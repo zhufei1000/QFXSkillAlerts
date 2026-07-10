@@ -1,0 +1,70 @@
+## Interface: 120005, 120007
+## Title: QFX Skill Alerts Config
+## Notes: Load-on-demand configuration UI for QFX Skill Alerts.
+## Author: zhufei1000
+## Version: 1.0.192
+## Dependencies: QFXSkillAlerts
+## LoadOnDemand: 1
+## IconTexture: Interface\AddOns\QFXSkillAlerts\AppIcon.png
+
+Libs\LibDeflate\LibDeflate.lua
+Ace3\AceSerializer-3.0\AceSerializer-3.0.xml
+
+Core\SavedListOrder.lua
+Core\SavedListDropKey.lua
+Core\SavedListMoveContext.lua
+Core\SavedListMoveController.lua
+Core\SavedListLayout.lua
+Core\OptionsState.lua
+Core\CollectionController.lua
+Core\AceOptions.lua
+Core\AceOptionsCompat.lua
+Core\OptionsController.lua
+Core\ImportCodec.lua
+Core\ImportEntryProcessor.lua
+Core\ImportFullProcessor.lua
+Core\ImportCollectionProcessor.lua
+Core\ExportBuilder.lua
+Core\ImportRefreshScheduler.lua
+Core\ImportExport.lua
+Core\EntryStore.lua
+Core\TestController.lua
+
+UI\Skin.lua
+UI\ScrollBar.lua
+UI\WidgetUtils.lua
+UI\Widgets.lua
+UI\WidgetScrollable.lua
+UI\DialogTextArea.lua
+UI\WidgetDropdownPopup.lua
+UI\WidgetDropdown.lua
+UI\PopupLayout.lua
+UI\EditorDrafts.lua
+UI\EditorLayout.lua
+UI\EditorSoundFields.lua
+UI\VisualPositionPreview.lua
+UI\ScopeSelector.lua
+UI\EditorFields.lua
+UI\EditorActions.lua
+UI\EditorFrameBuilder.lua
+UI\SavedListRows.lua
+UI\SavedListBuilder.lua
+UI\SavedListDragGeometry.lua
+UI\SavedListDropTarget.lua
+UI\SavedListDragDrop.lua
+UI\SavedListContextMenu.lua
+UI\SavedListSelection.lua
+UI\SavedListHeaders.lua
+UI\SavedListRowFactory.lua
+UI\SavedListRowRenderer.lua
+UI\SavedListRenderer.lua
+UI\SavedListRefresh.lua
+UI\SavedList.lua
+UI\EditorFrame.lua
+UI\MainFrameRefresh.lua
+UI\MainFrameLocale.lua
+UI\MainFrameDialogs.lua
+UI\MainFrameCollectionDialog.lua
+UI\MainFrameActions.lua
+UI\MainFrameBuilder.lua
+UI\MainFrame.lua

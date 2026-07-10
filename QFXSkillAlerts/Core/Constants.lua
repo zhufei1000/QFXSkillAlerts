@@ -1,0 +1,32 @@
+local NS = rawget(_G, "QFXSkillAlertsNS") or {}
+_G.QFXSkillAlertsNS = NS
+
+NS.Constants = NS.Constants or {}
+local C = NS.Constants
+
+C.ENTRY_MIN = 1
+C.ALL_CLASSES_ID = 0
+C.ALL_SPECS_ID = 0
+C.ALL_RACES_ID = 0
+
+C.OBJECT_TYPE_SPELL = "spell"
+C.OBJECT_TYPE_ITEM = "item"
+
+C.ITEM_LOAD_NONE = "none"
+C.ITEM_LOAD_EQUIPPED = "equipped"
+C.ITEM_LOAD_BAGS = "bags"
+
+C.MODE_TTS = "tts"
+C.MODE_SOUND = "sound"
+
+C.DEFAULT_COLLECTION_ICON = "Interface\\Icons\\INV_Misc_Note_01"
+
+C.SOUND_ROOT = "Interface\\AddOns\\QFXSkillAlerts\\Media\\Sounds\\"
+C.DEFAULT_BUILTIN_SOUND_FILE = "AirHorn.ogg"
+
+C.UPDATE_INTERVAL_COMBAT = 0.03
+C.UPDATE_INTERVAL_IDLE = 0.08
+
+C.EXHAUSTION_IDS = { 57723, 57724, 80354, 95809, 160455, 207400, 264689, 390435 }
+C.EXHAUSTION_DURATION = 600
+C.FRESH_WINDOW = 5

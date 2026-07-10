@@ -1,0 +1,50 @@
+## Interface: 120005, 120007
+## Title: QFX Skill Alerts
+## Title-zhCN: QFX 技能提醒
+## Title-zhTW: QFX 技能提醒
+## Notes: QFX Skill Alerts: voice, image, text, and TTS alerts for cooldowns, cast success, and Bloodlust-style effects.
+## Notes-zhCN: QFX 技能提醒：支持冷却、施法成功、嗜血提示，以及声音、图片、文本和 TTS 提醒。
+## Notes-zhTW: QFX 技能提醒：支援冷卻、施法成功、嗜血提示，以及聲音、圖片、文字和 TTS 提醒。
+## Author: zhufei1000
+## Version: 1.0.192
+## X-Compatible-GameVersion: 12.0.5, 12.0.7
+## SavedVariables: QFXSkillAlertsDB
+## OptionalDeps: LibSharedMedia-3.0, SharedMedia, SharedMedia_Causese, SharedMedia_MyMedia, SharedMedia_Naowh, NaowhUI
+## IconTexture: Interface\AddOns\QFXSkillAlerts\AppIcon.png
+
+Ace3\LibStub\LibStub.lua
+Ace3\CallbackHandler-1.0\CallbackHandler-1.0.xml
+Libs\LibSharedMedia-3.0\lib.xml
+Libs\LibDataBroker-1.1\LibDataBroker-1.1.lua
+Libs\LibDBIcon-1.0\LibDBIcon-1.0.lua
+Ace3\AceDB-3.0\AceDB-3.0.xml
+
+Localization.lua
+Core\Constants.lua
+Core\Utils.lua
+Core\CollectionStore.lua
+Core\MediaCatalog.lua
+Core\Scope.lua
+Core\EntryMap.lua
+Core\Resolver.lua
+Core\ResolverBridge.lua
+Core\Notifier.lua
+Core\NotifierBridge.lua
+Core\Runtime.lua
+Core\RuntimeBridge.lua
+Core\RuntimeConfigBuilder.lua
+Core\ProfileController.lua
+Core\ScopeMigration.lua
+Core\Bloodlust.lua
+Core\CastSuccess.lua
+Core\DeletedEntryStore.lua
+Core\ItemResolveQueue.lua
+Core\PublicAPI.lua
+Core\EventHub.lua
+Core\Startup.lua
+QFXSkillAlerts.lua
+Core\Database.lua
+Core\ImportExportUtil.lua
+Core\ConfigPanel.lua
+Core\Commands.lua
+Core\MinimapButton.lua
