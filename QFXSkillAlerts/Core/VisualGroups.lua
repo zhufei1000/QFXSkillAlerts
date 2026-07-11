@@ -46,12 +46,105 @@ function VisualGroups:GetStore()
     local store = db.visualGroups
     store.version = 1
     store.nextID = math.max(1, math.floor(tonumber(store.nextID) or 1))
+    store.nextUID = math.max(1, math.floor(tonumber(store.nextUID) or 1))
     if type(store.groups) ~= "table" then store.groups = {} end
     if type(store.members) ~= "table" then store.members = {} end
     return store
 end
 
+local function ParseEntryKey(key)
+    local classID, specID, index = tostring(key or ""):match("^(%-?%d+):(%-?%d+):(%-?%d+)$")
+    return tonumber(classID) or 0, tonumber(specID) or 0, tonumber(index) or 0
+end
+
+function VisualGroups:CreateVisualUID()
+    local store = self:GetStore()
+    local serial = store.nextUID
+    store.nextUID = serial + 1
+    return "visual:" .. tostring(serial)
+end
+
+function VisualGroups:GetSavedEntry(entryKey)
+    local classID, specID, index = ParseEntryKey(entryKey)
+    if index <= 0 then return nil end
+    local db = GetRootDB()
+    local specs = type(db.specConfigs) == "table" and db.specConfigs or nil
+    if not specs then return nil end
+    local classMap = specs[classID] or specs[tostring(classID)]
+    local specMap = type(classMap) == "table" and (classMap[specID] or classMap[tostring(specID)]) or nil
+    local entry = type(specMap) == "table" and (specMap[index] or specMap[tostring(index)]) or nil
+    return type(entry) == "table" and entry or nil
+end
+
+function VisualGroups:EnsureVisualUID(entry, preferred)
+    if type(entry) ~= "table" then return "" end
+    local uid = tostring(entry.visualUID or "")
+    if uid == "" then
+        uid = tostring(preferred or "")
+        if uid == "" then uid = self:CreateVisualUID() end
+        entry.visualUID = uid
+    end
+    return uid
+end
+
+function VisualGroups:ResolveIdentity(cfgOrKey)
+    if type(cfgOrKey) == "table" then
+        local uid = tostring(cfgOrKey.visualUID or "")
+        if uid ~= "" then return uid end
+        local entryKey = self:BuildEntryKey(cfgOrKey)
+        local entry = self:GetSavedEntry(entryKey)
+        uid = self:EnsureVisualUID(entry)
+        if uid ~= "" then cfgOrKey.visualUID = uid; return uid end
+        return entryKey
+    end
+    local value = tostring(cfgOrKey or "")
+    if value == "" or value:match("^visual:%d+$") then return value end
+    local entry = self:GetSavedEntry(value)
+    return self:EnsureVisualUID(entry) ~= "" and tostring(entry.visualUID) or value
+end
+
+function VisualGroups:MigrateSavedEntries()
+    local db = GetRootDB()
+    local entries = {}
+    local specs = type(db.specConfigs) == "table" and db.specConfigs or {}
+    for _, classMap in pairs(specs) do
+        if type(classMap) == "table" then
+            for _, specMap in pairs(classMap) do
+                if type(specMap) == "table" then
+                    for _, entry in pairs(specMap) do
+                        if type(entry) == "table" and (tonumber(entry.spellId) or 0) > 0 then
+                            entries[#entries + 1] = entry
+                        end
+                    end
+                end
+            end
+        end
+    end
+
+    local store = self:GetStore()
+    local maximum = 0
+    for _, entry in ipairs(entries) do
+        local serial = tostring(entry.visualUID or ""):match("^visual:(%d+)$")
+        maximum = math.max(maximum, tonumber(serial) or 0)
+    end
+    store.nextUID = math.max(store.nextUID, maximum + 1)
+
+    local seen = {}
+    local changed = 0
+    for _, entry in ipairs(entries) do
+        local uid = tostring(entry.visualUID or "")
+        if uid == "" or seen[uid] then
+            entry.visualUID = self:CreateVisualUID()
+            uid = entry.visualUID
+            changed = changed + 1
+        end
+        seen[uid] = true
+    end
+    return changed
+end
+
 function VisualGroups:GetMember(entryKey)
+    entryKey = self:ResolveIdentity(entryKey)
     entryKey = tostring(entryKey or "")
     if entryKey == "" then return nil end
     local member = self:GetStore().members[entryKey]
@@ -66,6 +159,7 @@ function VisualGroups:GetGroup(groupID)
 end
 
 function VisualGroups:GetGroupForEntry(entryKey)
+    entryKey = self:ResolveIdentity(entryKey)
     local member = self:GetMember(entryKey)
     if not member then return nil, nil end
     local groupID = tostring(member.groupID or "")
@@ -145,6 +239,7 @@ function VisualGroups:SetGapForEntry(entryKey, gap)
 end
 
 function VisualGroups:RemoveMember(entryKey, keepEmptyGroup)
+    entryKey = self:ResolveIdentity(entryKey)
     entryKey = tostring(entryKey or "")
     if entryKey == "" then return false end
     local store = self:GetStore()
@@ -155,17 +250,14 @@ function VisualGroups:RemoveMember(entryKey, keepEmptyGroup)
     local ordered = self:NormalizeOrders(groupID)
     if #ordered == 0 and not keepEmptyGroup then
         store.groups[groupID] = nil
-    elseif #ordered == 1 and not keepEmptyGroup then
-        -- A one-item dynamic group has no layout benefit. Dissolve it so the
-        -- remaining entry returns to its own saved X/Y position.
-        store.members[ordered[1].entryKey] = nil
-        store.groups[groupID] = nil
     end
     self:RefreshRuntime()
     return true
 end
 
 function VisualGroups:JoinAfter(entryKey, targetKey, direction, targetX, targetY)
+    entryKey = self:ResolveIdentity(entryKey)
+    targetKey = self:ResolveIdentity(targetKey)
     entryKey = tostring(entryKey or "")
     targetKey = tostring(targetKey or "")
     if entryKey == "" or targetKey == "" or entryKey == targetKey then
@@ -216,6 +308,7 @@ function VisualGroups:JoinAfter(entryKey, targetKey, direction, targetX, targetY
 end
 
 function VisualGroups:MoveMember(entryKey, delta)
+    entryKey = self:ResolveIdentity(entryKey)
     entryKey = tostring(entryKey or "")
     delta = tonumber(delta) or 0
     if entryKey == "" or delta == 0 then return false end
@@ -261,6 +354,27 @@ function VisualGroups:BuildEntryKey(cfg)
     )
 end
 
+local function WrapDatabaseInitialize()
+    local database = NS.Core and NS.Core.Database
+    if not database or type(database.Initialize) ~= "function" or database.qfxsaVisualGroupsWrapped then
+        return
+    end
+    database.qfxsaVisualGroupsWrapped = true
+    local original = database.Initialize
+    database.Initialize = function(self, ...)
+        local legacyStore = type(QFXSkillAlertsDB) == "table" and QFXSkillAlertsDB.visualGroups or nil
+        local result = original(self, ...)
+        if type(QFXSkillAlertsDB) == "table" and type(QFXSkillAlertsDB.visualGroups) ~= "table" and type(legacyStore) == "table" then
+            QFXSkillAlertsDB.visualGroups = legacyStore
+        end
+        VisualGroups:MigrateSavedEntries()
+        return result
+    end
+    if database.initialized then
+        VisualGroups:MigrateSavedEntries()
+    end
+end
+
 local function WrapRuntimeConfigBuilder()
     local builder = NS.Core and NS.Core.RuntimeConfigBuilder
     if not builder or type(builder.Rebuild) ~= "function" or builder.qfxsaVisualGroupsWrapped then
@@ -274,6 +388,29 @@ local function WrapRuntimeConfigBuilder()
             for _, cfg in pairs(runtimeCfg) do
                 if type(cfg) == "table" then
                     cfg.visualEntryKey = VisualGroups:BuildEntryKey(cfg)
+                    cfg.visualUID = VisualGroups:ResolveIdentity(cfg)
+                end
+            end
+        end
+        return result
+    end
+end
+
+local function WrapCastSuccessBuilder()
+    local castSuccess = NS.Core and NS.Core.CastSuccess
+    if not castSuccess or type(castSuccess.Rebuild) ~= "function" or castSuccess.qfxsaVisualGroupsWrapped then
+        return
+    end
+    castSuccess.qfxsaVisualGroupsWrapped = true
+    local original = castSuccess.Rebuild
+    castSuccess.Rebuild = function(self, ...)
+        local result = original(self, ...)
+        local configs = type(self.GetConfigTable) == "function" and self:GetConfigTable() or nil
+        if type(configs) == "table" then
+            for _, cfg in pairs(configs) do
+                if type(cfg) == "table" then
+                    cfg.visualEntryKey = VisualGroups:BuildEntryKey(cfg)
+                    cfg.visualUID = VisualGroups:ResolveIdentity(cfg)
                 end
             end
         end
@@ -329,6 +466,7 @@ local function WrapNotifier()
             local frame = slot and slot.frame
             if shown and frame and type(cfg) == "table" then
                 frame.qfxsaVisualEntryKey = VisualGroups:BuildEntryKey(cfg)
+                frame.qfxsaVisualUID = VisualGroups:ResolveIdentity(cfg)
                 frame.qfxsaImageSize = math.max(16, tonumber(cfg.imageSize) or 96)
                 frame.qfxsaHasImage = cfg.imageEnabled == true or tostring(kind or "") == "image" or tostring(kind or "") == "visual"
                 self:LayoutVisualSlots()
@@ -346,7 +484,7 @@ local function WrapNotifier()
             local slot = self.visualSlots[primaryKey]
             local frame = slot and slot.frame
             if frame and frame.qfxsaVisible == true and frame.IsShown and frame:IsShown() then
-                local entryKey = tostring(frame.qfxsaVisualEntryKey or "")
+                local entryKey = tostring(frame.qfxsaVisualUID or frame.qfxsaVisualEntryKey or "")
                 local group, member = VisualGroups:GetGroupForEntry(entryKey)
                 if group and member and frame.qfxsaHasImage == true then
                     local groupID = tostring(member.groupID or "")
@@ -380,5 +518,7 @@ local function WrapNotifier()
     end
 end
 
+WrapDatabaseInitialize()
 WrapRuntimeConfigBuilder()
+WrapCastSuccessBuilder()
 WrapNotifier()
