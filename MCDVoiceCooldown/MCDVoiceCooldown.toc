@@ -6,7 +6,7 @@
 ## Notes-zhCN: 一次性读取旧版 MCDVoiceCooldown 数据并安全合并到 QFX Skill Alerts。
 ## Notes-zhTW: 一次性讀取舊版 MCDVoiceCooldown 資料並安全合併到 QFX Skill Alerts。
 ## Author: zhufei1000
-## Version: 1.0.193
+## Version: 1.0.194
 ## Dependencies: QFXSkillAlerts
 ## SavedVariables: MCDVoiceCooldownDB
 ## IconTexture: Interface\AddOns\QFXSkillAlerts\AppIcon.png
