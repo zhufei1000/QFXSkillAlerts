@@ -1,0 +1,14 @@
+## Interface: 120005, 120007
+## Title: QFX Skill Alerts Legacy Data Migrator
+## Title-zhCN: QFX 技能提醒旧数据迁移器
+## Title-zhTW: QFX 技能提醒舊資料遷移器
+## Notes: One-time loader for migrating MCDVoiceCooldown saved data into QFX Skill Alerts.
+## Notes-zhCN: 一次性读取旧版 MCDVoiceCooldown 数据并安全合并到 QFX Skill Alerts。
+## Notes-zhTW: 一次性讀取舊版 MCDVoiceCooldown 資料並安全合併到 QFX Skill Alerts。
+## Author: zhufei1000
+## Version: 1.0.193
+## Dependencies: QFXSkillAlerts
+## SavedVariables: MCDVoiceCooldownDB
+## IconTexture: Interface\AddOns\QFXSkillAlerts\AppIcon.png
+
+LegacyDataLoader.lua
