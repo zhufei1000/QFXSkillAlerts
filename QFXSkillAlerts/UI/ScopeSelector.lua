@@ -182,6 +182,14 @@ function ScopeSelector:EnsureFrame()
     frame:SetScript("OnDragStop", frame.StopMovingOrSizing)
     frame:Hide()
     Widgets:ApplyPanelChrome(frame, { footerHeight = 58 })
+    -- This selector sits above the editor and contains many empty areas.  Keep
+    -- a fully opaque base even when an external skin elects not to paint one,
+    -- otherwise the editor underneath shows through the class/spec list.
+    local opaqueBackground = frame:CreateTexture(nil, "BACKGROUND", nil, -8)
+    opaqueBackground:SetAllPoints(frame)
+    opaqueBackground:SetColorTexture(0.015, 0.015, 0.015, 1)
+    frame.qfxsaOpaqueBackground = opaqueBackground
+    frame:SetAlpha(1)
 
     local close = CreateFrame("Button", nil, frame, "UIPanelCloseButton")
     close:SetSize(28, 28)

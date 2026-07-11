@@ -16,6 +16,7 @@ local Clamp = WidgetUtils.Clamp
 local DROPDOWN_ROW_HEIGHT = 22
 local DROPDOWN_MAX_VISIBLE_ROWS = 10
 local DROPDOWN_POPUP_PADDING = 6
+local DROPDOWN_AUTO_CLOSE_DELAY = 0.20
 
 local function SelectDropdownValue(dropdown, value, text)
     if not dropdown then
@@ -158,15 +159,24 @@ local function EnsureDropdownRow(popup, index)
     hover:Hide()
     row.qfxsaHover = hover
 
-    local check = row:CreateTexture(nil, "ARTWORK")
+    -- Multi-select rows need both halves of a checkbox.  The previous code
+    -- only drew UI-CheckBox-Check, so every unselected row had no visible box.
+    local checkBox = row:CreateTexture(nil, "ARTWORK", nil, 3)
+    checkBox:SetTexture("Interface\\Buttons\\UI-CheckBox-Up")
+    checkBox:SetSize(20, 20)
+    checkBox:SetPoint("LEFT", row, "LEFT", 1, 0)
+    checkBox:Hide()
+    row.checkBox = checkBox
+
+    local check = row:CreateTexture(nil, "ARTWORK", nil, 4)
     check:SetTexture("Interface\\Buttons\\UI-CheckBox-Check")
-    check:SetSize(16, 16)
-    check:SetPoint("LEFT", row, "LEFT", 3, 0)
+    check:SetSize(20, 20)
+    check:SetPoint("CENTER", checkBox, "CENTER", 0, 0)
     check:Hide()
     row.check = check
 
     local label = row:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-    label:SetPoint("LEFT", row, "LEFT", 23, 0)
+    label:SetPoint("LEFT", row, "LEFT", 27, 0)
     label:SetPoint("RIGHT", row, "RIGHT", -8, 0)
     label:SetJustifyH("LEFT")
     label:SetJustifyV("MIDDLE")
@@ -277,15 +287,19 @@ local function GetScrollableDropdownPopup()
                     end
                     ApplyDropdownRowHover(row, false)
                     if owner.qfxsaMultiSelect then
+                        row.checkBox:Show()
                         if selectedValues[item.value] == true then
                             row.check:Show()
                         else
                             row.check:Hide()
                         end
-                    elseif selected == item.value then
-                        row.check:Show()
                     else
-                        row.check:Hide()
+                        row.checkBox:Hide()
+                        if selected == item.value then
+                            row.check:Show()
+                        else
+                            row.check:Hide()
+                        end
                     end
                     row:Show()
                 else
@@ -376,6 +390,39 @@ local function GetScrollableDropdownPopup()
         end
     end
 
+    local function IsCursorInsideFrame(frame)
+        if not frame or not frame.IsShown or not frame:IsShown() then
+            return false
+        end
+        local left, right, top, bottom = frame:GetLeft(), frame:GetRight(), frame:GetTop(), frame:GetBottom()
+        local cx, cy = GetCursorPosition()
+        local scale = frame.GetEffectiveScale and frame:GetEffectiveScale() or 1
+        if not left or not right or not top or not bottom or not cx or not cy or not scale or scale == 0 then
+            return false
+        end
+        cx = cx / scale
+        cy = cy / scale
+        return cx >= left and cx <= right and cy >= bottom and cy <= top
+    end
+
+    local function UpdatePopup(self)
+        UpdateHoverFromCursor(self)
+        if not self.owner or not self:IsShown() then
+            self.autoCloseAt = nil
+            return
+        end
+        if IsCursorInsideFrame(self) or IsCursorInsideFrame(self.owner) then
+            self.autoCloseAt = nil
+            return
+        end
+        local now = GetTime()
+        if not self.autoCloseAt then
+            self.autoCloseAt = now + DROPDOWN_AUTO_CLOSE_DELAY
+        elseif now >= self.autoCloseAt then
+            self:Hide()
+        end
+    end
+
     local function SetScroll(value, fromSlider)
         local maxOffset = math.max(0, tonumber(popup.maxOffset) or 0)
         value = math.floor(Clamp(tonumber(value) or 0, 0, maxOffset) + 0.5)
@@ -402,8 +449,9 @@ local function GetScrollableDropdownPopup()
     popup:SetScript("OnMouseUp", function(_, button)
         SelectByCursor(button)
     end)
-    popup:SetScript("OnUpdate", UpdateHoverFromCursor)
+    popup:SetScript("OnUpdate", UpdatePopup)
     popup:SetScript("OnShow", function(self)
+        self.autoCloseAt = nil
         RaiseDropdownPopup(self, self.owner)
         RenderRows()
     end)
@@ -418,6 +466,7 @@ local function GetScrollableDropdownPopup()
         self.offset = 0
         self.hasScroll = nil
         self.skipMouseUpSelection = nil
+        self.autoCloseAt = nil
         local blocker = Widgets._nativeDropdownBlocker
         if blocker then
             blocker:Hide()
