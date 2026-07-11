@@ -299,6 +299,58 @@ function SavedListLayout:GetSavedListLayoutForScope(owner, classID, specID, incl
         return specNameCache[cacheKey]
     end
 
+    local function collectSelectedIDs(source, allID, fallbackID)
+        local map = CopyNumberBoolMap(source)
+        if next(map) == nil then
+            map[tonumber(fallbackID) or allID] = true
+        end
+        if map[allID] == true then
+            return { allID }
+        end
+        local ids = {}
+        for id, enabled in pairs(map) do
+            id = tonumber(id) or allID
+            if enabled == true and id > allID then
+                ids[#ids + 1] = id
+            end
+        end
+        table.sort(ids)
+        return ids
+    end
+
+    local function buildEntryScopeText(entry, rowClassID, rowSpecID, loadedTag)
+        local classIDs = collectSelectedIDs(entry.alertClassIDs or entry.customClassIDs, ALL_CLASSES_ID, rowClassID)
+        local specIDs = collectSelectedIDs(entry.alertSpecIDs or entry.customSpecIDs, ALL_SPECS_ID, rowSpecID)
+
+        local classText
+        if classIDs[1] == ALL_CLASSES_ID then
+            classText = resolveClassNameCached(ALL_CLASSES_ID)
+        elseif #classIDs > 3 then
+            classText = L("SCOPE_CLASS_COUNT", #classIDs)
+        else
+            local names = {}
+            for _, classID in ipairs(classIDs) do
+                names[#names + 1] = resolveClassNameCached(classID)
+            end
+            classText = table.concat(names, "/")
+        end
+
+        local specText
+        if specIDs[1] == ALL_SPECS_ID then
+            specText = L("SCOPE_ALL_SPECS")
+        elseif #specIDs > 3 or #classIDs ~= 1 or classIDs[1] == ALL_CLASSES_ID then
+            specText = L("SCOPE_SPEC_COUNT", #specIDs)
+        else
+            local names = {}
+            for _, specID in ipairs(specIDs) do
+                names[#names + 1] = resolveSpecNameCached(classIDs[1], specID)
+            end
+            specText = table.concat(names, "/")
+        end
+
+        return string.format("%s / %s%s", classText, specText, loadedTag)
+    end
+
     local function buildEntryRow(rowClassID, rowSpecID, rowIndex, depth, parentGroupID, parentGroupKey)
         rowClassID = tonumber(rowClassID) or 0
         rowSpecID = tonumber(rowSpecID) or 0
@@ -395,8 +447,6 @@ function SavedListLayout:GetSavedListLayoutForScope(owner, classID, specID, incl
         end
 
         local isLoaded = IsEntryLoadedForActiveScope(api, entry, rowClassID, rowSpecID, currentClassID, currentSpecID)
-        local className = resolveClassNameCached(rowClassID)
-        local specName = resolveSpecNameCached(rowClassID, rowSpecID)
         local loadedTag = isLoaded and L("LOADED_TAG") or L("UNLOADED_TAG")
 
         local row = {
@@ -407,6 +457,8 @@ function SavedListLayout:GetSavedListLayoutForScope(owner, classID, specID, incl
             itemLoadMode = (objectType == OBJECT_TYPE_ITEM) and NormalizeItemLoadMode(entry.itemLoadMode) or ITEM_LOAD_NONE,
             itemLoadSameName = objectType == OBJECT_TYPE_ITEM and NormalizeItemLoadMode(entry.itemLoadMode) == ITEM_LOAD_BAGS and entry.itemLoadSameName == true,
             alertRaceIDs = entry.alertRaceIDs,
+            alertClassIDs = entry.alertClassIDs or entry.customClassIDs,
+            alertSpecIDs = entry.alertSpecIDs or entry.customSpecIDs,
             classID = rowClassID,
             specID = rowSpecID,
             index = rowIndex,
@@ -424,7 +476,7 @@ function SavedListLayout:GetSavedListLayoutForScope(owner, classID, specID, incl
             talentName = TrimText(entry.talentName or ""),
             talentCD = tonumber(entry.talentCD) or 0,
             icon = icon,
-            scopeText = includeScopeText and string.format("%s / %s%s", className, specName, loadedTag) or "",
+            scopeText = includeScopeText and buildEntryScopeText(entry, rowClassID, rowSpecID, loadedTag) or "",
             isLoaded = isLoaded,
         }
         ENTRY_ROW_CACHE[cacheKey] = { signature = signature, row = row }
