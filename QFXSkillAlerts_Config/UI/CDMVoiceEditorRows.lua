@@ -44,9 +44,12 @@ local function CreateRow(frame)
     row.saveButton = Widgets:CreateButton(row, L("CDM_SAVE"), 62, 30)
     row.saveButton:SetPoint("LEFT", row, "LEFT", 768, 0)
 
+    row.applyButton = Widgets:CreateButton(row, L("CDM_APPLY"), 62, 30)
+    row.applyButton:SetPoint("LEFT", row, "LEFT", 836, 0)
+
     row.hint = row:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
-    row.hint:SetPoint("LEFT", row, "LEFT", 836, 0)
-    row.hint:SetWidth(178)
+    row.hint:SetPoint("LEFT", row, "LEFT", 904, 0)
+    row.hint:SetWidth(110)
     row.hint:SetJustifyH("LEFT")
     row.hint:SetWordWrap(true)
 
@@ -62,6 +65,21 @@ local function CreateRow(frame)
     row.saveButton:SetScript("OnClick", function()
         Controller:SaveRow(row)
     end)
+    row.applyButton:SetScript("OnClick", function()
+        Controller:ApplyRow(row)
+    end)
+    row.saveButton:SetScript("OnEnter", function(self)
+        GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+        GameTooltip:SetText(L("CDM_SAVE_TOOLTIP"), 1, 1, 1, true)
+        GameTooltip:Show()
+    end)
+    row.saveButton:SetScript("OnLeave", GameTooltip_Hide)
+    row.applyButton:SetScript("OnEnter", function(self)
+        GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+        GameTooltip:SetText(L("CDM_APPLY_TOOLTIP"), 1, 1, 1, true)
+        GameTooltip:Show()
+    end)
+    row.applyButton:SetScript("OnLeave", GameTooltip_Hide)
     return row
 end
 
@@ -89,12 +107,15 @@ function Rows:Render(frame, cooldowns, pendingEdit)
         row.cooldownInfo = info
         row.testButton:SetText(L("CDM_TEST"))
         row.saveButton:SetText(L("CDM_SAVE"))
+        row.applyButton:SetText(L("CDM_APPLY"))
         row.icon:SetTexture(info.icon or 134400)
         row.skillName:SetText(tostring(info.spellName or ""))
 
         local events = type(api.GetCDMVoiceValidEvents) == "function" and api.GetCDMVoiceValidEvents(info.cooldownID) or {}
         local eventItems = {}
-        local selectedEvent = tonumber(previousCooldownID) == tonumber(info.cooldownID) and row.selectedEvent or nil
+        local dirtyDraft = Controller:GetDirtyDraft(Controller.category, info.cooldownID)
+        local selectedEvent = dirtyDraft and dirtyDraft.eventType
+            or (tonumber(previousCooldownID) == tonumber(info.cooldownID) and row.selectedEvent or nil)
         for _, eventInfo in ipairs(type(events) == "table" and events or {}) do
             eventItems[#eventItems + 1] = { value = eventInfo.eventType, text = eventInfo.name }
         end
@@ -114,9 +135,11 @@ function Rows:Render(frame, cooldowns, pendingEdit)
         Widgets:SetDropdownValue(row.eventDropdown, selectedEvent, L("CDM_EVENT"))
         Widgets:SetDropdownEnabled(row.eventDropdown, #eventItems > 0)
         row.selectedEvent = selectedEvent
-        local requestedPayload = pendingEdit and targetIndex == index and pendingEdit.payload
+        local requestedPayload = dirtyDraft and dirtyDraft.payload
+            or (pendingEdit and targetIndex == index and pendingEdit.payload)
             or (tonumber(previousCooldownID) == tonumber(info.cooldownID) and row.selectedPayload)
         Controller:RefreshRowSelection(row, requestedPayload)
+        row.dirty = dirtyDraft ~= nil
         row:ClearAllPoints()
         local rowOffset = -((index - 1) * ROW_HEIGHT)
         row:SetPoint("TOPLEFT", frame.scrollContent, "TOPLEFT", 2, rowOffset)

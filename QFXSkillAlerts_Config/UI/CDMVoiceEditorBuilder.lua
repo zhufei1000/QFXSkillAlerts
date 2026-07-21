@@ -66,7 +66,7 @@ function Builder:Ensure()
         { text = L("CDM_SKILL"), x = 28, width = 215 },
         { text = L("CDM_EVENT"), x = 255, width = 175 },
         { text = L("CDM_CUSTOM_VOICE"), x = 440, width = 260 },
-        { text = L("CDM_ACTION"), x = 710, width = 150 },
+        { text = L("CDM_ACTION"), x = 700, width = 200 },
     }
     frame.headers = {}
     for _, item in ipairs(headers) do
@@ -86,7 +86,7 @@ function Builder:Ensure()
         selfFrame.headers[2]:SetText(L("CDM_EVENT"))
         selfFrame.headers[3]:SetText(L("CDM_CUSTOM_VOICE"))
         selfFrame.headers[4]:SetText(L("CDM_ACTION"))
-        selfFrame.syncButton:SetText(L("CDM_SYNC_CURRENT_SPEC"))
+        selfFrame.syncButton:SetText(L("CDM_APPLY_ALL_RELOAD"))
         selfFrame.exportButton:SetText(L("CDM_EXPORT_PRESETS"))
         selfFrame.closeButton:SetText(L("BTN_CLOSE"))
     end
@@ -104,10 +104,10 @@ function Builder:Ensure()
     frame.statusText:SetPoint("BOTTOMRIGHT", frame, "BOTTOMRIGHT", -24, 55)
     frame.statusText:SetJustifyH("LEFT")
 
-    frame.syncButton = Widgets:CreateButton(frame, L("CDM_SYNC_CURRENT_SPEC"), 190, 30)
+    frame.syncButton = Widgets:CreateButton(frame, L("CDM_APPLY_ALL_RELOAD"), 190, 30)
     frame.syncButton:SetPoint("BOTTOM", frame, "BOTTOM", -210, 14)
     frame.syncButton:SetScript("OnClick", function()
-        Controller:SyncCurrentSpec()
+        Controller:ApplyAllAndReload()
     end)
 
     frame.exportButton = Widgets:CreateButton(frame, L("CDM_EXPORT_PRESETS"), 190, 30)

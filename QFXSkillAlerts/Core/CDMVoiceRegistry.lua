@@ -190,8 +190,8 @@ function Registry:NotifyChanged()
         pcall(api.OnCDMVoiceRegistryChanged)
     end
     local sync = NS.Core and NS.Core.CDMVoicePresetSync
-    if sync and type(sync.ScheduleSync) == "function" then
-        sync:ScheduleSync("registry")
+    if sync and type(sync.ScheduleEvaluation) == "function" then
+        sync:ScheduleEvaluation("registry")
     end
 end
 

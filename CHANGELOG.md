@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.0.200 - 2026-07-21
+
+- Split Cooldown Manager voice handling into read-only evaluation and explicit apply transactions: local Save, import, login, specialization changes, CDM data events, and external layout saves no longer write Blizzard CDM data or reload the UI.
+- Restored per-row Apply as an atomic save-current-draft-and-apply action, and made Apply All and Reload validate and save every dirty editor row before applying all valid pending records for the current specialization.
+- Added persistent pending-removal tombstones; applying removals deletes only the saved target payload and preserves other payloads, events, and visual alerts.
+- Reworked explicit application into a fully prevalidated two-phase RemoveAlert/AddAlert transaction with one notification lock, one `SaveLayouts` call per changed batch, no `UnlockNotifications`, and one immediate reload to avoid `hasTotem` secret-value taint.
+- Added post-reload verification and one-time failure reporting without automatic retry or reload loops, including deferred verification while Cooldown Manager data is not yet readable.
+- Updated pending/applied/failed status UI, import and pending prompts, public APIs, and enUS/zhCN/zhTW text while preserving existing test, export/import, and non-CDM features.
+
 ## 1.0.199 - 2026-07-21
 
 - Removed every addon-driven Blizzard Cooldown Viewer refresh/notification path and kept the legacy runtime-refresh API as a no-op to prevent secret-value taint such as `hasTotem` failures.

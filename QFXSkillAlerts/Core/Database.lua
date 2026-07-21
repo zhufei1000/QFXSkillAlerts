@@ -59,6 +59,10 @@ local defaults = {
         },
         cdmVoiceProfiles = {},
         cdmVoiceDisabledPresets = {},
+        cdmVoicePendingRemovals = {},
+        cdmVoiceApplyState = {
+            applyInProgress = false,
+        },
         cdmVoiceSyncState = {
             importedVersion = 0,
             pendingRuntimeReload = false,
@@ -215,7 +219,8 @@ local function CopyKnownSavedFields(target, source)
     local sourceProfile = type(source.profile) == "table" and source.profile or source
     for _, key in ipairs({
         "specConfigs", "castSuccessConfigs", "bloodlustConfig", "minimap", "collectionData", "deletedEntries",
-        "cdmVoiceRegistry", "cdmVoiceUI", "cdmVoiceProfiles", "cdmVoiceDisabledPresets", "cdmVoiceSyncState",
+        "cdmVoiceRegistry", "cdmVoiceUI", "cdmVoiceProfiles", "cdmVoiceDisabledPresets",
+        "cdmVoicePendingRemovals", "cdmVoiceApplyState", "cdmVoiceSyncState",
     }) do
         if type(sourceProfile[key]) == "table" then
             if type(target[key]) ~= "table" then
@@ -318,6 +323,10 @@ function Database:Initialize()
         },
         cdmVoiceProfiles = {},
         cdmVoiceDisabledPresets = {},
+        cdmVoicePendingRemovals = {},
+        cdmVoiceApplyState = {
+            applyInProgress = false,
+        },
         cdmVoiceSyncState = {
             importedVersion = 0,
             pendingRuntimeReload = false,
