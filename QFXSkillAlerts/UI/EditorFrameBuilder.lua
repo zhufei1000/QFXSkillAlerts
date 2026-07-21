@@ -112,6 +112,7 @@ local function CreateNotifyControls(content, ctx)
     nw.builtinDrop = PlaceControl(Widgets:CreateDropdown(notifySection, "QFXSkillAlertsEditorBuiltinDropDown", BUILTIN_W), notifySection, BUILTIN_X, NOTIFY_SOUND_CONTROL_Y)
     nw.sharedMediaLabel = CreateFieldLabel(notifySection, L("LABEL_SHAREDMEDIA_SOUND"), SHAREDMEDIA_X, NOTIFY_SOUND_LABEL_Y, SHAREDMEDIA_W)
     nw.sharedMediaDrop = PlaceControl(Widgets:CreateDropdown(notifySection, "QFXSkillAlertsEditorSharedMediaDropDown", SHAREDMEDIA_W), notifySection, SHAREDMEDIA_X, NOTIFY_SOUND_CONTROL_Y)
+    Widgets:SetDropdownSearchable(nw.sharedMediaDrop, true, L("SEARCH_SHAREDMEDIA_SOUND"))
     nw.customPathLabel = CreateFieldLabel(notifySection, L("LABEL_CUSTOM_SOUND_PATH"), CUSTOM_X, NOTIFY_CUSTOM_LABEL_Y, CUSTOM_W)
     nw.soundPath = PlaceControl(Widgets:CreateEditBox(notifySection, CUSTOM_W, 30, false), notifySection, CUSTOM_X, NOTIFY_CUSTOM_CONTROL_Y)
     nw.bloodlustCustomPathLabels = {}

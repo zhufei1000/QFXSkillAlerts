@@ -127,8 +127,27 @@ end
 
 function Bridge:IsTalentSelected(talentId)
     local resolver = GetResolver()
-    if resolver and type(resolver.IsTalentSelected) == "function" then
+    if resolver and type(resolver.IsTalentSelectedCached) == "function" then
+        return resolver:IsTalentSelectedCached(talentId)
+    elseif resolver and type(resolver.IsTalentSelected) == "function" then
         return resolver:IsTalentSelected(talentId)
     end
     return true
+end
+
+function Bridge:InvalidateTalentCache()
+    local resolver = GetResolver()
+    if resolver and type(resolver.InvalidateTalentCache) == "function" then
+        resolver:InvalidateTalentCache()
+        return true
+    end
+    return false
+end
+
+function Bridge:BuildSelectedTalentCache()
+    local resolver = GetResolver()
+    if resolver and type(resolver.BuildSelectedTalentCache) == "function" then
+        return resolver:BuildSelectedTalentCache()
+    end
+    return false
 end

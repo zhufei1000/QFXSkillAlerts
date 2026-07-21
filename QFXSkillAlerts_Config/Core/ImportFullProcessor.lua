@@ -233,5 +233,12 @@ function Processor:Import(payload)
     end
 
     db.collectionSerial = math.max(tonumber(payload.collectionSerial) or 0, 0)
+    if type(payload.cdmVoiceProfiles) == "table" and type(api.ImportCDMVoicePresetPayload) == "function" then
+        api.ImportCDMVoicePresetPayload({
+            type = "cdmVoicePreset",
+            version = 1,
+            profiles = payload.cdmVoiceProfiles,
+        })
+    end
     return true, importedCount
 end

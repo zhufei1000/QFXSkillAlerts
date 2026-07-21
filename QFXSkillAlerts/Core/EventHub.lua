@@ -8,13 +8,13 @@ local EventHub = NS.Core.EventHub
 
 local EVENTS = {
     "PLAYER_LOGIN",
+    "PLAYER_LOGOUT",
     "PLAYER_ENTERING_WORLD",
     "PLAYER_SPECIALIZATION_CHANGED",
     "PLAYER_TALENT_UPDATE",
     "SPELLS_CHANGED",
     "ITEM_DATA_LOAD_RESULT",
     "PLAYER_REGEN_ENABLED",
-    "UNIT_SPELLCAST_SUCCEEDED",
     "PLAYER_EQUIPMENT_CHANGED",
     "BAG_UPDATE_DELAYED",
 }
@@ -39,8 +39,10 @@ function EventHub:Initialize(frame, handlers)
         frame:RegisterEvent(event)
     end
     if type(frame.RegisterUnitEvent) == "function" then
+        frame:RegisterUnitEvent("UNIT_SPELLCAST_SUCCEEDED", "player", "pet")
         frame:RegisterUnitEvent("UNIT_AURA", "player")
     else
+        frame:RegisterEvent("UNIT_SPELLCAST_SUCCEEDED")
         frame:RegisterEvent("UNIT_AURA")
     end
 
@@ -56,6 +58,8 @@ function EventHub:Dispatch(event, ...)
 
     if event == "PLAYER_LOGIN" then
         return Call(handlers, "OnPlayerLogin")
+    elseif event == "PLAYER_LOGOUT" then
+        return Call(handlers, "OnPlayerLogout")
     elseif event == "PLAYER_ENTERING_WORLD" or event == "SPELLS_CHANGED" or event == "PLAYER_TALENT_UPDATE" then
         return Call(handlers, "OnProfileRefresh", event)
     elseif event == "PLAYER_SPECIALIZATION_CHANGED" then

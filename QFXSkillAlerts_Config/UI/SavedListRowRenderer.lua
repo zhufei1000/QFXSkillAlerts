@@ -93,8 +93,15 @@ function RowRenderer:UpdateRow(row, entry, opts)
         local indent = 12 + ((tonumber(entry.depth) or 0) * 24)
         row.statusDot:SetPoint("LEFT", row, "LEFT", indent, 0)
         row.statusDot:Show()
-        if entry.isLoaded == false then
+        local loadState = tostring(entry.loadState or "")
+        if loadState == "red" or entry.isLoaded == false then
             row.statusDot:SetTextColor(1.00, 0.18, 0.18, 1)
+        elseif loadState == "yellow" then
+            row.statusDot:SetTextColor(1.00, 0.82, 0.00, 1)
+        elseif loadState == "orange" then
+            row.statusDot:SetTextColor(1.00, 0.48, 0.05, 1)
+        elseif loadState == "gray" then
+            row.statusDot:SetTextColor(0.55, 0.55, 0.55, 1)
         else
             row.statusDot:SetTextColor(0.18, 1.00, 0.25, 1)
         end
@@ -108,6 +115,10 @@ function RowRenderer:UpdateRow(row, entry, opts)
             row.statusDot:SetTextColor(1.00, 0.18, 0.18, 1)
         elseif loadState == "yellow" then
             row.statusDot:SetTextColor(1.00, 0.82, 0.00, 1)
+        elseif loadState == "orange" then
+            row.statusDot:SetTextColor(1.00, 0.48, 0.05, 1)
+        elseif loadState == "gray" then
+            row.statusDot:SetTextColor(0.55, 0.55, 0.55, 1)
         else
             row.statusDot:SetTextColor(0.18, 1.00, 0.25, 1)
         end

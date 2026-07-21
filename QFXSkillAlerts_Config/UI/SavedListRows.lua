@@ -101,6 +101,8 @@ local function GetEntryTypeText(entry)
         return L("ENTRY_TYPE_CUSTOM")
     elseif entryType == "bloodlust" then
         return L("ENTRY_TYPE_BLOODLUST")
+    elseif entryType == "cdmVoice" then
+        return L("CDM_ENTRY_TYPE")
     end
     return L("ENTRY_TYPE_COOLDOWN")
 end
@@ -154,6 +156,9 @@ function Rows.BuildEntryRowText(entry, includeScopeText)
         parts[#parts + 1] = string.format("|cff808080%s|r", soundDetail)
     elseif TrimText(entry and entry.modeText) ~= "" then
         parts[#parts + 1] = string.format("|cff808080%s|r", TrimText(entry and entry.modeText))
+    end
+    if tostring(entry and entry.entryType or "") == "cdmVoice" and TrimText(entry and entry.statusText) ~= "" then
+        parts[#parts + 1] = string.format("|cff808080%s|r", TrimText(entry.statusText))
     end
     if tostring(entry and entry.entryType or "") == "cast" and entry.delayEnabled == true and (tonumber(entry.delaySeconds) or 0) > 0 then
         parts[#parts + 1] = string.format("|cff808080%s|r", L("SAVED_CAST_DELAY", tonumber(entry.delaySeconds) or 0))

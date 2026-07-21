@@ -40,7 +40,6 @@ function Controller:Configure(opts)
     callbacks.getStoredEntryMap = opts.getStoredEntryMap
     callbacks.getUsedEntryCount = opts.getUsedEntryCount
     callbacks.wipeRuntimeCooldowns = opts.wipeRuntimeCooldowns
-    callbacks.clearDelayedCastSuccessTimers = opts.clearDelayedCastSuccessTimers
     callbacks.rebuildRuntimeConfig = opts.rebuildRuntimeConfig
     callbacks.rebuildCastSuccessConfig = opts.rebuildCastSuccessConfig
     callbacks.rebuildCustomConfig = opts.rebuildCustomConfig
@@ -105,7 +104,6 @@ function Controller:OnProfileChanged(resetCooldowns)
     -- fixed cooldown is already running; wiping here makes the ready alert vanish.
     if resetCooldowns then
         SafeCall("wipeRuntimeCooldowns", true)
-        SafeCall("clearDelayedCastSuccessTimers")
     end
     SafeCall("rebuildRuntimeConfig")
     SafeCall("rebuildCastSuccessConfig")
@@ -114,4 +112,3 @@ function Controller:OnProfileChanged(resetCooldowns)
     SafeCall("refreshRuntimeCooldowns")
     SafeCall("refreshPanel")
 end
-

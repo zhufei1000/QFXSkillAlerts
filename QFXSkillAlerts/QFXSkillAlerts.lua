@@ -335,6 +335,36 @@ local function EnsureDB()
     if type(db.deletedEntries) ~= "table" then
         db.deletedEntries = {}
     end
+    if type(db.cdmVoiceRegistry) ~= "table" then
+        db.cdmVoiceRegistry = {}
+    end
+    if type(db.cdmVoiceRegistry.byIdentity) ~= "table" then
+        db.cdmVoiceRegistry.byIdentity = {}
+    end
+    if type(db.cdmVoiceRegistry.byPayload) ~= "table" then
+        db.cdmVoiceRegistry.byPayload = {}
+    end
+    if type(db.cdmVoiceRegistry.collisionMap) ~= "table" then
+        db.cdmVoiceRegistry.collisionMap = {}
+    end
+    if type(db.cdmVoiceUI) ~= "table" then
+        db.cdmVoiceUI = { lastCategory = nil }
+    end
+    if type(db.cdmVoiceProfiles) ~= "table" then
+        db.cdmVoiceProfiles = {}
+    end
+    if type(db.cdmVoiceDisabledPresets) ~= "table" then
+        db.cdmVoiceDisabledPresets = {}
+    end
+    if type(db.cdmVoiceSyncState) ~= "table" then
+        db.cdmVoiceSyncState = {}
+    end
+    if type(db.cdmVoiceSyncState.importedVersion) ~= "number" then
+        db.cdmVoiceSyncState.importedVersion = 0
+    end
+    if db.cdmVoiceSyncState.pendingRuntimeReload == nil then
+        db.cdmVoiceSyncState.pendingRuntimeReload = false
+    end
     if type(db.languageMode) ~= "string" then
         db.languageMode = "auto"
     end
@@ -610,18 +640,26 @@ local function ResolveEntrySoundPath(entry)
     return NormalizeSoundPath(type(entry) == "table" and entry.soundPath or entry)
 end
 
-local function PlayReadyNotification(cfg)
+local function ResolveRuntimeImageTexture(entry)
+    local notifier = GetNotifier()
+    if notifier and type(notifier.ResolveImageTexture) == "function" then
+        return notifier:ResolveImageTexture(entry)
+    end
+    return nil
+end
+
+local function PlayReadyNotification(cfg, alertChannel, remaining, primaryKey)
     local bridge = GetNotifierBridge()
     if bridge and type(bridge.PlayReadyNotification) == "function" then
-        return bridge:PlayReadyNotification(cfg)
+        return bridge:PlayReadyNotification(cfg, alertChannel, remaining, primaryKey)
     end
     return false
 end
 
-local function PlayCastSuccessNotification(cfg)
+local function PlayCastSuccessNotification(cfg, triggerSpellID, castGUID)
     local bridge = GetNotifierBridge()
     if bridge and type(bridge.PlayCastSuccessNotification) == "function" then
-        return bridge:PlayCastSuccessNotification(cfg)
+        return bridge:PlayCastSuccessNotification(cfg, triggerSpellID, castGUID)
     end
     return false
 end
@@ -654,7 +692,6 @@ local function ConfigureRuntime()
             playReady = PlayReadyNotification,
             playCastSuccess = PlayCastSuccessNotification,
             hideVisual = HideVisualAlerts,
-            normalizeSoundPath = NormalizeSoundPath,
             resolveObjectName = ResolveObjectName,
         })
     end
@@ -686,6 +723,7 @@ local function ConfigureCastSuccess()
             isItemLoadRequirementMet = IsItemLoadRequirementMet,
             getObjectTriggerSpellID = GetObjectTriggerSpellID,
             resolveEntrySoundPath = ResolveEntrySoundPath,
+            resolveImageTexture = ResolveRuntimeImageTexture,
             queueNotification = QueueCastSuccessNotification,
         })
     end
@@ -722,6 +760,7 @@ local function ConfigureRuntimeConfigBuilder()
             makeObjectKey = MakeObjectKey,
             isTalentSelected = IsTalentSelected,
             resolveEntrySoundPath = ResolveEntrySoundPath,
+            resolveImageTexture = ResolveRuntimeImageTexture,
         })
     end
 end
@@ -748,8 +787,17 @@ local function HandleBloodlustAura(unit)
 end
 
 local function RebuildRuntimeConfig()
+    local startup = GetStartup()
+    if startup and type(startup.CancelScheduledProfileRefresh) == "function" then
+        startup:CancelScheduledProfileRefresh()
+    end
+    NS.Core.RuntimeBridge:ClearDelayedCastSuccessTimers()
     local builder = GetRuntimeConfigBuilder()
     if builder and type(builder.Rebuild) == "function" then
+        local resolverBridge = NS.Core and NS.Core.ResolverBridge
+        if resolverBridge and type(resolverBridge.BuildSelectedTalentCache) == "function" then
+            resolverBridge:BuildSelectedTalentCache()
+        end
         return builder:Rebuild(MAPPED_SPELL_TO_PRIMARY, MAPPED_RUNTIME_CFG)
     end
     return false
@@ -870,7 +918,6 @@ local function ConfigureProfileController()
             getStoredEntryMap = GetStoredEntryMap,
             getUsedEntryCount = GetUsedEntryCount,
             wipeRuntimeCooldowns = WipeRuntimeCooldowns,
-            clearDelayedCastSuccessTimers = ClearDelayedCastSuccessTimers,
             rebuildRuntimeConfig = RebuildRuntimeConfig,
             rebuildCastSuccessConfig = RebuildCastSuccessConfig,
             rebuildCustomConfig = RebuildCustomConfig,
@@ -940,6 +987,10 @@ function RefreshPanel()
 end
 
 local function OnProfileChanged(resetCooldowns)
+    local startup = GetStartup()
+    if startup and type(startup.CancelScheduledProfileRefresh) == "function" then
+        startup:CancelScheduledProfileRefresh()
+    end
     local controller = GetProfileController()
     if controller and type(controller.OnProfileChanged) == "function" then
         return controller:OnProfileChanged(resetCooldowns)
@@ -1045,6 +1096,147 @@ PublicAPI:Install({
         GetOrderedEntryIndices = GetOrderedEntryIndices,
         RebuildRuntimeConfig = RebuildRuntimeConfig,
         RefreshRuntimeCooldowns = RefreshRuntimeCooldowns,
+        GetCDMVoiceCurrentClassSpec = function()
+            return NS.Core.CDMVoiceService:GetCurrentClassSpec()
+        end,
+        IsCDMVoiceAvailable = function()
+            return NS.Core.CDMVoiceService:IsAvailable()
+        end,
+        GetCDMVoiceCategories = function()
+            return NS.Core.CDMVoiceService:GetCategories()
+        end,
+        GetCDMVoiceCooldownsForCategory = function(category)
+            return NS.Core.CDMVoiceService:GetCooldownsForCategory(category)
+        end,
+        GetCDMVoiceValidEvents = function(cooldownID)
+            return NS.Core.CDMVoiceService:GetValidEvents(cooldownID)
+        end,
+        GetCDMVoiceRegistryItems = function()
+            return NS.Core.CDMVoiceRegistry:GetItems()
+        end,
+        GetCDMVoiceConfiguredAlert = function(cooldownID, eventType)
+            return NS.Core.CDMVoiceService:GetSoundAlert(cooldownID, eventType)
+        end,
+        CanConfigureCDMVoice = function(cooldownID, eventType, payload)
+            return NS.Core.CDMVoiceService:CanConfigureSound(cooldownID, eventType, payload)
+        end,
+        ApplyCDMVoiceAlert = function(cooldownID, eventType, payload, classID, specID, category)
+            return NS.Core.CDMVoiceService:ApplySoundAlert(cooldownID, eventType, payload, classID, specID, category)
+        end,
+        SaveCDMVoicePresetOnly = function(cooldownID, eventType, payload, classID, specID, category)
+            return NS.Core.CDMVoiceService:SaveVoicePresetOnly(
+                cooldownID, eventType, payload, classID, specID, category
+            )
+        end,
+        SaveAndSyncCDMVoicePreset = function(cooldownID, eventType, payload, classID, specID, category)
+            return NS.Core.CDMVoiceService:SaveAndSyncVoicePreset(
+                cooldownID, eventType, payload, classID, specID, category
+            )
+        end,
+        DeleteCDMVoiceAlertByKey = function(key)
+            return NS.Core.CDMVoiceService:DeleteSoundAlertByKey(key)
+        end,
+        GetCDMVoiceSavedEntries = function()
+            return NS.Core.CDMVoiceService:GetCurrentSpecSavedEntries()
+        end,
+        GetCurrentSpecCDMVoiceEntries = function()
+            return NS.Core.CDMVoiceService:GetCurrentSpecSavedEntries()
+        end,
+        DeleteCDMVoiceEntryByKey = function(key)
+            return NS.Core.CDMVoiceService:DeleteSoundAlertByKey(key)
+        end,
+        ParseCDMVoiceSavedKey = function(key)
+            return NS.Core.CDMVoiceService:ParseSavedEntryKey(key)
+        end,
+        GetCDMVoicePresetRecord = function(classID, specID, recordKey)
+            return NS.Core.CDMVoicePresetStore:GetEffectiveRecord(classID, specID, recordKey)
+        end,
+        RefreshCDMVoiceRegistry = function()
+            return NS.Core.CDMVoiceRegistry:Refresh(false)
+        end,
+        GetCDMVoiceLastCategory = function()
+            return NS.Core.CDMVoiceService:GetLastCategory()
+        end,
+        SetCDMVoiceLastCategory = function(category)
+            return NS.Core.CDMVoiceService:SetLastCategory(category)
+        end,
+        SetCDMVoiceUIRefreshCallback = function(callback)
+            return NS.Core.CDMVoiceService:SetUIRefreshCallback(callback)
+        end,
+        GetCDMVoicePresetRecords = function(classID, specID)
+            local store = NS.Core.CDMVoicePresetStore
+            if classID and specID then
+                return store:GetEffectiveRecords(classID, specID)
+            end
+            return store:GetAllProfilesForExport()
+        end,
+        CaptureCurrentCDMVoicePresets = function()
+            return NS.Core.CDMVoicePresetStore:CaptureCurrentSpecFromLayout()
+        end,
+        ExportCDMVoicePresetString = function()
+            local builder = NS.ExportBuilder
+            return builder and type(builder.ExportCDMVoicePresetString) == "function"
+                and builder:ExportCDMVoicePresetString() or ""
+        end,
+        ExportCDMVoiceEntryString = function(savedEntryKey)
+            local builder = NS.ExportBuilder
+            return builder and type(builder.ExportCDMVoiceEntryString) == "function"
+                and builder:ExportCDMVoiceEntryString(savedEntryKey) or ""
+        end,
+        ImportCDMVoicePresetPayload = function(payload)
+            payload = type(payload) == "table" and payload or {}
+            if tonumber(payload.version) ~= 1 or type(payload.profiles) ~= "table" then
+                return false, 0, nil, "invalid_version"
+            end
+            local store = NS.Core.CDMVoicePresetStore
+            local imported = store:ImportProfiles(payload.profiles)
+            local state = store:GetSyncState()
+            state.importedVersion = math.max(tonumber(state.importedVersion) or 0, 1)
+            local sync = NS.Core.CDMVoicePresetSync
+            if type(InCombatLockdown) == "function" and InCombatLockdown() then
+                return imported > 0, imported, {
+                    added = 0,
+                    replaced = 0,
+                    deduplicated = 0,
+                    duplicateRemoved = 0,
+                    alreadyLoaded = 0,
+                    missingSkill = 0,
+                    missingVoice = 0,
+                    unsupportedEvent = 0,
+                    ambiguousSkill = 0,
+                    failed = 0,
+                }, "combat"
+            end
+            local ok, summary, reason = sync:RunCurrentSpecSync("preset_import", { capture = false })
+            return imported > 0 or ok, imported, summary, reason
+        end,
+        SyncCurrentSpecCDMVoices = function(reason, options)
+            return NS.Core.CDMVoicePresetSync:RunCurrentSpecSync(
+                reason or "manual",
+                type(options) == "table" and options or { capture = false }
+            )
+        end,
+        ClearCDMVoiceRuntimeReloadPending = function()
+            return NS.Core.CDMVoiceService:ClearPendingRuntimeReload()
+        end,
+        ApplyCDMVoiceAlertsBatch = function(operations, options)
+            return NS.Core.CDMVoiceService:ApplySoundAlertsBatch(operations, options)
+        end,
+        GetCDMVoiceSyncSummary = function()
+            return NS.Core.CDMVoicePresetSync:GetLastSummary()
+        end,
+        GetCDMVoiceRecordForAlert = function(classID, specID, category, spellID, eventType)
+            return NS.Core.CDMVoicePresetStore:GetRecordForAlert(classID, specID, category, spellID, eventType)
+        end,
+        RemoveCDMVoicePresetRecord = function(classID, specID, recordKey)
+            return NS.Core.CDMVoicePresetStore:RemoveRecord(classID, specID, recordKey)
+        end,
+        DisableBuiltInCDMVoicePreset = function(classID, specID, recordKey)
+            return NS.Core.CDMVoicePresetStore:DisableBuiltInRecord(classID, specID, recordKey)
+        end,
+        RefreshActiveCDMRuntime = function()
+            return false
+        end,
     })
 
 local function ConfigureStartup()
@@ -1058,13 +1250,6 @@ local function ConfigureStartup()
                 return false
             end,
             ensureDB = EnsureDB,
-            purgeDeletedEntries = PurgeDeletedEntries,
-            resolveAllStoredItemTriggers = ResolveAllStoredItemTriggers,
-            rebuildRuntimeConfig = RebuildRuntimeConfig,
-            rebuildCastSuccessConfig = RebuildCastSuccessConfig,
-            rebuildCustomConfig = RebuildCustomConfig,
-            rebuildBloodlustConfig = RebuildBloodlustConfig,
-            refreshRuntimeCooldowns = RefreshRuntimeCooldowns,
             initializeAceOptions = function()
                 if NS.AceOptions and type(NS.AceOptions.Initialize) == "function" then
                     return NS.AceOptions:Initialize()
@@ -1099,7 +1284,6 @@ local function ConfigureStartup()
                 print("[QFX-SA] " .. L("MSG_LOADED"))
             end,
             onProfileChanged = OnProfileChanged,
-            markBagItemCacheDirty = MarkBagItemCacheDirty,
             resolvePendingItems = ResolvePendingItems,
             clearDelayedCastSuccessTimers = ClearDelayedCastSuccessTimers,
             startCooldown = StartCooldown,
@@ -1107,6 +1291,18 @@ local function ConfigureStartup()
             handleBloodlustAura = HandleBloodlustAura,
             handleItemInventoryChanged = RefreshItemLoadState,
             handleCustomEvent = HandleCustomEvent,
+            invalidateTalentCache = function()
+                local bridge = NS.Core and NS.Core.ResolverBridge
+                if bridge and type(bridge.InvalidateTalentCache) == "function" then
+                    return bridge:InvalidateTalentCache()
+                end
+                return false
+            end,
+            prepareProfileRefresh = function()
+                PurgeDeletedEntries()
+                ResolveAllStoredItemTriggers(true)
+                MarkBagItemCacheDirty()
+            end,
         })
     end
 end

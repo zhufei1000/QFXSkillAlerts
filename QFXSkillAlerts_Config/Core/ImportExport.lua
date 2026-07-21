@@ -16,6 +16,7 @@ end
 local ImportCodec = NS.ImportCodec or {}
 local ImportEntryProcessor = NS.ImportEntryProcessor or {}
 local ImportFullProcessor = NS.ImportFullProcessor or {}
+local ImportCDMVoicePresetProcessor = NS.ImportCDMVoicePresetProcessor or {}
 local ImportCollectionProcessor = NS.ImportCollectionProcessor or {}
 local ExportBuilder = NS.ExportBuilder or {}
 local ImportRefreshScheduler = NS.ImportRefreshScheduler
@@ -60,6 +61,13 @@ function ImportExport.ExportFullString()
     return ""
 end
 
+function ImportExport.ExportCDMVoicePresetString()
+    if ExportBuilder and type(ExportBuilder.ExportCDMVoicePresetString) == "function" then
+        return ExportBuilder:ExportCDMVoicePresetString()
+    end
+    return ""
+end
+
 local function ImportFullPayload(payload)
     if ImportFullProcessor and type(ImportFullProcessor.Import) == "function" then
         return ImportFullProcessor:Import(payload)
@@ -91,48 +99,66 @@ function ImportExport.ImportString(text)
         return false
     end
 
-    local ok, count = false, 0
+    local ok, count, details = false, 0, nil
     if payload.type == "entry" then
         ok, count = ImportEntryPayload(payload)
     elseif payload.type == "collection" then
         ok, count = ImportCollectionPayload(payload)
     elseif payload.type == "full" then
         ok, count = ImportFullPayload(payload)
+    elseif payload.type == "cdmVoicePreset" then
+        if ImportCDMVoicePresetProcessor and type(ImportCDMVoicePresetProcessor.Import) == "function" then
+            ok, count, details = ImportCDMVoicePresetProcessor:Import(payload)
+        end
     else
         print("[QFX-SA] " .. L("MSG_IMPORT_UNKNOWN_TYPE"))
         return false
     end
 
     if ok then
-        if ImportRefreshScheduler and type(ImportRefreshScheduler.Schedule) == "function" then
-            ImportRefreshScheduler:Schedule("import:" .. tostring(payload.type or "unknown"))
-        else
-            local api = GetApi()
-            if api then
-                if type(api.ResolveAllStoredItemTriggers) == "function" then
-                    api.ResolveAllStoredItemTriggers(true)
-                end
-                if type(api.RebuildRuntimeConfig) == "function" then
-                    api.RebuildRuntimeConfig()
-                end
-                if type(api.RebuildCastSuccessConfig) == "function" then
-                    api.RebuildCastSuccessConfig()
-                end
-                if type(api.RebuildCustomConfig) == "function" then
-                    api.RebuildCustomConfig()
-                end
-                if type(api.RefreshRuntimeCooldowns) == "function" then
-                    api.RefreshRuntimeCooldowns()
-                end
-                if type(api.RebuildBloodlustConfig) == "function" then
-                    api.RebuildBloodlustConfig()
-                end
-                if type(api.RefreshPanel) == "function" then
-                    api.RefreshPanel()
+        if payload.type ~= "cdmVoicePreset" then
+            if ImportRefreshScheduler and type(ImportRefreshScheduler.Schedule) == "function" then
+                ImportRefreshScheduler:Schedule("import:" .. tostring(payload.type or "unknown"))
+            else
+                local api = GetApi()
+                if api then
+                    if type(api.ResolveAllStoredItemTriggers) == "function" then
+                        api.ResolveAllStoredItemTriggers(true)
+                    end
+                    if type(api.RebuildRuntimeConfig) == "function" then
+                        api.RebuildRuntimeConfig()
+                    end
+                    if type(api.RebuildCastSuccessConfig) == "function" then
+                        api.RebuildCastSuccessConfig()
+                    end
+                    if type(api.RebuildCustomConfig) == "function" then
+                        api.RebuildCustomConfig()
+                    end
+                    if type(api.RefreshRuntimeCooldowns) == "function" then
+                        api.RefreshRuntimeCooldowns()
+                    end
+                    if type(api.RebuildBloodlustConfig) == "function" then
+                        api.RebuildBloodlustConfig()
+                    end
+                    if type(api.RefreshPanel) == "function" then
+                        api.RefreshPanel()
+                    end
                 end
             end
         end
-        print("[QFX-SA] " .. L("MSG_IMPORT_DONE", tostring(payload.type), tonumber(count) or 0))
+        if payload.type == "cdmVoicePreset" then
+            details = type(details) == "table" and details or {}
+            print("[QFX-SA] " .. L(
+                "CDM_PRESET_IMPORT_DONE",
+                tonumber(count) or 0,
+                tonumber(details.added) or 0,
+                tonumber(details.replaced) or 0,
+                tonumber(details.deduplicated) or 0,
+                tonumber(details.missingVoice) or 0
+            ))
+        else
+            print("[QFX-SA] " .. L("MSG_IMPORT_DONE", tostring(payload.type), tonumber(count) or 0))
+        end
         return true
     end
 

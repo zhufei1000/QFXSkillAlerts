@@ -95,6 +95,87 @@ local function HideDropdownPopup(dropdown)
     end
 end
 
+local function EnsureDropdownSearchBox(dropdown)
+    if not dropdown or dropdown.qfxsaSearchBox then
+        return dropdown and dropdown.qfxsaSearchBox or nil
+    end
+    EnsureDropDownTextOverlay(dropdown)
+    local mask = dropdown.qfxsaTextMask
+    if not mask then
+        return nil
+    end
+
+    local searchBox = CreateFrame("EditBox", nil, mask)
+    searchBox:SetAllPoints(mask)
+    searchBox:SetAutoFocus(false)
+    searchBox:SetMaxLetters(80)
+    searchBox:SetFontObject("GameFontHighlightSmall")
+    searchBox:SetJustifyH("LEFT")
+    searchBox:SetTextInsets(0, 0, 0, 0)
+    searchBox:SetFrameLevel((mask.GetFrameLevel and mask:GetFrameLevel() or 1) + 2)
+    searchBox:EnableMouse(true)
+    searchBox:Hide()
+
+    local placeholder = searchBox:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+    placeholder:SetPoint("LEFT", searchBox, "LEFT", 0, 0)
+    placeholder:SetPoint("RIGHT", searchBox, "RIGHT", 0, 0)
+    placeholder:SetJustifyH("LEFT")
+    placeholder:SetWordWrap(false)
+    searchBox.qfxsaPlaceholder = placeholder
+
+    local function RefreshPlaceholder(self)
+        local text = tostring(self:GetText() or "")
+        placeholder:SetText(tostring(dropdown.qfxsaSearchPlaceholder or ""))
+        placeholder:SetShown(text == "")
+    end
+
+    searchBox:SetScript("OnTextChanged", function(self)
+        dropdown.qfxsaSearchText = tostring(self:GetText() or "")
+        RefreshPlaceholder(self)
+        if DropdownPopup and type(DropdownPopup.UpdateSearch) == "function" then
+            DropdownPopup:UpdateSearch(dropdown, dropdown.qfxsaSearchText)
+        end
+    end)
+    searchBox:SetScript("OnEscapePressed", function(self)
+        self:ClearFocus()
+        HideDropdownPopup(dropdown)
+    end)
+    searchBox:SetScript("OnEnterPressed", function(self)
+        if DropdownPopup and type(DropdownPopup.SelectSingleFilteredItem) == "function"
+            and DropdownPopup:SelectSingleFilteredItem(dropdown) then
+            self:ClearFocus()
+        end
+    end)
+
+    dropdown.qfxsaSearchBox = searchBox
+    dropdown.qfxsaBeginSearch = function(self)
+        if not self.qfxsaSearchable or not self.qfxsaSearchBox then
+            return
+        end
+        self.qfxsaSearchText = ""
+        if self.qfxsaTextOverlay then
+            self.qfxsaTextOverlay:Hide()
+        end
+        self.qfxsaSearchBox:Show()
+        self.qfxsaSearchBox:SetText("")
+        RefreshPlaceholder(self.qfxsaSearchBox)
+        self.qfxsaSearchBox:SetFocus()
+    end
+    dropdown.qfxsaEndSearch = function(self)
+        self.qfxsaSearchText = ""
+        if self.qfxsaSearchBox then
+            self.qfxsaSearchBox:SetText("")
+            self.qfxsaSearchBox:ClearFocus()
+            self.qfxsaSearchBox:Hide()
+        end
+        if self.qfxsaTextOverlay then
+            self.qfxsaTextOverlay:Show()
+        end
+        SetDropDownVisualText(self, self.qfxsaText or "")
+    end
+    return searchBox
+end
+
 function Widgets:CreateDropdown(parent, name, width)
     width = width or 180
     local dropdown = SafeCreateFrame("Button", name, parent, { "BackdropTemplate" })
@@ -171,6 +252,22 @@ function Widgets:SetDropdownItems(dropdown, items)
     HideDropdownPopup(dropdown)
     if CloseDropDownMenus then
         CloseDropDownMenus()
+    end
+end
+
+function Widgets:SetDropdownSearchable(dropdown, enabled, placeholder)
+    if not dropdown then
+        return
+    end
+    dropdown.qfxsaSearchable = enabled == true
+    dropdown.qfxsaSearchPlaceholder = tostring(placeholder or "")
+    if dropdown.qfxsaSearchable then
+        local searchBox = EnsureDropdownSearchBox(dropdown)
+        if searchBox and searchBox.qfxsaPlaceholder then
+            searchBox.qfxsaPlaceholder:SetText(dropdown.qfxsaSearchPlaceholder)
+        end
+    elseif dropdown.qfxsaEndSearch then
+        dropdown:qfxsaEndSearch()
     end
 end
 

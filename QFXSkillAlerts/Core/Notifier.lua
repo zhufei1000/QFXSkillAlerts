@@ -111,6 +111,9 @@ end
 
 function Notifier:ResolveEntrySoundPath(entry)
     if type(entry) == "table" then
+        if entry.resolvedSoundPath ~= nil then
+            return tostring(entry.resolvedSoundPath or "")
+        end
         local soundSource = tostring(entry.soundSource or "")
         if soundSource == "tts" or tostring(entry.notifyMode or "") == MODE_TTS then
             return ""
@@ -134,8 +137,9 @@ function Notifier:ResolveEntrySoundPath(entry)
             local sharedMediaSound = TrimText(entry.sharedMediaSound or entry.sharedMediaName or "")
             if soundSource == "sharedmedia" and sharedMediaSound ~= "" then
                 local resolved = NS.AceOptions:ResolveSharedMediaSoundPath(sharedMediaSound, entry.soundPath or "")
-                if self:NormalizeSoundPath(resolved) ~= "" then
-                    return self:NormalizeSoundPath(resolved)
+                resolved = self:NormalizeSoundPath(resolved)
+                if resolved ~= "" then
+                    return resolved
                 end
             end
         end
@@ -155,8 +159,8 @@ function Notifier:ResolveEntrySoundPath(entry)
     return self:NormalizeSoundPath(entry)
 end
 
-function Notifier:PlayVoiceFile(path)
-    path = self:NormalizeSoundPath(path)
+function Notifier:PlayVoiceFile(path, pathIsResolved)
+    path = pathIsResolved and tostring(path or "") or self:NormalizeSoundPath(path)
     if path == "" then
         return false
     end
@@ -272,6 +276,10 @@ function Notifier:ResolveImageTexture(cfgOrValue)
         return tonumber(value) or value
     end
 
+    if cfgOrValue.resolvedImageTexture ~= nil then
+        return cfgOrValue.resolvedImageTexture or nil
+    end
+
     local source = tostring(cfgOrValue.imageSource or "auto")
     if source == "spell" then
         return ResolveSpellIcon(cfgOrValue.imageIconID)
@@ -327,6 +335,15 @@ local function InvalidateVisualTimer(frame)
     end
 end
 
+local function CancelVisualTimer(frame)
+    if frame and frame.qfxsaTimer then
+        if type(frame.qfxsaTimer.Cancel) == "function" then
+            frame.qfxsaTimer:Cancel()
+        end
+        frame.qfxsaTimer = nil
+    end
+end
+
 local function PrepareVisualFrame(frame)
     if not frame then
         return
@@ -347,9 +364,21 @@ local function ClearVisualFrame(frame)
     if not frame then
         return
     end
+    CancelVisualTimer(frame)
     InvalidateVisualTimer(frame)
     frame.qfxsaVisible = false
     frame.qfxsaPrimaryKey = nil
+    frame.qfxsaVisualEntryKey = nil
+    frame.qfxsaVisualUID = nil
+    frame.qfxsaVisualGroupID = nil
+    frame.qfxsaVisualGroupOrder = nil
+    frame.qfxsaImageSize = nil
+    frame.qfxsaHasImage = nil
+    frame.qfxsaHasText = nil
+    frame.qfxsaChannel = nil
+    frame.qfxsaBaseX = nil
+    frame.qfxsaBaseY = nil
+    frame.qfxsaLayoutHeight = nil
     if frame.Hide then
         frame:Hide()
     end
@@ -379,21 +408,27 @@ local function StartVisualTimer(frame, duration)
     -- Always advance the ticket when a visual is shown, even for state-based
     -- visuals without a fixed duration. Older timers may then only hide their
     -- own visual slot and cannot hide a newer alert for another spell/item.
+    CancelVisualTimer(frame)
     InvalidateVisualTimer(frame)
 
-    if duration and C_Timer and C_Timer.After then
+    if duration and C_Timer and type(C_Timer.NewTimer) == "function" then
         local ticket = frame.qfxsaTicket
-        C_Timer.After(duration, function()
-            if frame and frame.qfxsaTicket == ticket then
+        local primaryKey = frame.qfxsaPrimaryKey
+        local timer
+        timer = C_Timer.NewTimer(duration, function()
+            if frame and frame.qfxsaTimer == timer then
+                frame.qfxsaTimer = nil
+            end
+            if frame and frame.qfxsaTicket == ticket and frame.qfxsaPrimaryKey == primaryKey then
                 local owner = frame.qfxsaOwner
-                local key = frame.qfxsaPrimaryKey
-                if owner and key and type(owner.HideVisualAlertForKey) == "function" then
-                    owner:HideVisualAlertForKey(key)
+                if owner and primaryKey and type(owner.HideVisualAlertForKey) == "function" then
+                    owner:HideVisualAlertForKey(primaryKey)
                 else
                     ClearVisualFrame(frame)
                 end
             end
         end)
+        frame.qfxsaTimer = timer
     end
 end
 
@@ -494,7 +529,6 @@ function Notifier:HideVisualAlertForKey(primaryKey)
         return false
     end
     ClearVisualFrame(slot.frame)
-    self.visualSlots[primaryKey] = nil
     self:ForgetVisualKey(primaryKey)
     self:LayoutVisualSlots()
     return true
@@ -524,8 +558,12 @@ function Notifier:HideVisualAlerts(primaryKeyOrMode)
             ClearVisualFrame(slot and slot.frame)
         end
     end
-    self.visualSlots = {}
-    self.activeVisualOrder = {}
+    self.visualSlots = self.visualSlots or {}
+    if type(self.activeVisualOrder) == "table" then
+        wipe(self.activeVisualOrder)
+    else
+        self.activeVisualOrder = {}
+    end
 
     -- Compatibility cleanup for frames created by older builds.
     if type(self.visualFrames) == "table" then
@@ -586,19 +624,15 @@ function Notifier:RefreshActiveVisualForKey(primaryKey, cfg, fallbackText)
         return true
     end
 
-    local copy = {}
-    for key, value in pairs(cfg) do
-        copy[key] = value
-    end
-    copy.primaryKey = primaryKey
+    local channel
     if showImage and showText then
-        copy.alertChannel = "visual"
+        channel = "visual"
     elseif showImage then
-        copy.alertChannel = "image"
+        channel = "image"
     else
-        copy.alertChannel = "text"
+        channel = "text"
     end
-    self:ShowVisualAlerts(copy, fallbackText)
+    self:ShowVisualAlerts(cfg, fallbackText, channel, primaryKey)
     return true
 end
 
@@ -673,6 +707,30 @@ function Notifier:ApplyImageTextLayout(frame, texture, text, imageSize, textSize
     end
 end
 
+function Notifier:ApplyVisualGroupMetadata(frame, cfg, kind)
+    if not frame then
+        return
+    end
+    cfg = type(cfg) == "table" and cfg or {}
+    kind = tostring(kind or "visual")
+    local groups = NS.Core and NS.Core.VisualGroups
+    local entryKey = tostring(cfg.visualEntryKey or "")
+    if entryKey == "" and groups and type(groups.BuildEntryKey) == "function" then
+        entryKey = groups:BuildEntryKey(cfg)
+    end
+    local visualUID = tostring(cfg.visualUID or "")
+    if visualUID == "" and groups and type(groups.ResolveIdentity) == "function" then
+        visualUID = tostring(groups:ResolveIdentity(entryKey ~= "" and entryKey or cfg) or "")
+    end
+    frame.qfxsaVisualEntryKey = entryKey ~= "" and entryKey or nil
+    frame.qfxsaVisualUID = visualUID ~= "" and visualUID or nil
+    frame.qfxsaImageSize = math.max(16, tonumber(cfg.imageSize) or 96)
+    frame.qfxsaHasImage = kind == "image" or kind == "visual"
+    frame.qfxsaHasText = kind == "text" or kind == "visual"
+    frame.qfxsaVisualGroupID = nil
+    frame.qfxsaVisualGroupOrder = nil
+end
+
 function Notifier:ShowVisualSlot(primaryKey, kind, cfg, fallbackText, duration)
     primaryKey = MakeVisualKey(cfg, primaryKey)
     cfg = type(cfg) == "table" and cfg or {}
@@ -691,6 +749,7 @@ function Notifier:ShowVisualSlot(primaryKey, kind, cfg, fallbackText, duration)
     frame.qfxsaBaseX = tonumber((kind == "text") and cfg.textX or cfg.imageX) or 0
     frame.qfxsaBaseY = tonumber((kind == "text") and cfg.textY or cfg.imageY) or 120
     frame.qfxsaLayoutHeight = 100
+    frame.qfxsaChannel = kind
 
     if kind == "image" then
         local texture = self:ResolveImageTexture(cfg)
@@ -745,6 +804,7 @@ function Notifier:ShowVisualSlot(primaryKey, kind, cfg, fallbackText, duration)
         self:ApplyImageTextLayout(frame, texture, text, imageSize, textSize, cfg, fallbackText)
     end
 
+    self:ApplyVisualGroupMetadata(frame, cfg, kind)
     self.activeVisualKey = primaryKey
     self:RememberVisualKey(primaryKey)
     frame:Show()
@@ -782,7 +842,7 @@ function Notifier:ShowTextAlert(text, size, duration, x, y, primaryKey)
     return self:ShowVisualSlot(primaryKey or "text", "text", cfg, text, duration)
 end
 
-function Notifier:ShowImageTextGroup(cfg, fallbackText)
+function Notifier:ShowImageTextGroup(cfg, fallbackText, primaryKey)
     cfg = type(cfg) == "table" and cfg or {}
     local linkedDurationEnabled = cfg.imageEnabled == true and cfg.textEnabled == true and (cfg.imageDurationEnabled == true or cfg.textDurationEnabled == true)
     local imageDuration = ResolveDuration(linkedDurationEnabled or cfg.imageDurationEnabled, cfg.imageDuration, cfg)
@@ -794,17 +854,17 @@ function Notifier:ShowImageTextGroup(cfg, fallbackText)
     if imageDuration and textDuration then
         duration = math.max(imageDuration, textDuration)
     end
-    return self:ShowVisualSlot(MakeVisualKey(cfg, "group"), "visual", cfg, fallbackText, duration)
+    return self:ShowVisualSlot(primaryKey or MakeVisualKey(cfg, "group"), "visual", cfg, fallbackText, duration)
 end
 
-function Notifier:ShowVisualAlerts(cfg, fallbackText)
+function Notifier:ShowVisualAlerts(cfg, fallbackText, alertChannel, primaryKey)
     if type(cfg) ~= "table" then
         return false
     end
 
-    local primaryKey = MakeVisualKey(cfg)
+    primaryKey = MakeVisualKey(cfg, primaryKey)
     self.activeVisualKey = primaryKey
-    local channel = tostring(cfg.alertChannel or "all")
+    local channel = tostring(alertChannel or cfg.alertChannel or "all")
     local shown = false
     local showImage = (channel == "all" or channel == "visual" or channel == "image") and cfg.imageEnabled == true
     local showText = (channel == "all" or channel == "visual" or channel == "text") and cfg.textEnabled == true
@@ -812,7 +872,7 @@ function Notifier:ShowVisualAlerts(cfg, fallbackText)
     -- One visual slot belongs to one saved entry. Re-triggering the same entry
     -- refreshes its slot; different entries can remain visible at the same time.
     if showImage and showText then
-        return self:ShowImageTextGroup(cfg, fallbackText)
+        return self:ShowImageTextGroup(cfg, fallbackText, primaryKey)
     end
     if showImage then
         shown = self:ShowVisualSlot(primaryKey, "image", cfg, fallbackText, ResolveDuration(cfg.imageDurationEnabled, cfg.imageDuration, cfg)) or shown
@@ -826,14 +886,14 @@ function Notifier:ShowVisualAlerts(cfg, fallbackText)
     return shown
 end
 
-function Notifier:PlayReadyNotification(cfg)
+function Notifier:PlayReadyNotification(cfg, alertChannel, remaining, primaryKey)
     if type(cfg) ~= "table" then
         return false
     end
 
     local fallbackText = (tostring(cfg.spellName or "") ~= "" and tostring(cfg.spellName) or tostring(cfg.spellId or "")) .. L("TTS_READY_DEFAULT")
-    local channel = tostring(cfg.alertChannel or "all")
-    local visualShown = self:ShowVisualAlerts(cfg, fallbackText)
+    local channel = tostring(alertChannel or cfg.alertChannel or "all")
+    local visualShown = self:ShowVisualAlerts(cfg, fallbackText, channel, primaryKey)
     if channel ~= "all" and channel ~= "voice" then
         return visualShown
     end
@@ -857,10 +917,10 @@ function Notifier:PlayReadyNotification(cfg)
         end
         return visualShown
     end
-    return self:PlayVoiceFile(path) or visualShown
+    return self:PlayVoiceFile(path, cfg.resolvedSoundPath ~= nil) or visualShown
 end
 
-function Notifier:PlayCastSuccessNotification(cfg)
+function Notifier:PlayCastSuccessNotification(cfg, triggerSpellID, castGUID)
     if type(cfg) ~= "table" then
         return false
     end
@@ -891,7 +951,7 @@ function Notifier:PlayCastSuccessNotification(cfg)
         end
         return visualShown
     end
-    return self:PlayVoiceFile(path) or visualShown
+    return self:PlayVoiceFile(path, cfg.resolvedSoundPath ~= nil) or visualShown
 end
 
 function Notifier:PlayBloodlustNotification(cfg, fallbackPaths)

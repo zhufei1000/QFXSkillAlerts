@@ -12,6 +12,10 @@ local Utils = NS.Utils or {}
 local OBJECT_TYPE_SPELL = CONST.OBJECT_TYPE_SPELL or "spell"
 local OBJECT_TYPE_ITEM = CONST.OBJECT_TYPE_ITEM or "item"
 
+Resolver.selectedTalentIDs = Resolver.selectedTalentIDs or {}
+Resolver.talentCacheValid = Resolver.talentCacheValid == true
+Resolver.talentCacheReadable = Resolver.talentCacheReadable == true
+
 local L = NS.L or function(key, ...)
     if select("#", ...) > 0 then
         return string.format(tostring(key), ...)
@@ -417,22 +421,48 @@ function Resolver:TalentDefinitionMatches(definitionID, talentId)
     return false
 end
 
-function Resolver:IsTalentSelected(talentId)
-    talentId = tonumber(talentId) or 0
-    if talentId <= 0 then
-        return true
+function Resolver:InvalidateTalentCache()
+    self.talentCacheValid = false
+end
+
+local function CacheTalentEntry(configID, entryID, selectedTalentIDs)
+    entryID = tonumber(entryID) or 0
+    if entryID <= 0 then return end
+    local okEntry, entryInfo = pcall(C_Traits.GetEntryInfo, configID, entryID)
+    if not okEntry or type(entryInfo) ~= "table" then return end
+    local definitionID = tonumber(entryInfo.definitionID) or 0
+    if definitionID <= 0 then return end
+    selectedTalentIDs[definitionID] = true
+    if C_Traits.GetDefinitionInfo then
+        local okDefinition, definitionInfo = pcall(C_Traits.GetDefinitionInfo, definitionID)
+        if okDefinition and type(definitionInfo) == "table" then
+            local spellID = tonumber(definitionInfo.spellID) or 0
+            local overriddenSpellID = tonumber(definitionInfo.overriddenSpellID) or 0
+            if spellID > 0 then selectedTalentIDs[spellID] = true end
+            if overriddenSpellID > 0 then selectedTalentIDs[overriddenSpellID] = true end
+        end
     end
+end
+
+function Resolver:BuildSelectedTalentCache()
+    if self.talentCacheValid then
+        return self.talentCacheReadable
+    end
+    local selectedTalentIDs = self.selectedTalentIDs
+    wipe(selectedTalentIDs)
+    self.talentCacheValid = true
+    self.talentCacheReadable = false
 
     local configID = self:GetActiveTalentConfigID()
     if not configID or not (C_Traits and C_Traits.GetConfigInfo and C_Traits.GetTreeNodes and C_Traits.GetNodeInfo and C_Traits.GetEntryInfo) then
-        -- 无法读取天赋树时不要误拦截冷却提示。
-        return true
+        return false
     end
 
     local okConfig, configInfo = pcall(C_Traits.GetConfigInfo, configID)
     if not okConfig or type(configInfo) ~= "table" or type(configInfo.treeIDs) ~= "table" then
-        return true
+        return false
     end
+    self.talentCacheReadable = true
 
     for _, treeID in ipairs(configInfo.treeIDs) do
         local okNodes, nodeIDs = pcall(C_Traits.GetTreeNodes, treeID)
@@ -442,22 +472,12 @@ function Resolver:IsTalentSelected(talentId)
                 if okNode and type(nodeInfo) == "table" then
                     local rank = math.max(tonumber(nodeInfo.activeRank) or 0, tonumber(nodeInfo.currentRank) or 0)
                     if rank > 0 then
-                        local entryIDs = {}
                         local activeEntry = nodeInfo.activeEntry or nodeInfo.currentEntry
                         if type(activeEntry) == "table" and tonumber(activeEntry.entryID) then
-                            entryIDs[#entryIDs + 1] = tonumber(activeEntry.entryID)
+                            CacheTalentEntry(configID, activeEntry.entryID, selectedTalentIDs)
                         elseif type(nodeInfo.entryIDs) == "table" then
                             for _, entryID in ipairs(nodeInfo.entryIDs) do
-                                entryIDs[#entryIDs + 1] = tonumber(entryID)
-                            end
-                        end
-
-                        for _, entryID in ipairs(entryIDs) do
-                            if entryID and entryID > 0 then
-                                local okEntry, entryInfo = pcall(C_Traits.GetEntryInfo, configID, entryID)
-                                if okEntry and type(entryInfo) == "table" and self:TalentDefinitionMatches(entryInfo.definitionID, talentId) then
-                                    return true
-                                end
+                                CacheTalentEntry(configID, entryID, selectedTalentIDs)
                             end
                         end
                     end
@@ -465,6 +485,23 @@ function Resolver:IsTalentSelected(talentId)
             end
         end
     end
+    return true
+end
 
-    return false
+function Resolver:IsTalentSelectedCached(talentId)
+    talentId = tonumber(talentId) or 0
+    if talentId <= 0 then
+        return true
+    end
+    if not self.talentCacheValid then
+        self:BuildSelectedTalentCache()
+    end
+    if not self.talentCacheReadable then
+        return true
+    end
+    return self.selectedTalentIDs[talentId] == true
+end
+
+function Resolver:IsTalentSelected(talentId)
+    return self:IsTalentSelectedCached(talentId)
 end

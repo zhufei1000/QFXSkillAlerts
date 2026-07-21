@@ -36,7 +36,7 @@ function Bridge:QueueCastSuccessNotification(triggerSpellID, cfg, fallback)
         return runtime:QueueCastSuccessNotification(triggerSpellID, cfg)
     end
     if type(fallback) == "function" then
-        return fallback(cfg)
+        return fallback(cfg, triggerSpellID)
     end
     return false
 end

@@ -212,6 +212,40 @@ function Builder:ExportCollectionString(groupKey)
     })
 end
 
+function Builder:ExportCDMVoicePresetString()
+    local api = GetApi()
+    local profiles = api and type(api.GetCDMVoicePresetRecords) == "function"
+        and api.GetCDMVoicePresetRecords() or {}
+    return EncodeExportPayload({
+        type = "cdmVoicePreset",
+        version = 1,
+        profiles = DeepCopyTable(profiles or {}),
+    })
+end
+
+function Builder:ExportCDMVoiceEntryString(savedEntryKey)
+    local api = GetApi()
+    local parsed = api and type(api.ParseCDMVoiceSavedKey) == "function"
+        and api.ParseCDMVoiceSavedKey(savedEntryKey) or nil
+    if not parsed or parsed.keyType ~= "preset" or type(api.GetCDMVoicePresetRecord) ~= "function" then
+        return ""
+    end
+    local record = api.GetCDMVoicePresetRecord(parsed.classID, parsed.specID, parsed.recordKey)
+    if type(record) ~= "table" then
+        return ""
+    end
+    local exportedRecord = DeepCopyTable(record)
+    exportedRecord.pendingApply = nil
+    local profiles = {
+        [parsed.classID] = {
+            [parsed.specID] = {
+                [parsed.recordKey] = exportedRecord,
+            },
+        },
+    }
+    return EncodeExportPayload({ type = "cdmVoicePreset", version = 1, profiles = profiles })
+end
+
 function Builder:ExportFullString()
     local db = EnsureRootDB()
     MigrateLegacyCastSuccessConfigs(db)
@@ -249,5 +283,7 @@ function Builder:ExportFullString()
         minimap = DeepCopyTable(db.minimap or {}),
         languageMode = tostring(db.languageMode or "auto"),
         uiSkinMode = tostring(db.uiSkinMode or "auto"),
+        cdmVoiceProfiles = DeepCopyTable((GetApi() and GetApi().GetCDMVoicePresetRecords
+            and GetApi().GetCDMVoicePresetRecords()) or {}),
     })
 end

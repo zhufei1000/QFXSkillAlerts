@@ -454,5 +454,23 @@ function Builder.BuildLayout(list, state)
     loadedEntries = applyDisplayOrder("loaded", loadedEntries)
     unloadedEntries = applyDisplayOrder("unloaded", unloadedEntries)
 
+    -- CDM voice rows are runtime projections of effective local presets. Append
+    -- them after normal ordering so they never enter savedListOrder or collections.
+    if api and type(api.GetCDMVoiceSavedEntries) == "function" then
+        local cdmEntries = api.GetCDMVoiceSavedEntries()
+        for _, entry in ipairs(type(cdmEntries) == "table" and cdmEntries or {}) do
+            entry.depth = 0
+            entry.canDrag = false
+            entry.isVirtual = true
+            if entry.displaySection == "unloaded" or entry.isLoaded == false then
+                entry.displaySection = "unloaded"
+                unloadedEntries[#unloadedEntries + 1] = entry
+            else
+                entry.displaySection = "loaded"
+                loadedEntries[#loadedEntries + 1] = entry
+            end
+        end
+    end
+
     return loadedEntries, unloadedEntries, Builder.CountVisibleHeaderItems(loadedEntries), Builder.CountVisibleHeaderItems(unloadedEntries)
 end
