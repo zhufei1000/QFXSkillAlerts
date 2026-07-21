@@ -238,16 +238,6 @@ function Registry:Refresh(silent)
     return items
 end
 
-function Registry:SelfCheck()
-    local identityA = self:BuildIdentity(" Test Sound ", "Interface/AddOns/Test/Sound.ogg")
-    local identityB = self:BuildIdentity("test sound", "Interface\\AddOns\\Test\\Sound.ogg")
-    local payloadA = identityA and self:BuildCandidate(identityA, 0) or nil
-    local payloadB = identityB and self:BuildCandidate(identityB, 0) or nil
-    return identityA == identityB
-        and IsValidPayload(payloadA)
-        and payloadA == payloadB
-end
-
 function Registry:RegisterSharedMediaCallback()
     if self.callbackRegistered then
         return true
@@ -270,7 +260,6 @@ function Registry:Initialize()
         return
     end
     self.initialized = true
-    self.selfCheckPassed = self:SelfCheck()
     self:RepairStoredMappings()
     local registered = self:RegisterSharedMediaCallback()
     self:Refresh(true)

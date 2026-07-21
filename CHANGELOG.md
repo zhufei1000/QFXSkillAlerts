@@ -1,5 +1,52 @@
 # Changelog
 
+## 1.0.206 - 2026-07-21
+
+- Reduced combat-time `UNIT_AURA` work by using incremental aura updates to skip all exhaustion lookups for unrelated player aura changes, with a safe full-scan fallback when update data is unavailable or unreadable.
+- Reused one Cooldown Manager catalog across every record in a pending-plan or post-reload verification pass, avoiding repeated provider enumeration and spell/icon resolution per saved voice record.
+- Cached the active cooldown runtime update interval for each processing period instead of querying combat/update state on multiple rendered frames near the threshold.
+- Removed a production-only CDM registry self-check whose result was never consumed.
+- Removed 59 Lua files (about 794 KiB) that were not referenced by either addon's TOC: duplicated configuration sources under the runtime addon plus an unused configuration localization copy.
+- Added regression coverage for CDM catalog reuse, incremental exhaustion filtering, and cooldown update-interval caching.
+
+## 1.0.205 - 2026-07-21
+
+- Removed the selectable "No custom voice selected" row from the Cooldown Manager voice dropdown while retaining it as placeholder text for genuinely unconfigured rows.
+- Empty voice rows are no longer collected as dirty drafts, preventing one incomplete row from blocking Apply All and Reload.
+- Added per-dropdown popup strata support and placed searchable CDM voice lists below WoW's IME candidate layer while keeping them above the CDM editor.
+
+## 1.0.204 - 2026-07-21
+
+- Fixed the pending Cooldown Manager voice Apply/Reload prompt being lost when specialization changes were immediately followed by talent, spell, or CDM data refresh events.
+- Coalesced event evaluations now retain prompt intent for the complete event burst and retry after Cooldown Manager data becomes available.
+- Deferred specialization prompts now retry after combat through `PLAYER_REGEN_ENABLED`.
+- Switching away and back resets the target specialization's prompt guard so unresolved entries can prompt again, without repeating the popup on every world/instance transition.
+
+## 1.0.203 - 2026-07-21
+
+- Removed the UI reload from confirmed manual Cooldown Manager voice deletion.
+- Manual deletion now runs a dedicated removal-only transaction: remove all matching same-event Sound alerts from equivalent cooldown IDs, verify zero remain, save the Blizzard layout once, and return without locking notifications or reloading.
+- Clears the temporary removal tombstone immediately after successful synchronous verification and preserves rollback on any removal or save failure.
+- Routes removal-only Apply All batches through the same no-reload transaction, including pending removals created by earlier versions.
+- Kept reload behavior unchanged for Apply/Apply All flows that add or replace sounds.
+
+## 1.0.202 - 2026-07-21
+
+- Changed confirmed manual Cooldown Manager voice deletion to immediately remove the matching same-event Sound alerts, save the Blizzard layout once, and reload the UI once instead of requiring a second Apply All action.
+- Kept the payload-free removal tombstone only as an internal post-reload verification marker; it is no longer a user-facing pending step for manual deletion.
+- Added atomic local-record rollback when immediate deletion cannot build or apply a valid CDM removal plan.
+- Preserved the explicitly named local-only deletion API for import and automation callers that intentionally batch later changes.
+- Updated deletion confirmation text to state that the Cooldown Manager layout is changed immediately and the UI reloads once.
+
+## 1.0.201 - 2026-07-21
+
+- Fixed old Cooldown Manager sounds continuing to play after replacing an already-applied QFX voice.
+- Explicit apply now finds every current-specialization cooldown entry for the same logical spell and removes all same-event Sound alerts from every equivalent cooldown ID.
+- Writes exactly one target Sound on the current primary cooldown ID after the complete removal phase, while preserving other spells, other events, and Visual alerts.
+- Read-only status evaluation and post-reload verification now check every equivalent cooldown ID so leftover sounds remain pending or report apply failure instead of incorrectly showing Applied.
+- Preserved local-only Save/import behavior and the explicit two-phase apply workflow with at most one `SaveLayouts` call and one immediate reload per changed batch.
+- Preserved the secret-value safety policy: no `UnlockNotifications`, `UpdateAlert`, or addon-driven Blizzard Cooldown Viewer refresh calls were introduced.
+
 ## 1.0.200 - 2026-07-21
 
 - Split Cooldown Manager voice handling into read-only evaluation and explicit apply transactions: local Save, import, login, specialization changes, CDM data events, and external layout saves no longer write Blizzard CDM data or reload the UI.

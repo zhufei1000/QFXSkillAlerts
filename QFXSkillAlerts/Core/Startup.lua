@@ -131,8 +131,8 @@ function Startup:OnUnitSpellcastSucceeded(unit, spellId)
     end
 end
 
-function Startup:OnUnitAura(unit)
-    return SafeCall("handleBloodlustAura", unit)
+function Startup:OnUnitAura(unit, updateInfo)
+    return SafeCall("handleBloodlustAura", unit, updateInfo)
 end
 
 function Startup:OnItemInventoryChanged(event)
@@ -169,8 +169,8 @@ function Startup:GetEventHandlers()
         OnUnitSpellcastSucceeded = function(unit, spellId)
             return self:OnUnitSpellcastSucceeded(unit, spellId)
         end,
-        OnUnitAura = function(unit)
-            return self:OnUnitAura(unit)
+        OnUnitAura = function(unit, updateInfo)
+            return self:OnUnitAura(unit, updateInfo)
         end,
         OnItemInventoryChanged = function(event)
             return self:OnItemInventoryChanged(event)

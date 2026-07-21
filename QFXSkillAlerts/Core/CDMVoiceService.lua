@@ -65,12 +65,6 @@ local function GetAlertPayload(alert)
     return tonumber(GetAlertValue(alert, CooldownViewerAlert_GetPayload, 3))
 end
 
-local function AlertMatches(alert, eventType, payload)
-    return GetAlertType(alert) == GetSoundAlertType()
-        and tonumber(GetAlertEvent(alert)) == tonumber(eventType)
-        and tonumber(GetAlertPayload(alert)) == tonumber(payload)
-end
-
 local function EnsureCooldownViewerLoaded()
     if CooldownViewerSettings and type(CooldownViewerSettings.GetLayoutManager) == "function" then
         return true
@@ -484,6 +478,7 @@ local function NewBatchSummary(seed)
         unsupportedEvent = 0,
         ambiguousSkill = 0,
         failed = 0,
+        removed = 0,
     }
     for key in pairs(summary) do
         summary[key] = tonumber(type(seed) == "table" and seed[key]) or 0
@@ -534,196 +529,28 @@ local function ManagerCallSucceeded(fn, ...)
     return true
 end
 
-local function SnapshotSounds(alerts)
-    local snapshots = {}
-    for _, alert in ipairs(type(alerts) == "table" and alerts or {}) do
-        local eventType = tonumber(GetAlertEvent(alert))
-        local payload = tonumber(GetAlertPayload(alert))
-        if not eventType or not payload then
-            return nil
-        end
-        snapshots[#snapshots + 1] = { eventType = eventType, payload = payload }
-    end
-    return snapshots
+local function AddAlertSucceeded(manager, cooldownID, alert)
+    local ok, status = pcall(manager.AddAlert, manager, cooldownID, alert)
+    return ok and (status == true or (type(status) == "number" and IsSuccessStatus(status)))
 end
 
-local function SnapshotCounts(snapshots)
-    local counts = {}
-    for _, snapshot in ipairs(type(snapshots) == "table" and snapshots or {}) do
-        local key = tostring(snapshot.payload)
-        counts[key] = (counts[key] or 0) + 1
-    end
-    return counts
+local function PairKey(cooldownID, eventType)
+    return tostring(tonumber(cooldownID) or "") .. ":" .. tostring(tonumber(eventType) or "")
 end
 
-local function SnapshotsRestored(manager, cooldownID, eventType, snapshots)
-    local sounds = GetEventSounds(manager, cooldownID, eventType)
-    if type(sounds) ~= "table" or #sounds ~= #snapshots then
-        return false
-    end
-    local wanted, actual = SnapshotCounts(snapshots), {}
-    for _, alert in ipairs(sounds) do
-        local payload = tonumber(GetAlertPayload(alert))
-        if not payload then
-            return false
-        end
-        local key = tostring(payload)
-        actual[key] = (actual[key] or 0) + 1
-    end
-    for key, count in pairs(wanted) do
-        if actual[key] ~= count then
-            return false
-        end
-        actual[key] = nil
-    end
-    return next(actual) == nil
-end
-
-local function RestoreSoundSnapshots(manager, cooldownID, eventType, snapshots)
-    local current = GetEventSounds(manager, cooldownID, eventType)
-    if type(current) ~= "table" then
-        return false
-    end
-    for _, alert in ipairs(current) do
-        if not ManagerCallSucceeded(manager.RemoveAlert, manager, cooldownID, alert) then
-            return false
+local function CopyEquivalentCooldownIDs(values)
+    local result, seen = {}, {}
+    for _, value in ipairs(type(values) == "table" and values or {}) do
+        value = tonumber(value)
+        if value and not seen[value] then
+            seen[value] = true
+            result[#result + 1] = value
         end
     end
-    local remaining = GetEventSounds(manager, cooldownID, eventType)
-    if type(remaining) ~= "table" or #remaining ~= 0 then
-        return false
-    end
-    for _, snapshot in ipairs(snapshots) do
-        local alert = CreateAlert(snapshot.eventType, snapshot.payload)
-        if not alert or not ManagerCallSucceeded(manager.AddAlert, manager, cooldownID, alert) then
-            return false
-        end
-    end
-    return SnapshotsRestored(manager, cooldownID, eventType, snapshots)
-end
-
-function Service:ReconcileSoundAlert(operation, manager)
-    manager = manager or GetLayoutManager()
-    local cooldownID = tonumber(operation and operation.cooldownID)
-    local eventType = tonumber(operation and operation.eventType)
-    local payload = tonumber(operation and operation.payload)
-    local result = {
-        success = false,
-        changed = false,
-        duplicateRemoved = 0,
-        reason = "invalid_operation",
-    }
-    if IsInCombat()
-        or type(manager) ~= "table" or type(manager.GetAlerts) ~= "function"
-        or type(manager.AddAlert) ~= "function" or type(manager.RemoveAlert) ~= "function"
-        or not cooldownID or cooldownID <= 0 or cooldownID ~= math.floor(cooldownID)
-        or not eventType or eventType ~= math.floor(eventType)
-        or not payload or payload ~= math.floor(payload)
-        or not self:GetCooldownInfo(cooldownID)
-        or not self:IsValidEvent(cooldownID, eventType) then
-        return result
-    end
-    if not Registry or not Registry:IsOwnedPayload(payload)
-        or not Registry:IsPayloadAvailable(payload)
-        or type(Registry:GetPathForPayload(payload)) ~= "string"
-        or Registry:GetPathForPayload(payload) == "" then
-        result.reason = "target_alert_invalid"
-        return result
-    end
-    local targetAlert = operation and operation.alert
-    if type(targetAlert) ~= "table" or not AlertMatches(targetAlert, eventType, payload) then
-        result.reason = "target_alert_invalid"
-        return result
-    end
-    if type(CooldownViewerAlert_GetAlertStatus) == "function" then
-        local ok, status = pcall(CooldownViewerAlert_GetAlertStatus, targetAlert)
-        if not ok or not IsSuccessStatus(status) then
-            result.reason = "target_alert_invalid"
-            return result
-        end
-    end
-
-    local matching, targetCount, readError = GetEventSounds(manager, cooldownID, eventType, payload)
-    if type(matching) ~= "table" then
-        result.reason = readError or "invalid_operation"
-        return result
-    end
-    if #matching == 1 and targetCount == 1 then
-        result.success = true
-        result.mutationKind = "unchanged"
-        result.reason = nil
-        return result
-    end
-
-    local snapshots = SnapshotSounds(matching)
-    if not snapshots then
-        result.reason = "remove_failed"
-        return result
-    end
-    result.previousSounds = snapshots
-    if #matching == 0 then
-        if not ManagerCallSucceeded(manager.AddAlert, manager, cooldownID, targetAlert) then
-            result.reason = "add_failed"
-            return result
-        end
-        local finalSounds, finalTargets = GetEventSounds(manager, cooldownID, eventType, payload)
-        if type(finalSounds) ~= "table" or #finalSounds ~= 1 or finalTargets ~= 1 then
-            RestoreSoundSnapshots(manager, cooldownID, eventType, snapshots)
-            result.reason = "add_verify_failed"
-            return result
-        end
-        result.success = true
-        result.changed = true
-        result.mutationKind = "added"
-        result.reason = nil
-        return result
-    end
-
-    result.mutationKind = #matching >= 2 and "deduplicated" or "replaced"
-    result.duplicateRemoved = result.mutationKind == "deduplicated" and math.max(0, #matching - 1) or 0
-    for _, alert in ipairs(matching) do
-        if not ManagerCallSucceeded(manager.RemoveAlert, manager, cooldownID, alert) then
-            if not RestoreSoundSnapshots(manager, cooldownID, eventType, snapshots) then
-                result.reason = "replace_rollback_failed"
-            else
-                result.reason = "remove_failed"
-            end
-            return result
-        end
-    end
-    local remaining = GetEventSounds(manager, cooldownID, eventType, payload)
-    if type(remaining) ~= "table" or #remaining ~= 0 then
-        if not RestoreSoundSnapshots(manager, cooldownID, eventType, snapshots) then
-            result.reason = "replace_rollback_failed"
-        else
-            result.reason = "remove_verify_failed"
-        end
-        return result
-    end
-    if not ManagerCallSucceeded(manager.AddAlert, manager, cooldownID, targetAlert) then
-        if not RestoreSoundSnapshots(manager, cooldownID, eventType, snapshots) then
-            result.reason = "replace_rollback_failed"
-        else
-            result.reason = "add_failed"
-        end
-        return result
-    end
-    local finalSounds, finalTargets = GetEventSounds(manager, cooldownID, eventType, payload)
-    if type(finalSounds) ~= "table" or #finalSounds ~= 1 or finalTargets ~= 1 then
-        if not RestoreSoundSnapshots(manager, cooldownID, eventType, snapshots) then
-            result.reason = "replace_rollback_failed"
-        else
-            result.reason = "add_verify_failed"
-        end
-        return result
-    end
-    result.success = true
-    result.changed = true
-    result.reason = nil
     return result
 end
 
-local function CopyApplyPlan(plan)
+local function CopyApplyPlan(plan, includeTargetAlert)
     local copy = {}
     for _, operation in ipairs(type(plan) == "table" and plan or {}) do
         copy[#copy + 1] = {
@@ -736,6 +563,11 @@ local function CopyApplyPlan(plan)
             payload = tonumber(operation.payload),
             recordKey = operation.recordKey,
             runtimeKey = operation.runtimeKey,
+            category = operation.category,
+            spellID = tonumber(operation.spellID),
+            eventKey = operation.eventKey,
+            equivalentCooldownIDs = CopyEquivalentCooldownIDs(operation.equivalentCooldownIDs),
+            targetAlert = includeTargetAlert and operation.targetAlert or nil,
         }
     end
     return copy
@@ -752,7 +584,11 @@ local function StablePlanSignature(plan)
             tostring(operation.eventType or ""),
             tostring(operation.payload or ""),
             tostring(operation.recordKey or ""),
+            tostring(operation.originalRecordKey or ""),
         }, ":")
+        for _, cooldownID in ipairs(operation.equivalentCooldownIDs or {}) do
+            parts[#parts + 1] = "equivalent:" .. tostring(cooldownID)
+        end
     end
     table.sort(parts)
     return table.concat(parts, "|")
@@ -773,6 +609,7 @@ end
 local function SetApplyFailure(store, plan, reason, mutationStarted)
     local state = store:GetApplyState()
     state.applyInProgress = false
+    state.plan = nil
     state.lastApplyError = tostring(reason or "apply_failed")
     state.errorNeedsReport = mutationStarted == true
     state.failedRecordKeys = type(state.failedRecordKeys) == "table" and state.failedRecordKeys or {}
@@ -783,15 +620,328 @@ local function SetApplyFailure(store, plan, reason, mutationStarted)
     end
 end
 
-local function SnapshotKey(operation)
-    return string.format("%s:%s", tostring(operation.cooldownID), tostring(operation.eventType))
+function Service:RemoveAllSoundAlertsForEvent(manager, cooldownID, eventType)
+    local alerts, readReason = ReadManagerAlerts(manager, cooldownID)
+    if type(alerts) ~= "table" then
+        return false, 0, readReason or "read_failed"
+    end
+    local removeList = {}
+    for _, alert in ipairs(alerts) do
+        if GetAlertType(alert) == GetSoundAlertType()
+            and tonumber(GetAlertEvent(alert)) == tonumber(eventType) then
+            removeList[#removeList + 1] = alert
+        end
+    end
+    for _, alert in ipairs(removeList) do
+        local ok = pcall(manager.RemoveAlert, manager, tonumber(cooldownID), alert)
+        if not ok then
+            return false, #removeList, "remove_failed"
+        end
+    end
+    local remaining, _, verifyReason = GetEventSounds(manager, cooldownID, eventType)
+    if type(remaining) ~= "table" then
+        return false, #removeList, verifyReason or "read_failed"
+    end
+    if #remaining ~= 0 then
+        return false, #removeList, "cleanup_verify_failed"
+    end
+    return true, #removeList
+end
+
+function Service:BuildSoundCleanupGroups(plan)
+    local manager = GetLayoutManager()
+    if not manager then
+        return nil, "data_not_ready"
+    end
+    local groups, groupsByKey, claims = {}, {}, {}
+    for _, operation in ipairs(type(plan) == "table" and plan or {}) do
+        if operation.kind == "set" then
+            for _, cooldownID in ipairs(operation.equivalentCooldownIDs or {}) do
+                local key = PairKey(cooldownID, operation.eventType)
+                local claim = claims[key]
+                if claim and (tonumber(claim.payload) ~= tonumber(operation.payload)
+                    or tonumber(claim.cooldownID) ~= tonumber(operation.cooldownID)) then
+                    return nil, "conflicting_local_targets"
+                end
+                claims[key] = operation
+            end
+        end
+        for _, cooldownID in ipairs(operation.equivalentCooldownIDs or {}) do
+            local key = PairKey(cooldownID, operation.eventType)
+            if not groupsByKey[key] then
+                local alerts, _, readReason = GetEventSounds(manager, cooldownID, operation.eventType)
+                if type(alerts) ~= "table" then
+                    return nil, readReason or "read_failed"
+                end
+                local group = {
+                    cooldownID = tonumber(cooldownID),
+                    eventType = tonumber(operation.eventType),
+                    alerts = alerts,
+                }
+                groupsByKey[key] = group
+                groups[#groups + 1] = group
+            end
+        end
+    end
+    table.sort(groups, function(left, right)
+        if left.cooldownID == right.cooldownID then
+            return left.eventType < right.eventType
+        end
+        return left.cooldownID < right.cooldownID
+    end)
+    return groups
+end
+
+local function SnapshotCleanupGroups(groups)
+    local snapshots = {}
+    for _, group in ipairs(groups) do
+        local sounds = {}
+        for _, alert in ipairs(group.alerts or {}) do
+            local payload = tonumber(GetAlertPayload(alert))
+            if not payload then
+                return nil, "snapshot_failed"
+            end
+            sounds[#sounds + 1] = { eventType = group.eventType, payload = payload }
+        end
+        snapshots[PairKey(group.cooldownID, group.eventType)] = {
+            cooldownID = group.cooldownID,
+            eventType = group.eventType,
+            sounds = sounds,
+        }
+    end
+    return snapshots
+end
+
+local function SnapshotCounts(sounds)
+    local counts = {}
+    for _, sound in ipairs(type(sounds) == "table" and sounds or {}) do
+        local key = tostring(sound.payload)
+        counts[key] = (counts[key] or 0) + 1
+    end
+    return counts
+end
+
+local function SnapshotRestored(manager, snapshot)
+    local sounds = GetEventSounds(manager, snapshot.cooldownID, snapshot.eventType)
+    if type(sounds) ~= "table" or #sounds ~= #snapshot.sounds then
+        return false
+    end
+    local wanted, actual = SnapshotCounts(snapshot.sounds), {}
+    for _, alert in ipairs(sounds) do
+        local key = tostring(GetAlertPayload(alert))
+        actual[key] = (actual[key] or 0) + 1
+    end
+    for key, count in pairs(wanted) do
+        if actual[key] ~= count then
+            return false
+        end
+        actual[key] = nil
+    end
+    return next(actual) == nil
+end
+
+local function RestoreSnapshot(service, manager, snapshot)
+    local removed = service:RemoveAllSoundAlertsForEvent(
+        manager, snapshot.cooldownID, snapshot.eventType
+    )
+    if not removed then
+        return false
+    end
+    for _, sound in ipairs(snapshot.sounds) do
+        local alert = CreateAlert(sound.eventType, sound.payload)
+        if not alert or not AddAlertSucceeded(manager, snapshot.cooldownID, alert) then
+            return false
+        end
+    end
+    return SnapshotRestored(manager, snapshot)
+end
+
+local function VerifySetOperation(manager, operation)
+    for _, cooldownID in ipairs(operation.equivalentCooldownIDs or {}) do
+        local sounds, targetCount, readReason = GetEventSounds(
+            manager, cooldownID, operation.eventType,
+            tonumber(cooldownID) == tonumber(operation.cooldownID) and operation.payload or nil
+        )
+        if type(sounds) ~= "table" then
+            return false, readReason or "read_failed"
+        end
+        if tonumber(cooldownID) == tonumber(operation.cooldownID) then
+            if #sounds ~= 1 or targetCount ~= 1 then
+                return false, "add_verify_failed"
+            end
+        elseif #sounds ~= 0 then
+            return false, "add_verify_failed"
+        end
+    end
+    return true
+end
+
+local function VerifyRemoveOperation(manager, operation)
+    for _, cooldownID in ipairs(operation.equivalentCooldownIDs or {}) do
+        local sounds, _, readReason = GetEventSounds(manager, cooldownID, operation.eventType)
+        if type(sounds) ~= "table" then
+            return false, readReason or "read_failed"
+        end
+        if #sounds ~= 0 then
+            return false, "cleanup_verify_failed"
+        end
+    end
+    return true
+end
+
+function Service:ApplyCDMRemovalPlanWithoutReload(plan, options)
+    plan = type(plan) == "table" and plan or {}
+    options = type(options) == "table" and options or {}
+    local summary = NewBatchSummary(options.summary)
+    if IsInCombat() then
+        return false, summary, "combat"
+    end
+    local store = NS.Core and NS.Core.CDMVoicePresetStore
+    local manager = GetLayoutManager()
+    if not store or not manager or type(manager.GetAlerts) ~= "function"
+        or type(manager.AddAlert) ~= "function"
+        or type(manager.RemoveAlert) ~= "function"
+        or type(manager.SaveLayouts) ~= "function" then
+        return false, summary, "data_not_ready"
+    end
+    local classID, specID = self:GetCurrentClassSpec()
+    local scopeToken = options.scopeToken
+    if type(scopeToken) == "table"
+        and (tonumber(scopeToken.classID) ~= tonumber(classID)
+            or tonumber(scopeToken.specID) ~= tonumber(specID)) then
+        return false, summary, "stale_scope"
+    end
+    if #plan == 0 then
+        return true, summary, "no_changes"
+    end
+
+    local validated = CopyApplyPlan(plan, false)
+    for _, operation in ipairs(validated) do
+        if operation.kind ~= "remove"
+            or tonumber(operation.classID) ~= tonumber(classID)
+            or tonumber(operation.specID) ~= tonumber(specID)
+            or not operation.cooldownID or operation.cooldownID <= 0
+            or operation.cooldownID ~= math.floor(operation.cooldownID)
+            or not operation.eventType or operation.eventType ~= math.floor(operation.eventType)
+            or not self:GetCooldownInfo(operation.cooldownID)
+            or not self:IsValidEvent(operation.cooldownID, operation.eventType)
+            or #operation.equivalentCooldownIDs == 0 then
+            return false, summary, "invalid_operation"
+        end
+        local containsTarget = false
+        for _, cooldownID in ipairs(operation.equivalentCooldownIDs) do
+            if cooldownID <= 0 or cooldownID ~= math.floor(cooldownID)
+                or not self:GetCooldownInfo(cooldownID) then
+                return false, summary, "invalid_equivalent_cooldown"
+            end
+            containsTarget = containsTarget or cooldownID == operation.cooldownID
+            local alerts, readReason = ReadManagerAlerts(manager, cooldownID)
+            if type(alerts) ~= "table" then
+                return false, summary, readReason or "read_failed"
+            end
+        end
+        if not containsTarget then
+            return false, summary, "invalid_equivalent_cooldown"
+        end
+    end
+
+    local cleanupGroups, cleanupReason = self:BuildSoundCleanupGroups(validated)
+    if type(cleanupGroups) ~= "table" then
+        return false, summary, cleanupReason or "cleanup_plan_failed"
+    end
+    local snapshots, snapshotReason = SnapshotCleanupGroups(cleanupGroups)
+    if type(snapshots) ~= "table" then
+        return false, summary, snapshotReason or "snapshot_failed"
+    end
+
+    local hasChanges = false
+    for _, operation in ipairs(validated) do
+        local correct, verifyReason = VerifyRemoveOperation(manager, operation)
+        if not correct then
+            if verifyReason == "read_failed" or verifyReason == "data_not_ready" then
+                return false, summary, verifyReason
+            end
+            hasChanges = true
+        end
+    end
+    if not hasChanges then
+        for _, operation in ipairs(validated) do
+            store:ClearPendingRemoval(classID, specID, operation.recordKey)
+        end
+        self.lastBatchResults = {}
+        self.lastBatchSummary = summary
+        self:RefreshRuntimeData(options.reason or "manual_delete_noop")
+        return true, summary, "no_changes"
+    end
+
+    self:BeginCDMMutation("qfx_manual_delete")
+    local mutationStarted, failureReason = false, nil
+    for _, group in ipairs(cleanupGroups) do
+        if #(group.alerts or {}) > 0 then
+            mutationStarted = true
+        end
+        local removed, removedCount, removeReason = self:RemoveAllSoundAlertsForEvent(
+            manager, group.cooldownID, group.eventType
+        )
+        if not removed then
+            failureReason = removeReason or "cleanup_verify_failed"
+            break
+        end
+        summary.removed = summary.removed + removedCount
+    end
+    if not failureReason then
+        for _, operation in ipairs(validated) do
+            local verified, verifyReason = VerifyRemoveOperation(manager, operation)
+            if not verified then
+                failureReason = verifyReason
+                break
+            end
+        end
+    end
+    if not failureReason and not ManagerCallSucceeded(manager.SaveLayouts, manager) then
+        failureReason = "save_failed"
+    end
+
+    if failureReason then
+        local rollbackOK = true
+        if mutationStarted then
+            for _, snapshot in pairs(snapshots) do
+                if not RestoreSnapshot(self, manager, snapshot) then
+                    rollbackOK = false
+                end
+            end
+        end
+        if mutationStarted and not rollbackOK then
+            failureReason = "rollback_failed"
+        end
+        summary.failed = summary.failed + 1
+        self.lastBatchResults = {}
+        self.lastBatchSummary = summary
+        self:EndCDMMutation()
+        return false, summary, failureReason
+    end
+
+    local results = {}
+    for _, operation in ipairs(validated) do
+        store:ClearPendingRemoval(classID, specID, operation.recordKey)
+        results[#results + 1] = {
+            success = true,
+            changed = true,
+            operation = operation,
+            mutationKind = "removed",
+        }
+    end
+    self.lastBatchResults = results
+    self.lastBatchSummary = summary
+    self:EndCDMMutation()
+    self:RefreshRuntimeData(options.reason or "manual_delete")
+    return true, summary, "deleted"
 end
 
 function Service:ApplyCDMPlanAndReload(plan, options)
     plan = type(plan) == "table" and plan or {}
     options = type(options) == "table" and options or {}
     local summary = NewBatchSummary(options.summary)
-    summary.removed = tonumber(options.summary and options.summary.removed) or 0
     if IsInCombat() then
         return false, summary, "combat"
     end
@@ -811,81 +961,81 @@ function Service:ApplyCDMPlanAndReload(plan, options)
             or tonumber(scopeToken.specID) ~= tonumber(specID)) then
         return false, summary, "stale_scope"
     end
-
-    local validated = {}
-    local setTargets = {}
-    local removalTargets = {}
-    local snapshots = {}
-    local changedCount = 0
-    for _, rawOperation in ipairs(plan) do
-        local operation = CopyApplyPlan({ rawOperation })[1]
-        if not operation or tonumber(operation.classID) ~= tonumber(classID)
-            or tonumber(operation.specID) ~= tonumber(specID)
-            or not operation.cooldownID or not self:GetCooldownInfo(operation.cooldownID)
-            or not operation.eventType or not self:IsValidEvent(operation.cooldownID, operation.eventType)
-            or not operation.payload then
-            return false, summary, "invalid_operation"
-        end
-        local pairKey = SnapshotKey(operation)
-        if operation.kind == "set" then
-            if setTargets[pairKey] and setTargets[pairKey] ~= operation.payload then
-                return false, summary, "conflicting_targets"
-            end
-            if removalTargets[pairKey] and removalTargets[pairKey][operation.payload] then
-                return false, summary, "conflicting_targets"
-            end
-            setTargets[pairKey] = operation.payload
-            local canConfigure, alertOrReason = self:CanConfigureSound(
-                operation.cooldownID,
-                operation.eventType,
-                operation.payload
-            )
-            if not canConfigure then
-                return false, summary, alertOrReason or "target_alert_invalid"
-            end
-            operation.alert = alertOrReason
-        elseif operation.kind == "remove" and Registry and Registry:IsOwnedPayload(operation.payload) then
-            if setTargets[pairKey] == operation.payload then
-                return false, summary, "conflicting_targets"
-            end
-            removalTargets[pairKey] = removalTargets[pairKey] or {}
-            removalTargets[pairKey][operation.payload] = true
-        else
-            return false, summary, "invalid_operation"
-        end
-        if not snapshots[pairKey] then
-            local eventSounds, _, readReason = GetEventSounds(
-                manager, operation.cooldownID, operation.eventType, operation.payload
-            )
-            local snapshot = SnapshotSounds(eventSounds)
-            if type(snapshot) ~= "table" then
-                return false, summary, readReason or "read_failed"
-            end
-            snapshots[pairKey] = {
-                cooldownID = operation.cooldownID,
-                eventType = operation.eventType,
-                sounds = snapshot,
-            }
-        end
-        local currentSounds, targetCount = GetEventSounds(
-            manager, operation.cooldownID, operation.eventType, operation.payload
-        )
-        if type(currentSounds) ~= "table" then
-            return false, summary, "read_failed"
-        end
-        if operation.kind == "set" then
-            operation.changed = not (#currentSounds == 1 and targetCount == 1)
-        else
-            operation.changed = targetCount > 0
-        end
-        operation.currentSounds = currentSounds
-        if operation.changed then
-            changedCount = changedCount + 1
-        end
-        validated[#validated + 1] = operation
+    if #plan == 0 then
+        return true, summary, "no_changes"
     end
 
-    if changedCount == 0 then
+    local validated = CopyApplyPlan(plan, true)
+    for _, operation in ipairs(validated) do
+        if tonumber(operation.classID) ~= tonumber(classID)
+            or tonumber(operation.specID) ~= tonumber(specID)
+            or not operation.cooldownID or operation.cooldownID <= 0
+            or operation.cooldownID ~= math.floor(operation.cooldownID)
+            or not operation.eventType or operation.eventType ~= math.floor(operation.eventType)
+            or not self:GetCooldownInfo(operation.cooldownID)
+            or not self:IsValidEvent(operation.cooldownID, operation.eventType)
+            or #operation.equivalentCooldownIDs == 0 then
+            return false, summary, "invalid_operation"
+        end
+        local containsTarget = false
+        for _, cooldownID in ipairs(operation.equivalentCooldownIDs) do
+            if cooldownID <= 0 or cooldownID ~= math.floor(cooldownID)
+                or not self:GetCooldownInfo(cooldownID) then
+                return false, summary, "invalid_equivalent_cooldown"
+            end
+            containsTarget = containsTarget or cooldownID == operation.cooldownID
+            local alerts, readReason = ReadManagerAlerts(manager, cooldownID)
+            if type(alerts) ~= "table" then
+                return false, summary, readReason or "read_failed"
+            end
+        end
+        if not containsTarget then
+            return false, summary, "invalid_equivalent_cooldown"
+        end
+        if operation.kind == "set" then
+            local path = Registry and Registry:GetPathForPayload(operation.payload)
+            if not operation.payload or not Registry or not Registry:IsOwnedPayload(operation.payload)
+                or not Registry:IsPayloadAvailable(operation.payload)
+                or type(path) ~= "string" or path == "" then
+                return false, summary, "target_alert_invalid"
+            end
+            local canConfigure, targetAlert = self:CanConfigureSound(
+                operation.cooldownID, operation.eventType, operation.payload
+            )
+            if not canConfigure or type(targetAlert) ~= "table" then
+                return false, summary, targetAlert or "target_alert_invalid"
+            end
+            operation.targetAlert = targetAlert
+        elseif operation.kind ~= "remove" then
+            return false, summary, "invalid_operation"
+        end
+    end
+
+    local cleanupGroups, cleanupReason = self:BuildSoundCleanupGroups(validated)
+    if type(cleanupGroups) ~= "table" then
+        return false, summary, cleanupReason or "cleanup_plan_failed"
+    end
+    local snapshots, snapshotReason = SnapshotCleanupGroups(cleanupGroups)
+    if type(snapshots) ~= "table" then
+        return false, summary, snapshotReason or "snapshot_failed"
+    end
+
+    local hasChanges = false
+    for _, operation in ipairs(validated) do
+        local correct, verifyReason
+        if operation.kind == "set" then
+            correct, verifyReason = VerifySetOperation(manager, operation)
+        else
+            correct, verifyReason = VerifyRemoveOperation(manager, operation)
+        end
+        if not correct then
+            if verifyReason == "read_failed" or verifyReason == "data_not_ready" then
+                return false, summary, verifyReason
+            end
+            hasChanges = true
+        end
+    end
+    if not hasChanges then
         for _, operation in ipairs(validated) do
             if operation.kind == "remove" then
                 store:ClearPendingRemoval(classID, specID, operation.recordKey)
@@ -906,114 +1056,54 @@ function Service:ApplyCDMPlanAndReload(plan, options)
     applyState.lastApplyError = nil
     applyState.errorNeedsReport = false
     applyState.lastApplySummary = summary
-    applyState.plan = CopyApplyPlan(validated)
+    applyState.plan = CopyApplyPlan(validated, false)
 
     self:BeginCDMMutation("qfx_explicit_apply")
-    if type(manager.LockNotifications) == "function"
-        and not ManagerCallSucceeded(manager.LockNotifications, manager) then
+    if not ManagerCallSucceeded(manager.LockNotifications, manager) then
         self:EndCDMMutation()
         SetApplyFailure(store, validated, "lock_failed", false)
         return false, summary, "lock_failed"
     end
 
-    local mutationStarted = false
-    local results = {}
-    local failureReason
-
-    -- Removal phase. Keeping every RemoveAlert ahead of every AddAlert makes the
-    -- mutation boundary deterministic and prevents a later record from seeing a
-    -- partially rebuilt target as its input state.
-    local removedAlerts = {}
-    for _, operation in ipairs(validated) do
-        if operation.changed then
-            local removed = 0
-            for _, alert in ipairs(operation.currentSounds or {}) do
-                local shouldRemove = operation.kind == "set"
-                    or tonumber(GetAlertPayload(alert)) == tonumber(operation.payload)
-                if shouldRemove and not removedAlerts[alert] then
-                    mutationStarted = true
-                    if not ManagerCallSucceeded(manager.RemoveAlert, manager, operation.cooldownID, alert) then
-                        failureReason = "remove_failed"
-                        break
-                    end
-                    removedAlerts[alert] = true
-                    removed = removed + 1
-                end
-            end
-            if failureReason then
-                break
-            end
-            local remainingSounds, remainingTargets = GetEventSounds(
-                manager, operation.cooldownID, operation.eventType, operation.payload
-            )
-            if type(remainingSounds) ~= "table"
-                or (operation.kind == "set" and #remainingSounds ~= 0)
-                or (operation.kind == "remove" and tonumber(remainingTargets) ~= 0) then
-                failureReason = "remove_verify_failed"
-                break
-            end
-            if operation.kind == "remove" then
-                summary.removed = summary.removed + removed
-            end
+    local mutationStarted, failureReason = false, nil
+    for _, group in ipairs(cleanupGroups) do
+        if #(group.alerts or {}) > 0 then
+            mutationStarted = true
         end
+        local removed, removedCount, removeReason = self:RemoveAllSoundAlertsForEvent(
+            manager, group.cooldownID, group.eventType
+        )
+        if not removed then
+            failureReason = removeReason or "cleanup_verify_failed"
+            break
+        end
+        summary.removed = summary.removed + removedCount
     end
 
-    -- Addition phase. Target alerts were created and validated before the
-    -- notification lock, so this phase only performs the already-approved writes.
     if not failureReason then
-        local addedPairs = {}
         for _, operation in ipairs(validated) do
-            local pairKey = SnapshotKey(operation)
-            if operation.kind == "set" and operation.changed and not addedPairs[pairKey] then
+            if operation.kind == "set" then
                 mutationStarted = true
-                if not ManagerCallSucceeded(
-                    manager.AddAlert, manager, operation.cooldownID, operation.alert
+                if not AddAlertSucceeded(
+                    manager, operation.cooldownID, operation.targetAlert
                 ) then
                     failureReason = "add_failed"
                     break
                 end
-                addedPairs[pairKey] = true
             end
         end
     end
-
     if not failureReason then
         for _, operation in ipairs(validated) do
-            local sounds, targetCount = GetEventSounds(
-                manager, operation.cooldownID, operation.eventType, operation.payload
-            )
-            if operation.kind == "set" and (type(sounds) ~= "table" or #sounds ~= 1 or targetCount ~= 1) then
-                failureReason = "add_verify_failed"
-                break
-            elseif operation.kind == "remove" and tonumber(targetCount) ~= 0 then
-                failureReason = "remove_verify_failed"
+            local verified, verifyReason = operation.kind == "set"
+                and VerifySetOperation(manager, operation)
+                or VerifyRemoveOperation(manager, operation)
+            if not verified then
+                failureReason = verifyReason
                 break
             end
         end
     end
-
-    if not failureReason then
-        for _, operation in ipairs(validated) do
-            local result = {
-                success = true,
-                changed = operation.changed == true,
-                operation = operation,
-            }
-            if not operation.changed then
-                summary.alreadyLoaded = summary.alreadyLoaded + 1
-            elseif operation.kind == "set" then
-                local previousCount = #(operation.currentSounds or {})
-                result.mutationKind = previousCount == 0 and "added"
-                    or (previousCount > 1 and "deduplicated" or "replaced")
-                result.duplicateRemoved = result.mutationKind == "deduplicated"
-                    and math.max(0, previousCount - 1) or 0
-                summary[result.mutationKind] = (tonumber(summary[result.mutationKind]) or 0) + 1
-                summary.duplicateRemoved = summary.duplicateRemoved + result.duplicateRemoved
-            end
-            results[#results + 1] = result
-        end
-    end
-
     if not failureReason and not ManagerCallSucceeded(manager.SaveLayouts, manager) then
         failureReason = "save_failed"
     end
@@ -1022,16 +1112,16 @@ function Service:ApplyCDMPlanAndReload(plan, options)
         local rollbackOK = true
         if mutationStarted then
             for _, snapshot in pairs(snapshots) do
-                if not RestoreSoundSnapshots(manager, snapshot.cooldownID, snapshot.eventType, snapshot.sounds) then
+                if not RestoreSnapshot(self, manager, snapshot) then
                     rollbackOK = false
                 end
             end
         end
-        if not rollbackOK then
+        if mutationStarted and not rollbackOK then
             failureReason = "rollback_failed"
         end
         summary.failed = summary.failed + 1
-        self.lastBatchResults = results
+        self.lastBatchResults = {}
         self.lastBatchSummary = summary
         SetApplyFailure(store, validated, failureReason, mutationStarted)
         self:EndCDMMutation()
@@ -1041,10 +1131,24 @@ function Service:ApplyCDMPlanAndReload(plan, options)
         return false, summary, failureReason
     end
 
+    local results = {}
+    for _, operation in ipairs(validated) do
+        results[#results + 1] = {
+            success = true,
+            changed = true,
+            operation = operation,
+            mutationKind = operation.kind == "set" and (operation.action or "replaced") or "removed",
+        }
+        if operation.kind == "set" then
+            local kind = operation.action == "add" and "added"
+                or (operation.action == "deduplicate" and "deduplicated" or "replaced")
+            summary[kind] = (tonumber(summary[kind]) or 0) + 1
+        end
+    end
     self.lastBatchResults = results
     self.lastBatchSummary = summary
-    ReloadNow()
     self:EndCDMMutation()
+    ReloadNow()
     return true, summary, "reload_requested"
 end
 
@@ -1115,8 +1219,9 @@ function Service:ValidateCDMVoiceDraft(draft, _options)
 end
 
 function Service:SaveVoicePresetOnly(cooldownID, eventType, payload, expectedClassID, expectedSpecID, expectedCategory)
-    local record, reason
+    local record, reason, originalRecordKey
     if type(cooldownID) == "table" then
+        originalRecordKey = cooldownID.originalRecordKey
         record, reason = self:ValidateCDMVoiceDraft(cooldownID)
     else
         record, reason = self:BuildCDMVoiceDraft(
@@ -1128,9 +1233,20 @@ function Service:SaveVoicePresetOnly(cooldownID, eventType, payload, expectedCla
         return false, reason or "invalid_record"
     end
     local store = NS.Core and NS.Core.CDMVoicePresetStore
+    local originalRecord = originalRecordKey and store
+        and store:GetEffectiveRecord(record.classID, record.specID, originalRecordKey) or nil
     local recordKey, savedRecord = store and store:SaveAppliedRecord(record)
     if not recordKey then
         return false, savedRecord or "save_failed"
+    end
+    if originalRecordKey and originalRecordKey ~= recordKey and originalRecord then
+        local removed, removeReason = store:RemoveOrDisableRecord(
+            record.classID, record.specID, originalRecordKey,
+            { createPendingRemoval = true }
+        )
+        if not removed then
+            return false, removeReason or "save_failed"
+        end
     end
     local status = "pending"
     local sync = NS.Core and NS.Core.CDMVoicePresetSync
@@ -1299,7 +1415,8 @@ function Service:ParseSavedEntryKey(key)
     }
 end
 
-function Service:DeleteSoundAlertByKey(key)
+function Service:StageSoundAlertRemovalByKey(key, options)
+    options = type(options) == "table" and options or {}
     local parsed = self:ParseSavedEntryKey(key)
     if not parsed then
         return false, "invalid_key"
@@ -1315,21 +1432,24 @@ function Service:DeleteSoundAlertByKey(key)
             return false, "not_found"
         end
         local sync = NS.Core and NS.Core.CDMVoicePresetSync
-        local evaluation = sync and sync:EvaluateRecord(record) or { status = "skillMissing" }
         local snapshot, mutationError = store:RemoveOrDisableRecord(
             parsed.classID,
             parsed.specID,
             parsed.recordKey,
-            { createPendingRemoval = evaluation.hasTargetSound == true }
+            { createPendingRemoval = true }
         )
         if not snapshot then
             return false, mutationError or "delete_failed"
         end
         self:RefreshRuntimeData("preset_deleted_local")
-        if sync and type(sync.ScheduleEvaluation) == "function" then
+        if options.scheduleEvaluation ~= false
+            and sync and type(sync.ScheduleEvaluation) == "function" then
             sync:ScheduleEvaluation("preset_deleted_local")
         end
-        return true, snapshot.pendingRemoval and "pending_removal" or "local_deleted"
+        return true,
+            snapshot.pendingRemoval and "pending_removal" or "local_deleted",
+            parsed.recordKey,
+            snapshot
     end
 
     local category = self:FindCategoryForCooldown(parsed.cooldownID)
@@ -1345,10 +1465,12 @@ function Service:DeleteSoundAlertByKey(key)
             parsed.eventType
         )
     end
+    local snapshot
     if store and recordKey then
         local existing = store:GetEffectiveRecord(parsed.classID, parsed.specID, recordKey)
         if existing then
-            local snapshot, reason = store:RemoveOrDisableRecord(
+            local reason
+            snapshot, reason = store:RemoveOrDisableRecord(
                 parsed.classID,
                 parsed.specID,
                 recordKey,
@@ -1357,32 +1479,71 @@ function Service:DeleteSoundAlertByKey(key)
             if not snapshot then
                 return false, reason or "delete_failed"
             end
-        elseif info and category and Registry then
-            local voice = Registry:GetItemForPayload(parsed.payload)
-            if voice then
-                store:SetPendingRemoval({
-                    classID = parsed.classID,
-                    specID = parsed.specID,
-                    category = category,
-                    spellID = info.spellID,
-                    eventKey = store:EventTypeToKey(parsed.eventType),
-                    eventTypeHint = parsed.eventType,
-                    voiceIdentity = voice.identity,
-                    voiceName = voice.name,
-                    voicePath = voice.path,
-                    payloadHint = parsed.payload,
-                    cooldownIDHint = parsed.cooldownID,
-                    source = "user",
-                })
-            end
+        elseif info and category then
+            local pendingKey = store:SetPendingRemoval({
+                classID = parsed.classID,
+                specID = parsed.specID,
+                category = category,
+                spellID = info.spellID,
+                eventKey = store:EventTypeToKey(parsed.eventType),
+                eventTypeHint = parsed.eventType,
+                cooldownIDHint = parsed.cooldownID,
+                source = "user",
+            })
+            recordKey = pendingKey or recordKey
         end
+    end
+    if not store or not recordKey
+        or not store:GetPendingRemoval(parsed.classID, parsed.specID, recordKey) then
+        return false, "delete_failed"
     end
     self:RefreshRuntimeData("preset_deleted_local")
     local sync = NS.Core and NS.Core.CDMVoicePresetSync
-    if sync and type(sync.ScheduleEvaluation) == "function" then
+    if options.scheduleEvaluation ~= false
+        and sync and type(sync.ScheduleEvaluation) == "function" then
         sync:ScheduleEvaluation("preset_deleted_local")
     end
-    return true, "pending_removal"
+    return true, "pending_removal", recordKey, snapshot
+end
+
+function Service:DeleteSoundAlertByKeyLocalOnly(key)
+    return self:StageSoundAlertRemovalByKey(key)
+end
+
+function Service:DeleteSoundAlertByKey(key)
+    if IsInCombat() then
+        return false, "combat"
+    end
+    local staged, stageReason, recordKey, snapshot = self:StageSoundAlertRemovalByKey(
+        key,
+        { scheduleEvaluation = false }
+    )
+    if not staged then
+        return false, stageReason
+    end
+    if stageReason ~= "pending_removal" then
+        return true, "deleted"
+    end
+
+    local store = NS.Core and NS.Core.CDMVoicePresetStore
+    local sync = NS.Core and NS.Core.CDMVoicePresetSync
+    if not sync or type(sync.ApplyPendingRemovalByKey) ~= "function" then
+        if snapshot and store and type(store.RestoreRecordMutation) == "function" then
+            store:RestoreRecordMutation(snapshot)
+        end
+        self:RefreshRuntimeData("preset_delete_rollback")
+        return false, "not_available"
+    end
+
+    local applied, summary, applyReason = sync:ApplyPendingRemovalByKey(recordKey)
+    if not applied then
+        if snapshot and store and type(store.RestoreRecordMutation) == "function" then
+            store:RestoreRecordMutation(snapshot)
+        end
+        self:RefreshRuntimeData("preset_delete_rollback")
+        return false, applyReason or "delete_failed"
+    end
+    return true, applyReason or "deleted", summary
 end
 
 function Service:GetLastCategory()

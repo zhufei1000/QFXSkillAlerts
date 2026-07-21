@@ -226,14 +226,37 @@ function Store:GetPendingRemoval(classID, specID, recordKey)
 end
 
 function Store:SetPendingRemoval(record)
-    local sanitized = self:SanitizeRecord(record, record and record.source or "user")
-    if not sanitized then
+    record = type(record) == "table" and record or {}
+    local classID = tonumber(record.classID)
+    local specID = tonumber(record.specID)
+    local category = Trim(record.category)
+    local spellID = tonumber(record.spellID)
+    local eventKey = Trim(record.eventKey):upper()
+    local eventType = tonumber(record.eventTypeHint) or tonumber(record.eventType)
+    if eventKey == "" then
+        eventKey = self:EventTypeToKey(eventType)
+    end
+    eventType = self:EventKeyToType(eventKey, eventType)
+    local recordKey = self:BuildRecordKey(category, spellID, eventKey)
+    if not classID or classID <= 0 or classID ~= math.floor(classID)
+        or not specID or specID <= 0 or specID ~= math.floor(specID)
+        or not recordKey or not eventType or eventType ~= math.floor(eventType) then
         return nil, "invalid_record"
     end
-    local tombstone = CopyRecord(sanitized)
-    tombstone.createdAt = tonumber(record and record.createdAt)
+    local tombstone = {
+        version = 1,
+        classID = math.floor(classID),
+        specID = math.floor(specID),
+        category = category,
+        spellID = math.floor(spellID),
+        eventKey = eventKey,
+        eventTypeHint = math.floor(eventType),
+        cooldownIDHint = tonumber(record.cooldownIDHint) or tonumber(record.cooldownID),
+        recordKey = recordKey,
+    }
+    tombstone.createdAt = tonumber(record.createdAt)
         or (type(time) == "function" and time() or 0)
-    tombstone.enabled = nil
+    tombstone.source = Trim(record.source or "user")
     local scope = EnsureScope(
         EnsureDatabase().cdmVoicePendingRemovals,
         tombstone.classID,

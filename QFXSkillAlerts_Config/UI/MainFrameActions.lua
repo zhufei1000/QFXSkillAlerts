@@ -160,7 +160,8 @@ local function EnsureCDMDeletePopup()
                     state.selectedKey = nil
                     state.entryType = "cooldown"
                 end
-                print("[QFX-SA] " .. L(reason == "pending_removal" and "CDM_DELETE_PENDING" or "CDM_DELETED"))
+                print("[QFX-SA] " .. L(reason == "reload_requested"
+                    and "CDM_DELETE_APPLYING" or "CDM_DELETED"))
             else
                 local message = reason == "combat" and L("CDM_COMBAT_BLOCKED") or L("CDM_DELETE_FAILED")
                 print("[QFX-SA] " .. message)

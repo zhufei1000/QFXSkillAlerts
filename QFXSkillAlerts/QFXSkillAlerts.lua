@@ -786,10 +786,10 @@ local function RebuildBloodlustConfig()
     return false
 end
 
-local function HandleBloodlustAura(unit)
+local function HandleBloodlustAura(unit, updateInfo)
     local bloodlust = GetBloodlust()
     if bloodlust and type(bloodlust.HandleUnitAura) == "function" then
-        return bloodlust:HandleUnitAura(unit, GetNotifier())
+        return bloodlust:HandleUnitAura(unit, GetNotifier(), updateInfo)
     end
     return false
 end
@@ -1135,6 +1135,9 @@ local InstalledAPI = PublicAPI:Install({
             return NS.Core.CDMVoicePresetSync:ApplyCurrentDraftAndReload(draft)
         end,
         SaveCDMVoicePresetOnly = function(cooldownID, eventType, payload, classID, specID, category)
+            if type(cooldownID) == "table" then
+                return NS.Core.CDMVoiceService:SaveVoicePresetOnly(cooldownID)
+            end
             return NS.Core.CDMVoiceService:SaveVoicePresetOnly(
                 cooldownID, eventType, payload, classID, specID, category
             )
@@ -1157,7 +1160,7 @@ local InstalledAPI = PublicAPI:Install({
             return NS.Core.CDMVoiceService:DeleteSoundAlertByKey(key)
         end,
         DeleteCDMVoiceEntryLocalOnly = function(key)
-            return NS.Core.CDMVoiceService:DeleteSoundAlertByKey(key)
+            return NS.Core.CDMVoiceService:DeleteSoundAlertByKeyLocalOnly(key)
         end,
         ParseCDMVoiceSavedKey = function(key)
             return NS.Core.CDMVoiceService:ParseSavedEntryKey(key)

@@ -195,6 +195,7 @@ function Controller:CheckScopeChanged()
             row.selectedEvent = nil
             row.selectedPayload = nil
             row.selectedPath = nil
+            row.originalRecordKey = nil
         end
     end
     return changed
@@ -275,6 +276,7 @@ function Controller:RefreshRowSelection(row, requestedPayload)
                 and tonumber(entry.alertEvent) == eventType then
                 payload = tonumber(entry.voicePayload)
                 row.recordKey = entry.recordKey
+                row.originalRecordKey = row.originalRecordKey or entry.recordKey
                 break
             end
         end
@@ -284,8 +286,11 @@ function Controller:RefreshRowSelection(row, requestedPayload)
     end
     payload = payload or 0
 
-    local voiceItems = { { value = 0, text = L("CDM_SELECT_VOICE") } }
-    local hasRequested = payload == 0
+    -- Keep the empty state as display-only placeholder text. It must not be a
+    -- selectable menu item because selecting it creates an invalid dirty draft
+    -- that can block Apply All.
+    local voiceItems = {}
+    local hasRequested = false
     local registryItems = self:GetRegistryItems()
     for _, item in ipairs(registryItems) do
         voiceItems[#voiceItems + 1] = { value = item.payload, text = item.name }
@@ -392,6 +397,7 @@ function Controller:BuildRowDraft(row)
         payload = tonumber(row.selectedPayload),
         classID = tonumber(self.openedClassID),
         specID = tonumber(self.openedSpecID),
+        originalRecordKey = row.originalRecordKey or row.recordKey,
     }
 end
 
@@ -401,8 +407,17 @@ function Controller:MarkRowDirty(row)
         return
     end
     self.dirtyDrafts = self.dirtyDrafts or {}
-    self.dirtyDrafts[DraftKey(draft.category, draft.cooldownID)] = draft
+    local draftKey = DraftKey(draft.category, draft.cooldownID)
+    if not tonumber(draft.payload) or tonumber(draft.payload) == 0 then
+        -- An unconfigured row is not an actionable draft. This also recovers
+        -- rows left empty by an event change without poisoning the whole batch.
+        self.dirtyDrafts[draftKey] = nil
+        row.dirty = false
+        return false
+    end
+    self.dirtyDrafts[draftKey] = draft
     row.dirty = true
+    return true
 end
 
 function Controller:GetDirtyDraft(category, cooldownID)
@@ -445,19 +460,13 @@ function Controller:SaveRow(row)
         self:SetStatus(L("CDM_SAVE_FAILED"), { 1, 0.25, 0.25 })
         return false
     end
-    local ok, recordKeyOrReason, syncState = save(
-        row.cooldownInfo.cooldownID,
-        row.selectedEvent,
-        row.selectedPayload,
-        self.openedClassID,
-        self.openedSpecID,
-        self.category
-    )
+    local ok, recordKeyOrReason, syncState = save(self:BuildRowDraft(row))
     if not ok then
         self:SetStatus(L(ERROR_KEYS[recordKeyOrReason] or "CDM_SAVE_FAILED"), { 1, 0.25, 0.25 })
         return false
     end
     row.recordKey = recordKeyOrReason
+    row.originalRecordKey = recordKeyOrReason
     self:ClearDirtyDraft(row)
     if syncState == "loaded" then
         row.hint:SetText(L("CDM_STATUS_APPLIED"))
@@ -492,6 +501,7 @@ function Controller:ApplyRow(row)
         return false
     end
     row.recordKey = recordKey or row.recordKey
+    row.originalRecordKey = row.recordKey
     self:ClearDirtyDraft(row)
     if reason == "already_applied" or reason == "no_changes" then
         self:SetStatus(L("CDM_SAVE_ALREADY_APPLIED"), { 0.2, 1, 0.25 })

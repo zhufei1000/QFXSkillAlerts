@@ -10,6 +10,10 @@ local CONST = NS.Constants or {}
 local EXHAUSTION_IDS = CONST.EXHAUSTION_IDS or { 57723, 57724, 80354, 95809, 160455, 207400, 264689, 390435 }
 local EXHAUSTION_DURATION = CONST.EXHAUSTION_DURATION or 600
 local FRESH_WINDOW = CONST.FRESH_WINDOW or 5
+local EXHAUSTION_ID_SET = {}
+for _, spellID in ipairs(EXHAUSTION_IDS) do
+    EXHAUSTION_ID_SET[tonumber(spellID)] = true
+end
 
 local customSoundPaths = {}
 local runtimeConfig = {
@@ -133,8 +137,56 @@ function Bloodlust:CheckExhaustionFresh()
     return false, nil
 end
 
-function Bloodlust:HandleUnitAura(unit, notifier)
+local function GetReadableAuraSpellID(aura)
+    if type(aura) ~= "table" then
+        return nil, true
+    end
+    local ok, spellID = pcall(function()
+        return tonumber(aura.spellId or aura.spellID)
+    end)
+    return ok and spellID or nil, ok
+end
+
+function Bloodlust:UpdateMayContainExhaustion(updateInfo)
+    if type(updateInfo) ~= "table" or updateInfo.isFullUpdate == true then
+        return true
+    end
+
+    for _, aura in ipairs(type(updateInfo.addedAuras) == "table" and updateInfo.addedAuras or {}) do
+        local spellID, readable = GetReadableAuraSpellID(aura)
+        if not readable or EXHAUSTION_ID_SET[spellID] then
+            return true
+        end
+    end
+
+    local updated = type(updateInfo.updatedAuraInstanceIDs) == "table"
+        and updateInfo.updatedAuraInstanceIDs or {}
+    if #updated > 0 then
+        if not C_UnitAuras or type(C_UnitAuras.GetAuraDataByAuraInstanceID) ~= "function" then
+            return true
+        end
+        for _, auraInstanceID in ipairs(updated) do
+            local ok, aura = pcall(C_UnitAuras.GetAuraDataByAuraInstanceID, "player", auraInstanceID)
+            if not ok then
+                return true
+            end
+            local spellID, readable = GetReadableAuraSpellID(aura)
+            if not readable or EXHAUSTION_ID_SET[spellID] then
+                return true
+            end
+        end
+    end
+
+    -- Removed auras cannot represent a newly applied exhaustion effect.
+    return false
+end
+
+function Bloodlust:HandleUnitAura(unit, notifier, updateInfo)
     if unit ~= "player" then
+        return false
+    end
+    local filterOK, mayContainExhaustion = pcall(self.UpdateMayContainExhaustion, self, updateInfo)
+    if filterOK and not mayContainExhaustion then
         return false
     end
 
