@@ -18,6 +18,7 @@ local cooldowns = {}
 local delayedCastSuccess = {}
 local delayedCastToken = 0
 local updateElapsed = 0
+local activeUpdateInterval = UPDATE_INTERVAL_IDLE
 local updating = false
 local callbacks = {}
 local ApplyAlertFields
@@ -392,13 +393,10 @@ end
 
 local function RuntimeOnUpdate(_, elapsed)
     updateElapsed = updateElapsed + elapsed
-    if updateElapsed < UPDATE_INTERVAL_COMBAT then
+    if updateElapsed < activeUpdateInterval then
         return
     end
-    local interval = GetRuntimeUpdateInterval()
-    if updateElapsed < interval then
-        return
-    end
+    local interval = activeUpdateInterval
     updateElapsed = math.min(math.max(0, updateElapsed - interval), interval)
 
     local now = GetTime()
@@ -408,6 +406,7 @@ local function RuntimeOnUpdate(_, elapsed)
             active = true
         end
     end
+    activeUpdateInterval = GetRuntimeUpdateInterval()
     if not active then
         StopUpdate()
     end
@@ -419,6 +418,7 @@ function Runtime:StartUpdate()
     end
     updating = true
     updateElapsed = 0
+    activeUpdateInterval = GetRuntimeUpdateInterval()
     frame:SetScript("OnUpdate", RuntimeOnUpdate)
 end
 

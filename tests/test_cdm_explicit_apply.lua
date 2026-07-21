@@ -37,6 +37,7 @@ local alertsByCooldown = {}
 local calls = {}
 local failNextAdd = false
 local failNextRead = false
+local failNextSave = false
 
 local function PushCall(name)
     calls[#calls + 1] = name
@@ -55,11 +56,11 @@ function manager:AddAlert(cooldownID, alert)
     PushCall("add:" .. tostring(cooldownID))
     if failNextAdd then
         failNextAdd = false
-        return false
+        return 1
     end
     local alerts = self:GetAlerts(cooldownID)
     alerts[#alerts + 1] = alert
-    return true
+    return 0
 end
 function manager:RemoveAlert(cooldownID, alert)
     PushCall("remove:" .. tostring(cooldownID))
@@ -67,7 +68,7 @@ function manager:RemoveAlert(cooldownID, alert)
     for index, candidate in ipairs(alerts) do
         if candidate == alert then
             table.remove(alerts, index)
-            return true
+            return nil
         end
     end
     return false
@@ -82,16 +83,23 @@ function manager:UnlockNotifications()
 end
 function manager:SaveLayouts()
     PushCall("save")
+    if failNextSave then
+        failNextSave = false
+        return false
+    end
     return true
 end
 
 local cooldownInfo = {
-    [101] = { category = 1, spellID = 1001, isKnown = true },
+    [101] = { category = 1, spellID = 1001, linkedSpellIDs = { 1003 }, isKnown = true },
     [102] = { category = 1, spellID = 1002, isKnown = true },
+    [103] = { category = 1, spellID = 1003, isKnown = true },
 }
+local providerCategoryCalls = 0
 local provider = {}
 function provider:GetOrderedCooldownIDsForCategory(category)
-    return category == 1 and { 101, 102 } or {}
+    providerCategoryCalls = providerCategoryCalls + 1
+    return category == 1 and { 101, 102, 103 } or {}
 end
 function provider:GetCooldownInfoForID(cooldownID)
     return cooldownInfo[cooldownID]
@@ -167,6 +175,7 @@ dofile("QFXSkillAlerts/Core/CDMVoicePresetSync.lua")
 local Store = QFXSkillAlertsNS.Core.CDMVoicePresetStore
 local Service = QFXSkillAlertsNS.Core.CDMVoiceService
 local Sync = QFXSkillAlertsNS.Core.CDMVoicePresetSync
+Assert(QFXSkillAlertsDB.cdmVoiceAppliedTargets == nil, "applied-target history must not be created")
 
 local function ResetCalls()
     calls = {}
@@ -205,12 +214,33 @@ local function Draft(cooldownID, payload)
     }
 end
 
+local equivalentProbe = Service:BuildCDMVoiceDraft(101, EVENT_AVAILABLE, PAYLOAD_A, 8, 62, "essential")
+local equivalentCooldowns = Sync:FindEquivalentCooldownsForRecord(
+    equivalentProbe,
+    Service:GetCooldownInfo(101)
+)
+Equal(equivalentCooldowns[1].cooldownID, 101, "preferred cooldown should be first")
+Equal(#equivalentCooldowns, 2, "linked spell identifiers should find the equivalent cooldown")
+Equal(equivalentCooldowns[2].cooldownID, 103, "linked equivalent cooldown should be included")
+
 -- Local Save never touches LayoutManager and reports pending when CDM differs.
 ResetCalls()
 local saved, recordKey, status = Service:SaveVoicePresetOnly(Draft(101, PAYLOAD_A))
 Assert(saved, "local save should succeed")
 Equal(status, "pending", "local save should report pending")
 Equal(#calls, 0, "local save must not call LayoutManager or reload")
+
+-- A multi-record pending evaluation enumerates the CDM provider once per
+-- category for the whole plan, not once per record.
+providerCategoryCalls = 0
+local catalogRecord = Store:GetEffectiveRecord(8, 62, recordKey)
+Assert(catalogRecord, "catalog test requires the saved record")
+Sync:BuildPendingPlan({ catalogRecord, catalogRecord }, {})
+Equal(
+    providerCategoryCalls,
+    #Service:GetCategories(),
+    "pending plan should reuse one cooldown catalog across records"
+)
 
 -- Row Apply validates, saves the current draft, applies, saves once, never unlocks,
 -- and requests exactly one immediate reload.
@@ -246,6 +276,12 @@ alertsByCooldown[101] = {
     { SOUND, EVENT_AVAILABLE, 702 },
     { SOUND, EVENT_AVAILABLE, 703 },
 }
+alertsByCooldown[102] = { { SOUND, EVENT_AVAILABLE, PAYLOAD_A } }
+alertsByCooldown[103] = {
+    { VISUAL, EVENT_AVAILABLE, 704 },
+    { SOUND, EVENT_OTHER, 705 },
+    { SOUND, EVENT_AVAILABLE, PAYLOAD_A },
+}
 ResetCalls()
 local replaced = Sync:ApplyCurrentDraftAndReload(Draft(101, PAYLOAD_B))
 Assert(replaced, "replacement apply should succeed")
@@ -253,32 +289,143 @@ Equal(CountAlerts(101, SOUND, EVENT_AVAILABLE, PAYLOAD_B), 1, "replacement shoul
 Equal(CountAlerts(101, SOUND, EVENT_AVAILABLE), 1, "replacement should remove all same-event sounds")
 Equal(CountAlerts(101, VISUAL, EVENT_AVAILABLE), 1, "replacement must preserve visual alerts")
 Equal(CountAlerts(101, SOUND, EVENT_OTHER), 1, "replacement must preserve other events")
+Equal(CountAlerts(103, SOUND, EVENT_AVAILABLE), 0, "replacement should clear equivalent cooldown sounds")
+Equal(CountAlerts(103, VISUAL, EVENT_AVAILABLE), 1, "equivalent cleanup must preserve visuals")
+Equal(CountAlerts(103, SOUND, EVENT_OTHER), 1, "equivalent cleanup must preserve other events")
+Equal(CountAlerts(102, SOUND, EVENT_AVAILABLE, PAYLOAD_A), 1, "another skill using the same payload must be preserved")
 Equal(CountCalls("save"), 1, "replacement should save once")
 Equal(CountCalls("reload"), 1, "replacement should reload once")
 Equal(CountCalls("unlock"), 0, "replacement must not unlock")
 Assert(Sync:VerifyPostReloadApply(), "replacement should verify after reload")
 
--- Deleting a saved row is local-only and creates a tombstone. Explicit Apply All
--- removes only that payload, then verification clears the tombstone.
+-- A target that is correct on the main cooldown is still pending when an
+-- equivalent cooldown retains an old same-event sound.
+alertsByCooldown[103][#alertsByCooldown[103] + 1] = { SOUND, EVENT_AVAILABLE, PAYLOAD_A }
+local duplicateEvaluation = Sync:EvaluateRecord(Store:GetEffectiveRecord(8, 62, recordKey))
+Equal(duplicateEvaluation.status, "pending", "equivalent old sound should make the record pending")
+Equal(
+    duplicateEvaluation.pendingReason,
+    "duplicate_equivalent_cooldown_sound",
+    "equivalent old sound should report the dedicated pending reason"
+)
+ResetCalls()
+Assert(Sync:ApplyCurrentDraftAndReload(Draft(101, PAYLOAD_B)), "equivalent old sound should be repaired")
+Equal(CountAlerts(103, SOUND, EVENT_AVAILABLE), 0, "repair should clear equivalent old sound")
+
+-- Post-reload verification re-resolves every equivalent cooldown and rejects a
+-- sound that reappears outside the main target.
+alertsByCooldown[103][#alertsByCooldown[103] + 1] = { SOUND, EVENT_AVAILABLE, PAYLOAD_A }
+local verified, verifyReason = Sync:VerifyPostReloadApply()
+Assert(not verified, "post-reload verification should reject an equivalent duplicate")
+Equal(
+    verifyReason,
+    "post_reload_duplicate_sound_remaining",
+    "post-reload duplicate should persist the expected failure reason"
+)
+ResetCalls()
+Assert(Sync:ApplyCurrentDraftAndReload(Draft(101, PAYLOAD_B)), "explicit reapply should repair post-reload failure")
+Assert(Sync:VerifyPostReloadApply(), "repaired equivalent set should verify")
+
+-- Manual deletion immediately removes every same-event Sound from all equivalent
+-- cooldowns, saves once, and does not reload. The synchronous verification clears
+-- the temporary tombstone before returning.
+alertsByCooldown[103][#alertsByCooldown[103] + 1] = { SOUND, EVENT_AVAILABLE, 900 }
+alertsByCooldown[103][#alertsByCooldown[103] + 1] = { SOUND, EVENT_AVAILABLE, 901 }
 ResetCalls()
 local deleted, deleteReason = Service:DeleteSoundAlertByKey(
     "cdmpreset:8:62:essential:1001:AVAILABLE"
 )
 Assert(deleted, "saved entry deletion should succeed")
-Equal(deleteReason, "pending_removal", "applied deletion should create a tombstone")
-Equal(#calls, 0, "local deletion must not touch LayoutManager or reload")
-Assert(Store:GetPendingRemoval(8, 62, recordKey), "pending removal should be persisted")
-ResetCalls()
-local removed = Sync:ApplyAllPendingCurrentSpecAndReload("test_remove")
-Assert(removed, "pending removal apply should succeed")
+Equal(deleteReason, "deleted", "manual deletion should apply immediately")
 Equal(CountAlerts(101, SOUND, EVENT_AVAILABLE, PAYLOAD_B), 0, "target payload should be removed")
-Equal(CountAlerts(101, VISUAL, EVENT_AVAILABLE), 1, "pending removal must preserve visual alerts")
-Equal(CountAlerts(101, SOUND, EVENT_OTHER), 1, "pending removal must preserve other events")
-Equal(CountCalls("save"), 1, "pending removal batch should save once")
-Equal(CountCalls("reload"), 1, "pending removal batch should reload once")
-Assert(Store:GetPendingRemoval(8, 62, recordKey), "tombstone should remain until post-reload verification")
-Assert(Sync:VerifyPostReloadApply(), "pending removal should verify")
-Assert(not Store:GetPendingRemoval(8, 62, recordKey), "verification should clear the tombstone")
+Equal(CountAlerts(103, SOUND, EVENT_AVAILABLE), 0, "manual deletion should clear equivalent sounds")
+Equal(CountAlerts(101, VISUAL, EVENT_AVAILABLE), 1, "manual deletion must preserve visual alerts")
+Equal(CountAlerts(101, SOUND, EVENT_OTHER), 1, "manual deletion must preserve other events")
+Equal(CountCalls("save"), 1, "manual deletion should save once")
+Equal(CountCalls("reload"), 0, "manual deletion must not reload")
+Equal(CountCalls("lock"), 0, "manual deletion must not leave notifications locked")
+Assert(not Store:GetPendingRemoval(8, 62, recordKey), "manual deletion should clear its tombstone")
+
+-- The explicitly named compatibility API still supports local-only staging for
+-- import/automation callers that intentionally want a later batch apply.
+Assert(Service:SaveVoicePresetOnly(Draft(101, PAYLOAD_A)))
+alertsByCooldown[101] = { { SOUND, EVENT_AVAILABLE, PAYLOAD_A } }
+ResetCalls()
+local staged, stagedReason = Service:DeleteSoundAlertByKeyLocalOnly(
+    "cdmpreset:8:62:essential:1001:AVAILABLE"
+)
+Assert(staged, "local-only deletion staging should succeed")
+Equal(stagedReason, "pending_removal", "local-only API should return pending removal")
+Equal(#calls, 0, "local-only deletion must not touch LayoutManager or reload")
+Assert(Store:GetPendingRemoval(8, 62, recordKey), "local-only tombstone should persist")
+local tombstone = Store:GetPendingRemoval(8, 62, recordKey)
+Assert(tombstone.payloadHint == nil, "pending-removal tombstone must not persist the old payload")
+Assert(tombstone.voicePath == nil, "pending-removal tombstone must not persist the old voice path")
+ResetCalls()
+Assert(Sync:ApplyAllPendingCurrentSpecAndReload("test_staged_remove"), "staged removal should apply")
+Equal(CountAlerts(101, SOUND, EVENT_AVAILABLE), 0, "staged removal should clear the sound")
+Equal(CountCalls("save"), 1, "staged removal should save once")
+Equal(CountCalls("reload"), 0, "removal-only batch must not reload")
+Equal(CountCalls("lock"), 0, "removal-only batch must not lock notifications")
+Assert(not Store:GetPendingRemoval(8, 62, recordKey), "removal-only batch should clear its tombstone")
+
+-- If immediate deletion cannot even build a readable CDM plan, the local record
+-- is restored so the user never lands in a half-deleted state.
+Assert(Service:SaveVoicePresetOnly(Draft(101, PAYLOAD_A)))
+alertsByCooldown[101] = { { SOUND, EVENT_AVAILABLE, PAYLOAD_A } }
+failNextRead = true
+ResetCalls()
+local failedDelete, failedDeleteReason = Service:DeleteSoundAlertByKey(
+    "cdmpreset:8:62:essential:1001:AVAILABLE"
+)
+Assert(not failedDelete, "unreadable CDM data should fail immediate deletion")
+Equal(failedDeleteReason, "delete_failed", "failed deletion should report a stable reason")
+Assert(Store:GetEffectiveRecord(8, 62, recordKey), "failed deletion should restore the local record")
+Assert(not Store:GetPendingRemoval(8, 62, recordKey), "failed deletion should remove its tombstone")
+Equal(CountAlerts(101, SOUND, EVENT_AVAILABLE, PAYLOAD_A), 1, "failed deletion should preserve CDM")
+Equal(#calls, 0, "failed deletion prevalidation must not mutate or reload")
+
+-- A save failure after removal restores both the runtime alert and local record,
+-- without reloading or leaving a pending tombstone.
+failNextSave = true
+ResetCalls()
+local unsavedDelete, unsavedDeleteReason = Service:DeleteSoundAlertByKey(
+    "cdmpreset:8:62:essential:1001:AVAILABLE"
+)
+Assert(not unsavedDelete, "SaveLayouts failure should fail immediate deletion")
+Equal(unsavedDeleteReason, "save_failed", "save failure should be reported")
+Assert(Store:GetEffectiveRecord(8, 62, recordKey), "save failure should restore the local record")
+Assert(not Store:GetPendingRemoval(8, 62, recordKey), "save failure should clear its tombstone")
+Equal(CountAlerts(101, SOUND, EVENT_AVAILABLE, PAYLOAD_A), 1, "save failure should restore CDM")
+Equal(CountCalls("save"), 1, "failed deletion should attempt one save")
+Equal(CountCalls("reload"), 0, "failed deletion must not reload")
+
+-- Changing the record key keeps the old logical skill/event as a payload-free
+-- tombstone and applies old cleanup plus the new target in one transaction.
+local oldKey102 = "essential:1002:AVAILABLE"
+Assert(Service:SaveVoicePresetOnly(Draft(102, PAYLOAD_A)))
+alertsByCooldown[102] = { { SOUND, EVENT_AVAILABLE, PAYLOAD_A } }
+ResetCalls()
+local keyChanged, _, keyChangeReason, newKey102 = Sync:ApplyCurrentDraftAndReload({
+    cooldownID = 102,
+    eventType = EVENT_OTHER,
+    payload = PAYLOAD_B,
+    classID = 8,
+    specID = 62,
+    category = "essential",
+    originalRecordKey = oldKey102,
+})
+Assert(keyChanged, "record-key change should apply")
+Equal(keyChangeReason, "reload_requested", "record-key change should request one reload")
+Equal(newKey102, "essential:1002:ON_COOLDOWN", "new event should produce the new record key")
+Assert(not Store:GetEffectiveRecord(8, 62, oldKey102), "old record key must no longer be effective")
+Assert(Store:GetPendingRemoval(8, 62, oldKey102), "old record key should create a tombstone")
+Equal(CountAlerts(102, SOUND, EVENT_AVAILABLE), 0, "old record event should be cleared")
+Equal(CountAlerts(102, SOUND, EVENT_OTHER, PAYLOAD_B), 1, "new record event should contain one target")
+Equal(CountCalls("save"), 1, "record-key change should save layouts once")
+Equal(CountCalls("reload"), 1, "record-key change should reload once")
+Assert(Sync:VerifyPostReloadApply(), "record-key change should verify after reload")
+Assert(not Store:GetPendingRemoval(8, 62, oldKey102), "verified old-key tombstone should clear")
 
 -- Import is store-only and re-saving a record cancels its matching tombstone.
 local importedRecord = {
@@ -342,6 +489,30 @@ Equal(CountCalls("reload"), 1, "batch should reload once")
 Equal(CountCalls("unlock"), 0, "batch must not unlock notifications")
 Assert(Sync:VerifyPostReloadApply(), "batch should verify after reload")
 
+-- Two local targets that claim the same equivalent cooldown/event pair but use
+-- different payloads fail prevalidation before locking or mutating CDM.
+local conflictPlan = {
+    {
+        kind = "set", classID = 8, specID = 62, recordKey = "conflict:a",
+        category = "essential", spellID = 1001, eventKey = "AVAILABLE",
+        cooldownID = 101, eventType = EVENT_AVAILABLE, payload = PAYLOAD_A,
+        equivalentCooldownIDs = { 101, 103 },
+        targetAlert = { SOUND, EVENT_AVAILABLE, PAYLOAD_A },
+    },
+    {
+        kind = "set", classID = 8, specID = 62, recordKey = "conflict:b",
+        category = "essential", spellID = 1003, eventKey = "AVAILABLE",
+        cooldownID = 103, eventType = EVENT_AVAILABLE, payload = PAYLOAD_B,
+        equivalentCooldownIDs = { 101, 103 },
+        targetAlert = { SOUND, EVENT_AVAILABLE, PAYLOAD_B },
+    },
+}
+ResetCalls()
+local conflictOK, _, conflictReason = Service:ApplyCDMPlanAndReload(conflictPlan, {})
+Assert(not conflictOK, "conflicting local targets should fail")
+Equal(conflictReason, "conflicting_local_targets", "conflict should use the stable failure reason")
+Equal(#calls, 0, "conflict prevalidation must not lock, mutate, save, or reload")
+
 -- Dirty rows are validated as a group. One invalid row prevents every dirty-row
 -- save and every LayoutManager call.
 local beforeDirtyBatch = Store:GetEffectiveRecord(8, 62, "essential:1001:AVAILABLE")
@@ -374,5 +545,91 @@ Equal(Store:GetEffectiveRecord(8, 62, recordKey).voiceIdentity, "voice:b", "late
 ResetCalls()
 Assert(Sync:EvaluateCurrentSpec("after_failure"), "post-failure evaluation should run")
 Equal(#calls, 0, "post-failure evaluation must not auto-retry or reload")
+
+-- Debounced event bursts retain a scope prompt even when ordinary talent/spell
+-- refresh events arrive after the specialization event.
+local timerCallbacks = {}
+C_Timer = {
+    After = function(_, callback)
+        timerCallbacks[#timerCallbacks + 1] = callback
+    end,
+}
+local originalEvaluateCurrentSpec = Sync.EvaluateCurrentSpec
+local scheduledEvaluations = {}
+local evaluationAvailable = true
+Sync.EvaluateCurrentSpec = function(_, reason, options)
+    scheduledEvaluations[#scheduledEvaluations + 1] = {
+        reason = reason,
+        prompt = options and options.prompt,
+        promptKind = options and options.promptKind,
+    }
+    return evaluationAvailable
+end
+Sync.pendingEvaluationRequest = nil
+Sync.scheduleSerial = 0
+Sync.scopeSerial = 10
+Sync.sessionPromptedScopes = { ["scope:8:62"] = true }
+Assert(Sync:ResetPromptForCurrentScope(), "current scope prompt guard should reset")
+Assert(not Sync.sessionPromptedScopes["scope:8:62"],
+    "re-entered specialization should be allowed to prompt again")
+Sync:ScheduleEvaluation("PLAYER_SPECIALIZATION_CHANGED", {
+    prompt = true,
+    promptKind = "scope",
+})
+Sync:ScheduleEvaluation("PLAYER_TALENT_UPDATE", {
+    prompt = false,
+})
+timerCallbacks[1]()
+timerCallbacks[2]()
+Equal(#scheduledEvaluations, 1, "event burst should run one coalesced evaluation")
+Equal(scheduledEvaluations[1].prompt, true, "later refresh must preserve the scope prompt")
+Equal(scheduledEvaluations[1].promptKind, "scope", "coalescing must preserve prompt kind")
+
+-- If CDM is not ready, keep the prompt request and merge it into the next data
+-- event instead of silently losing it.
+timerCallbacks = {}
+scheduledEvaluations = {}
+Sync:AdvanceScope()
+evaluationAvailable = false
+Sync:ScheduleEvaluation("PLAYER_SPECIALIZATION_CHANGED", {
+    prompt = true,
+    promptKind = "scope",
+})
+timerCallbacks[1]()
+Assert(Sync.pendingEvaluationRequest and Sync.pendingEvaluationRequest.prompt,
+    "unavailable CDM data should retain the pending prompt")
+evaluationAvailable = true
+Sync:ScheduleEvaluation("COOLDOWN_VIEWER_DATA_LOADED", {
+    prompt = false,
+})
+timerCallbacks[2]()
+Equal(#scheduledEvaluations, 2, "CDM data event should retry the evaluation")
+Equal(scheduledEvaluations[2].prompt, true, "CDM data retry should restore the prompt")
+
+-- Combat suppresses only the immediate popup. PLAYER_REGEN_ENABLED retries the
+-- retained request with prompting enabled.
+timerCallbacks = {}
+scheduledEvaluations = {}
+local inCombat = true
+InCombatLockdown = function() return inCombat end
+Sync:AdvanceScope()
+Sync:ScheduleEvaluation("PLAYER_SPECIALIZATION_CHANGED", {
+    prompt = true,
+    promptKind = "scope",
+})
+timerCallbacks[1]()
+Equal(scheduledEvaluations[1].prompt, false, "combat evaluation must not show the popup")
+Assert(Sync.pendingEvaluationRequest and Sync.pendingEvaluationRequest.prompt,
+    "combat should retain the pending prompt")
+inCombat = false
+Sync:ScheduleEvaluation("PLAYER_REGEN_ENABLED", {
+    prompt = false,
+})
+timerCallbacks[2]()
+Equal(scheduledEvaluations[2].prompt, true, "leaving combat should retry the popup")
+
+Sync.EvaluateCurrentSpec = originalEvaluateCurrentSpec
+C_Timer = nil
+InCombatLockdown = function() return false end
 
 print("CDM explicit apply regression tests passed")

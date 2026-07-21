@@ -108,16 +108,19 @@ local function RaiseDropdownPopup(popup, dropdown)
     if not popup then
         return
     end
+    local popupStrata = dropdown and dropdown.qfxsaPopupStrata or "TOOLTIP"
+    local blockerLevel = tonumber(dropdown and dropdown.qfxsaPopupFrameLevel) or 9990
     local blocker = GetDropdownBlocker()
-    blocker:SetFrameStrata("TOOLTIP")
-    blocker:SetFrameLevel(9990)
+    blocker:SetFrameStrata(popupStrata)
+    blocker:SetFrameLevel(blockerLevel)
     blocker:Show()
     blocker:Raise()
 
     popup:SetParent(blocker)
-    popup:SetFrameStrata("TOOLTIP")
-    popup:SetFrameLevel((blocker:GetFrameLevel() or 9990) + 10)
+    popup:SetFrameStrata(popupStrata)
+    popup:SetFrameLevel((blocker:GetFrameLevel() or blockerLevel) + 10)
     popup:SetToplevel(true)
+    popup.qfxsaPopupStrata = popupStrata
     popup:Raise()
 end
 
@@ -154,7 +157,7 @@ local function EnsureDropdownRow(popup, index)
     end
 
     row = CreateFrame("Button", nil, popup)
-    row:SetFrameStrata("TOOLTIP")
+    row:SetFrameStrata(popup.qfxsaPopupStrata or "TOOLTIP")
     row:SetFrameLevel((popup:GetFrameLevel() or 1) + 20)
     row:SetSize(120, DROPDOWN_ROW_HEIGHT)
     row:SetPoint("TOPLEFT", popup, "TOPLEFT", DROPDOWN_POPUP_PADDING, -DROPDOWN_POPUP_PADDING - ((index - 1) * DROPDOWN_ROW_HEIGHT))
@@ -528,7 +531,7 @@ local function GetScrollableDropdownPopup()
             row:ClearAllPoints()
             row:SetPoint("TOPLEFT", popup, "TOPLEFT", DROPDOWN_POPUP_PADDING, -DROPDOWN_POPUP_PADDING - ((i - 1) * DROPDOWN_ROW_HEIGHT))
             row:SetSize(math.max(1, rowWidth), DROPDOWN_ROW_HEIGHT)
-            row:SetFrameStrata("TOOLTIP")
+            row:SetFrameStrata(popup.qfxsaPopupStrata or "TOOLTIP")
             row:SetFrameLevel((popup:GetFrameLevel() or 1) + 50 + i)
             row:EnableMouse(true)
             if row.Enable then

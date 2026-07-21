@@ -73,8 +73,8 @@ function EventHub:Dispatch(event, ...)
         local unit, _, spellId = ...
         return Call(handlers, "OnUnitSpellcastSucceeded", unit, spellId)
     elseif event == "UNIT_AURA" then
-        local unit = ...
-        return Call(handlers, "OnUnitAura", unit)
+        local unit, updateInfo = ...
+        return Call(handlers, "OnUnitAura", unit, updateInfo)
     elseif event == "PLAYER_EQUIPMENT_CHANGED" or event == "BAG_UPDATE_DELAYED" then
         return Call(handlers, "OnItemInventoryChanged", event)
     end

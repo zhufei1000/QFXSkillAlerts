@@ -36,6 +36,10 @@ local function CreateRow(frame)
 
     row.voiceDropdown = Widgets:CreateDropdown(row, nil, 260)
     row.voiceDropdown:SetPoint("LEFT", row, "LEFT", 440, 0)
+    -- Keep the searchable voice list above this editor but below WoW's IME
+    -- composition/candidate layer.
+    row.voiceDropdown.qfxsaPopupStrata = "FULLSCREEN_DIALOG"
+    row.voiceDropdown.qfxsaPopupFrameLevel = 260
     Widgets:SetDropdownSearchable(row.voiceDropdown, true, L("CDM_SEARCH_VOICE"))
 
     row.testButton = Widgets:CreateButton(row, L("CDM_TEST"), 62, 30)
@@ -104,6 +108,10 @@ function Rows:Render(frame, cooldowns, pendingEdit)
     for index, info in ipairs(type(cooldowns) == "table" and cooldowns or {}) do
         local row = self:Acquire(frame, index)
         local previousCooldownID = row.cooldownInfo and row.cooldownInfo.cooldownID
+        if tonumber(previousCooldownID) ~= tonumber(info.cooldownID) then
+            row.recordKey = nil
+            row.originalRecordKey = nil
+        end
         row.cooldownInfo = info
         row.testButton:SetText(L("CDM_TEST"))
         row.saveButton:SetText(L("CDM_SAVE"))
@@ -122,6 +130,8 @@ function Rows:Render(frame, cooldowns, pendingEdit)
         if pendingEdit and tonumber(pendingEdit.cooldownID) == tonumber(info.cooldownID) then
             selectedEvent = pendingEdit.eventType
             targetIndex = index
+            row.recordKey = pendingEdit.recordKey
+            row.originalRecordKey = pendingEdit.recordKey
         end
         local validSelection = nil
         for _, item in ipairs(eventItems) do
