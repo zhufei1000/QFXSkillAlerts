@@ -28,6 +28,21 @@ function Refresh:RefreshSavedListOnly(main)
     end
 
     local state = ace:GetState()
+    if tostring(state.entryType or "") == "cdmVoice" and tostring(state.selectedKey or "") ~= "" then
+        local found = false
+        local api = NS.API or {}
+        local entries = type(api.GetCDMVoiceSavedEntries) == "function" and api.GetCDMVoiceSavedEntries() or {}
+        for _, entry in ipairs(type(entries) == "table" and entries or {}) do
+            if tostring(entry.key or "") == tostring(state.selectedKey or "") then
+                found = true
+                break
+            end
+        end
+        if not found then
+            state.selectedKey = nil
+            state.entryType = "cooldown"
+        end
+    end
     if main.summary and type(ace.GetCurrentScopeSummary) == "function" then
         main.summary:SetText(ace:GetCurrentScopeSummary())
     end
@@ -50,7 +65,9 @@ function Refresh:RefreshActionButtons(main)
         main.editBtn:SetEnabled(hasSelected)
     end
     if main.deleteBtn then
-        main.deleteBtn:SetEnabled(hasSelected)
+        local combatBlocked = tostring(state.entryType or "") == "cdmVoice"
+            and type(InCombatLockdown) == "function" and InCombatLockdown() == true
+        main.deleteBtn:SetEnabled(hasSelected and not combatBlocked)
     end
 end
 

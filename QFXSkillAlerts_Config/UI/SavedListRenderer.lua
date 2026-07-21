@@ -147,6 +147,8 @@ local function BuildVirtualItems(state, loadedEntries, unloadedEntries, loadedDi
     end
 
     local function addRow(entry, includeScopeText, isPlaceholder, canDrag, canDrop)
+        canDrag = canDrag == true and entry.canDrag ~= false and entry.isVirtual ~= true
+        canDrop = canDrop == true and entry.isVirtual ~= true
         local height = GetRowHeightForEntry(entry)
         items[#items + 1] = {
             kind = "row",
@@ -221,6 +223,8 @@ local function RenderFullRows(list, state, selectedKey, loadedEntries, unloadedE
     end
 
     local function updateRow(entry, includeScopeText, isPlaceholder, canDrag, canDrop)
+        canDrag = canDrag == true and entry.canDrag ~= false and entry.isVirtual ~= true
+        canDrop = canDrop == true and entry.isVirtual ~= true
         local row = EnsureRow(list, rowIndex)
         local selected, height = false, ROW_HEIGHT
         if SavedListRowRenderer and type(SavedListRowRenderer.UpdateRow) == "function" then

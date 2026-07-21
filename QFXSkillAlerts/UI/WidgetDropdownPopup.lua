@@ -18,6 +18,22 @@ local DROPDOWN_MAX_VISIBLE_ROWS = 10
 local DROPDOWN_POPUP_PADDING = 6
 local DROPDOWN_AUTO_CLOSE_DELAY = 0.20
 
+local function L(key)
+    return type(NS.L) == "function" and NS.L(key) or tostring(key)
+end
+
+local function NormalizeSearchText(value)
+    return tostring(value or ""):match("^%s*(.-)%s*$"):lower()
+end
+
+local function ItemMatches(item, searchText)
+    if searchText == "" then
+        return true
+    end
+    local text = tostring(item and (item.searchText or item.text) or ""):lower()
+    return text:find(searchText, 1, true) ~= nil
+end
+
 local function SelectDropdownValue(dropdown, value, text)
     if not dropdown then
         return
@@ -204,6 +220,36 @@ local function EnsureDropdownRow(popup, index)
     return row
 end
 
+local function CreateInteractivePopupScrollBar(popup)
+    local slider = CreateFrame("Slider", "QFXSkillAlertsNativeDropDownPopupScrollBar", popup)
+    slider:SetOrientation("VERTICAL")
+    slider:SetWidth(16)
+    slider:SetMinMaxValues(0, 0)
+    slider:SetValueStep(1)
+    slider:SetObeyStepOnDrag(false)
+    slider:SetValue(0)
+    slider:EnableMouse(true)
+    slider:SetHitRectInsets(-5, -5, 0, 0)
+    local track = slider:CreateTexture(nil, "BACKGROUND")
+    track:SetAllPoints(slider)
+    track:SetColorTexture(0.08, 0.08, 0.08, 0.9)
+    slider.qfxsaTrack = track
+    local thumb = slider:CreateTexture(nil, "OVERLAY")
+    thumb:SetTexture("Interface\\Buttons\\UI-ScrollBar-Knob")
+    thumb:SetSize(16, 24)
+    slider:SetThumbTexture(thumb)
+    slider.qfxsaThumb = thumb
+    slider:HookScript("OnMouseDown", function()
+        popup.isDraggingScrollBar = true
+        popup.autoCloseAt = nil
+    end)
+    slider:HookScript("OnMouseUp", function()
+        popup.isDraggingScrollBar = false
+        popup.skipMouseUpSelection = true
+    end)
+    return slider
+end
+
 local function GetScrollableDropdownPopup()
     if Widgets._nativeDropdownPopup then
         return Widgets._nativeDropdownPopup
@@ -234,32 +280,25 @@ local function GetScrollableDropdownPopup()
         popup:SetBackdropBorderColor(0.75, 0.75, 0.75, 0.98)
     end
 
-    local scrollBar = ScrollBar and ScrollBar.Create and ScrollBar:Create(popup, "QFXSkillAlertsNativeDropDownPopupScrollBar", {
-        orientation = "VERTICAL",
-        width = 16,
-        minValue = 0,
-        maxValue = 0,
-        valueStep = 1,
-        value = 0,
-        obeyStepOnDrag = false,
-    }) or SafeCreateFrame("Slider", "QFXSkillAlertsNativeDropDownPopupScrollBar", popup, {
-        "UIPanelScrollBarTemplate",
-        "OptionsSliderTemplate",
-        "BackdropTemplate",
-    })
-    if ScrollBar and ScrollBar.ClearInheritedScripts then
-        ScrollBar:ClearInheritedScripts(scrollBar)
-    end
+    local scrollBar = CreateInteractivePopupScrollBar(popup)
     scrollBar:SetPoint("TOPRIGHT", popup, "TOPRIGHT", -6, -18)
     scrollBar:SetPoint("BOTTOMRIGHT", popup, "BOTTOMRIGHT", -6, 18)
-    scrollBar:SetFrameLevel((popup:GetFrameLevel() or 1) + 30)
+    scrollBar:SetFrameLevel((popup:GetFrameLevel() or 1) + 100)
+
+    local function GetDisplayedItems()
+        if type(popup.filteredItems) == "table" then
+            return popup.filteredItems
+        end
+        local owner = popup.owner
+        return owner and owner.qfxsaItems or {}
+    end
 
     local function RenderRows()
         local owner = popup.owner
         if not owner then
             return
         end
-        local items = owner.qfxsaItems or {}
+        local items = GetDisplayedItems()
         local offset = math.floor(tonumber(popup.offset) or 0)
         local visibleRows = tonumber(popup.visibleRows) or 0
         local width = tonumber(popup.rowWidth) or 120
@@ -273,6 +312,7 @@ local function GetScrollableDropdownPopup()
                 if item then
                     row.itemIndex = itemIndex
                     row.itemValue = item.value
+                    row.qfxsaSelectable = item.disabled ~= true
                     row.dropdown = owner
                     row.label:SetText(tostring(item.text or ""))
                     row.label:SetWidth(math.max(1, width - 32))
@@ -302,6 +342,18 @@ local function GetScrollableDropdownPopup()
                         end
                     end
                     row:Show()
+                elseif popup.noResults and itemIndex == 1 then
+                    row.itemIndex = nil
+                    row.itemValue = nil
+                    row.qfxsaSelectable = false
+                    row.dropdown = owner
+                    row.label:SetText(L("SEARCH_NO_RESULTS"))
+                    row.label:SetWidth(math.max(1, width - 32))
+                    row.label:SetTextColor(0.6, 0.6, 0.6, 1)
+                    row.checkBox:Hide()
+                    row.check:Hide()
+                    ApplyDropdownRowHover(row, false)
+                    row:Show()
                 else
                     row:Hide()
                     row.itemIndex = nil
@@ -320,8 +372,8 @@ local function GetScrollableDropdownPopup()
         if not owner then
             return
         end
-        local item = (owner.qfxsaItems or {})[tonumber(itemIndex) or 0]
-        if not item then
+        local item = GetDisplayedItems()[tonumber(itemIndex) or 0]
+        if not item or item.disabled == true then
             return
         end
         if owner.qfxsaMultiSelect then
@@ -334,10 +386,12 @@ local function GetScrollableDropdownPopup()
     end
 
     local function SelectRow(row)
-        if row and row.itemIndex then
+        if row and row.itemIndex and row.qfxsaSelectable ~= false then
             SelectItemByIndex(row.itemIndex)
         end
     end
+
+    local IsCursorInsideFrame
 
     local function GetRowNumberAtCursor(self)
         local cx, cy = GetCursorPosition()
@@ -364,6 +418,9 @@ local function GetScrollableDropdownPopup()
         if button and button ~= "LeftButton" then
             return
         end
+        if popup.isDraggingScrollBar or IsCursorInsideFrame(scrollBar) then
+            return
+        end
         if popup.skipMouseUpSelection then
             popup.skipMouseUpSelection = nil
             return
@@ -385,12 +442,12 @@ local function GetScrollableDropdownPopup()
         for i = 1, (self.visibleRows or 0) do
             local row = self.rows[i]
             if row and row:IsShown() then
-                ApplyDropdownRowHover(row, i == hoverRowNumber)
+                ApplyDropdownRowHover(row, i == hoverRowNumber and row.qfxsaSelectable ~= false)
             end
         end
     end
 
-    local function IsCursorInsideFrame(frame)
+    IsCursorInsideFrame = function(frame)
         if not frame or not frame.IsShown or not frame:IsShown() then
             return false
         end
@@ -408,6 +465,10 @@ local function GetScrollableDropdownPopup()
     local function UpdatePopup(self)
         UpdateHoverFromCursor(self)
         if not self.owner or not self:IsShown() then
+            self.autoCloseAt = nil
+            return
+        end
+        if self.isDraggingScrollBar then
             self.autoCloseAt = nil
             return
         end
@@ -433,6 +494,56 @@ local function GetScrollableDropdownPopup()
         RenderRows()
     end
 
+    local function ConfigureListLayout(resetOffset)
+        local items = GetDisplayedItems()
+        local count = #items
+        local displayCount = math.max(1, count)
+        local width = tonumber(popup.popupWidth) or 120
+        local visibleRows = math.min(displayCount, DROPDOWN_MAX_VISIBLE_ROWS)
+        local height = (visibleRows * DROPDOWN_ROW_HEIGHT) + (DROPDOWN_POPUP_PADDING * 2)
+        local hasScroll = count > visibleRows
+        local rowWidth = width - (hasScroll and 34 or 12)
+        popup:SetSize(width, height)
+        popup.rowWidth = rowWidth
+        popup.visibleRows = visibleRows
+        popup.maxOffset = math.max(0, count - visibleRows)
+        popup.hasScroll = hasScroll
+        scrollBar:SetFrameLevel((popup:GetFrameLevel() or 1) + 100)
+        if hasScroll then
+            scrollBar:Show()
+            scrollBar:SetMinMaxValues(0, popup.maxOffset)
+            scrollBar:SetValueStep(1)
+        else
+            scrollBar:Hide()
+            scrollBar:SetMinMaxValues(0, 0)
+        end
+        for i = 1, visibleRows do
+            local row = EnsureDropdownRow(popup, i)
+            row:ClearAllPoints()
+            row:SetPoint("TOPLEFT", popup, "TOPLEFT", DROPDOWN_POPUP_PADDING, -DROPDOWN_POPUP_PADDING - ((i - 1) * DROPDOWN_ROW_HEIGHT))
+            row:SetSize(math.max(1, rowWidth), DROPDOWN_ROW_HEIGHT)
+            row:SetFrameStrata("TOOLTIP")
+            row:SetFrameLevel((popup:GetFrameLevel() or 1) + 50 + i)
+            row:EnableMouse(true)
+            if row.Enable then row:Enable() end
+        end
+        if resetOffset then SetScroll(0) else SetScroll(popup.offset or 0) end
+    end
+
+    local function UpdateSearch(owner, searchText)
+        if popup.closing or popup.owner ~= owner or not owner or not owner.qfxsaSearchable then
+            return
+        end
+        local normalized = NormalizeSearchText(searchText)
+        local filtered = {}
+        for _, item in ipairs(owner.qfxsaItems or {}) do
+            if ItemMatches(item, normalized) then filtered[#filtered + 1] = item end
+        end
+        popup.filteredItems = filtered
+        popup.noResults = #filtered == 0
+        ConfigureListLayout(true)
+    end
+
     scrollBar:SetScript("OnValueChanged", function(_, value)
         SetScroll(value, true)
     end)
@@ -447,6 +558,7 @@ local function GetScrollableDropdownPopup()
 
     popup:SetScript("OnMouseWheel", OnMouseWheel)
     popup:SetScript("OnMouseUp", function(_, button)
+        if popup.isDraggingScrollBar then return end
         SelectByCursor(button)
     end)
     popup:SetScript("OnUpdate", UpdatePopup)
@@ -462,11 +574,18 @@ local function GetScrollableDropdownPopup()
                 ApplyDropdownRowHover(row, false)
             end
         end
+        local owner = self.owner
+        self.closing = true
+        if owner and type(owner.qfxsaEndSearch) == "function" then owner:qfxsaEndSearch() end
         self.owner = nil
         self.offset = 0
         self.hasScroll = nil
+        self.filteredItems = nil
+        self.noResults = nil
+        self.isDraggingScrollBar = nil
         self.skipMouseUpSelection = nil
         self.autoCloseAt = nil
+        self.closing = nil
         local blocker = Widgets._nativeDropdownBlocker
         if blocker then
             blocker:Hide()
@@ -478,6 +597,9 @@ local function GetScrollableDropdownPopup()
     popup.RenderRows = RenderRows
     popup.SelectRow = SelectRow
     popup.SelectByCursor = SelectByCursor
+    popup.ConfigureListLayout = ConfigureListLayout
+    popup.UpdateSearch = UpdateSearch
+    popup.SelectItemByIndex = SelectItemByIndex
     Widgets._nativeDropdownPopup = popup
     return popup
 end
@@ -487,6 +609,19 @@ function Popup:HideForOwner(dropdown)
     if popup and (not dropdown or popup.owner == dropdown) then
         popup:Hide()
     end
+end
+
+function Popup:UpdateSearch(dropdown, searchText)
+    local popup = Widgets._nativeDropdownPopup
+    if popup and type(popup.UpdateSearch) == "function" then popup.UpdateSearch(dropdown, searchText) end
+end
+
+function Popup:SelectSingleFilteredItem(dropdown)
+    local popup = Widgets._nativeDropdownPopup
+    if not popup or popup.owner ~= dropdown or type(popup.filteredItems) ~= "table" then return false end
+    if #popup.filteredItems ~= 1 or popup.filteredItems[1].disabled == true then return false end
+    popup.SelectItemByIndex(1)
+    return true
 end
 
 function Popup:Show(dropdown)
@@ -507,45 +642,19 @@ function Popup:Show(dropdown)
     end
 
     popup.owner = dropdown
+    popup.filteredItems = dropdown.qfxsaSearchable and {} or nil
+    popup.noResults = nil
     RaiseDropdownPopup(popup, dropdown)
 
     local width = math.max(120, math.floor(tonumber(dropdown.qfxsaOuterWidth) or ((dropdown.GetWidth and dropdown:GetWidth()) or 180)))
-    local visibleRows = math.min(count, DROPDOWN_MAX_VISIBLE_ROWS)
-    local height = (visibleRows * DROPDOWN_ROW_HEIGHT) + (DROPDOWN_POPUP_PADDING * 2)
-    local hasScroll = count > visibleRows
-    local rowWidth = width - (hasScroll and 34 or 12)
-
-    popup:SetSize(width, height)
-    popup.rowWidth = rowWidth
-    popup.visibleRows = visibleRows
-    popup.maxOffset = math.max(0, count - visibleRows)
-    popup.hasScroll = hasScroll
-
-    popup.scrollBar:SetFrameLevel((popup:GetFrameLevel() or 1) + 30)
-    if hasScroll then
-        popup.scrollBar:Show()
-        popup.scrollBar:SetMinMaxValues(0, popup.maxOffset)
-        popup.scrollBar:SetValueStep(1)
-    else
-        popup.scrollBar:Hide()
-        popup.scrollBar:SetMinMaxValues(0, 0)
+    popup.popupWidth = width
+    if dropdown.qfxsaSearchable then
+        for _, item in ipairs(items) do popup.filteredItems[#popup.filteredItems + 1] = item end
     end
+    popup.ConfigureListLayout(true)
 
     popup:ClearAllPoints()
     popup:SetPoint("TOPLEFT", dropdown, "BOTTOMLEFT", 0, -2)
-
-    for i = 1, visibleRows do
-        local row = EnsureDropdownRow(popup, i)
-        row:ClearAllPoints()
-        row:SetPoint("TOPLEFT", popup, "TOPLEFT", DROPDOWN_POPUP_PADDING, -DROPDOWN_POPUP_PADDING - ((i - 1) * DROPDOWN_ROW_HEIGHT))
-        row:SetSize(math.max(1, rowWidth), DROPDOWN_ROW_HEIGHT)
-        row:SetFrameStrata("TOOLTIP")
-        row:SetFrameLevel((popup:GetFrameLevel() or 1) + 50 + i)
-        row:EnableMouse(true)
-        if row.Enable then
-            row:Enable()
-        end
-    end
 
     local selectedIndex = 1
     for i, item in ipairs(items) do
@@ -561,10 +670,11 @@ function Popup:Show(dropdown)
     end
 
     local initialOffset = 0
-    if hasScroll and selectedIndex and selectedIndex > 1 then
-        initialOffset = selectedIndex - math.ceil(visibleRows / 2)
+    if popup.hasScroll and selectedIndex and selectedIndex > 1 then
+        initialOffset = selectedIndex - math.ceil((popup.visibleRows or 1) / 2)
     end
     popup.SetPopupScroll(Clamp(initialOffset, 0, popup.maxOffset or 0))
     popup:Show()
     popup.RenderRows()
+    if dropdown.qfxsaSearchable and type(dropdown.qfxsaBeginSearch) == "function" then dropdown:qfxsaBeginSearch() end
 end

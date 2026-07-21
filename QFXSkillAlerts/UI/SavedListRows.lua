@@ -155,6 +155,9 @@ function Rows.BuildEntryRowText(entry, includeScopeText)
     elseif TrimText(entry and entry.modeText) ~= "" then
         parts[#parts + 1] = string.format("|cff808080%s|r", TrimText(entry and entry.modeText))
     end
+    if tostring(entry and entry.entryType or "") == "cdmVoice" and TrimText(entry and entry.statusText) ~= "" then
+        parts[#parts + 1] = string.format("|cff808080%s|r", TrimText(entry.statusText))
+    end
     if tostring(entry and entry.entryType or "") == "cast" and entry.delayEnabled == true and (tonumber(entry.delaySeconds) or 0) > 0 then
         parts[#parts + 1] = string.format("|cff808080%s|r", L("SAVED_CAST_DELAY", tonumber(entry.delaySeconds) or 0))
     end

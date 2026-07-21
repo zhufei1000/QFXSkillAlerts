@@ -9,14 +9,14 @@ local Runtime = NS.Core.Runtime
 local CONST = NS.Constants or {}
 local Utils = NS.Utils or {}
 
-local OBJECT_TYPE_SPELL = CONST.OBJECT_TYPE_SPELL or "spell"
 local MODE_SOUND = CONST.MODE_SOUND or "sound"
-local UPDATE_INTERVAL_COMBAT = CONST.UPDATE_INTERVAL_COMBAT or 0.03
-local UPDATE_INTERVAL_IDLE = CONST.UPDATE_INTERVAL_IDLE or 0.08
+local UPDATE_INTERVAL_COMBAT = CONST.UPDATE_INTERVAL_COMBAT or 0.10
+local UPDATE_INTERVAL_IDLE = CONST.UPDATE_INTERVAL_IDLE or 0.16
 
 local frame = CreateFrame("Frame")
 local cooldowns = {}
 local delayedCastSuccess = {}
+local delayedCastToken = 0
 local updateElapsed = 0
 local updating = false
 local callbacks = {}
@@ -42,15 +42,6 @@ local function GetRuntimeUpdateInterval()
     return UPDATE_INTERVAL_IDLE
 end
 
-local function NormalizeSoundPath(path)
-    local value = SafeCall("normalizeSoundPath", path)
-    if type(value) == "string" then
-        return value
-    end
-    return tostring(path or ""):gsub("/", "\\")
-end
-
-
 local function NormalizeConditionOp(value)
     value = tostring(value or "<=")
     if value == "<" or value == "<=" or value == ">" or value == ">=" or value == "==" then
@@ -70,11 +61,7 @@ local function NormalizeConditionTime(value, fallback)
     return math.max(0, numeric or 0)
 end
 
-local function NormalizeCastDelayMode(value)
-    return "show"
-end
-
-local function EvaluateCooldownCondition(op, threshold, remaining)
+local function EvaluateCooldownCondition(op, threshold, remaining, previousRemaining)
     remaining = math.max(0, tonumber(remaining) or 0)
     threshold = math.max(0, tonumber(threshold) or 0)
     op = NormalizeConditionOp(op)
@@ -88,19 +75,13 @@ local function EvaluateCooldownCondition(op, threshold, remaining)
         if threshold <= 0 then
             return remaining <= 0
         end
-        return math.abs(remaining - threshold) <= 0.12
+        if math.abs(remaining - threshold) <= 0.12 then
+            return true
+        end
+        previousRemaining = tonumber(previousRemaining)
+        return previousRemaining ~= nil and previousRemaining > threshold and remaining <= threshold
     end
     return remaining <= threshold
-end
-
-local function CopyChannelConfig(cfg, channel, remaining)
-    local copy = {}
-    for key, value in pairs(cfg or {}) do
-        copy[key] = value
-    end
-    copy.alertChannel = channel
-    copy.cooldownRemaining = math.max(0, tonumber(remaining) or 0)
-    return copy
 end
 
 local function CheckAndNotifyChannel(cd, channel, remaining)
@@ -108,8 +89,8 @@ local function CheckAndNotifyChannel(cd, channel, remaining)
         if cd.voiceEnabled == false or cd.voiceNotified then
             return false
         end
-        if EvaluateCooldownCondition(cd.voiceConditionOp, cd.voiceConditionTime, remaining) then
-            SafeCall("playReady", CopyChannelConfig(cd, "voice", remaining))
+        if EvaluateCooldownCondition(cd.voiceConditionOp, cd.voiceConditionTime, remaining, cd.previousRemaining) then
+            SafeCall("playReady", cd, "voice", remaining, cd.primaryKey)
             cd.voiceNotified = true
             return true
         end
@@ -151,8 +132,8 @@ local function IsVisualAlreadyNotified(cd, channel)
 end
 
 local function CheckAndUpdateVisualChannels(cd, remaining)
-    local imageReady = cd.imageEnabled == true and EvaluateCooldownCondition(cd.imageConditionOp, cd.imageConditionTime, remaining)
-    local textReady = cd.textEnabled == true and EvaluateCooldownCondition(cd.textConditionOp, cd.textConditionTime, remaining)
+    local imageReady = cd.imageEnabled == true and EvaluateCooldownCondition(cd.imageConditionOp, cd.imageConditionTime, remaining, cd.previousRemaining)
+    local textReady = cd.textEnabled == true and EvaluateCooldownCondition(cd.textConditionOp, cd.textConditionTime, remaining, cd.previousRemaining)
     local channel = nil
     if imageReady and textReady then
         channel = "visual"
@@ -176,7 +157,7 @@ local function CheckAndUpdateVisualChannels(cd, remaining)
         if IsVisualAlreadyNotified(cd, channel) then
             return false
         end
-        SafeCall("playReady", CopyChannelConfig(cd, channel, remaining))
+        SafeCall("playReady", cd, channel, remaining, cd.primaryKey)
         SetVisualNotified(cd, channel)
         cd.visualActive = false
         cd.visualChannel = nil
@@ -189,7 +170,7 @@ local function CheckAndUpdateVisualChannels(cd, remaining)
     if cd.visualActive == true and cd.visualChannel == channel then
         return false
     end
-    SafeCall("playReady", CopyChannelConfig(cd, channel, remaining))
+    SafeCall("playReady", cd, channel, remaining, cd.primaryKey)
     cd.visualActive = true
     cd.visualChannel = channel
     return true
@@ -209,7 +190,6 @@ function Runtime:Configure(opts)
     callbacks.playReady = opts.playReady
     callbacks.playCastSuccess = opts.playCastSuccess
     callbacks.hideVisual = opts.hideVisual
-    callbacks.normalizeSoundPath = opts.normalizeSoundPath
     callbacks.resolveObjectName = opts.resolveObjectName
     return true
 end
@@ -222,6 +202,14 @@ function Runtime:GetDelayedCastSuccessTable()
     return delayedCastSuccess
 end
 
+local function StopUpdate()
+    if updating then
+        updating = false
+        updateElapsed = 0
+        frame:SetScript("OnUpdate", nil)
+    end
+end
+
 function Runtime:WipeCooldowns(hideVisual)
     wipe(cooldowns)
 
@@ -232,21 +220,20 @@ function Runtime:WipeCooldowns(hideVisual)
         SafeCall("hideVisual")
     end
 
-    if next(delayedCastSuccess) == nil and updating then
-        updating = false
-        updateElapsed = 0
-        frame:SetScript("OnUpdate", nil)
+    if next(cooldowns) == nil then
+        StopUpdate()
     end
     return true
 end
 
 function Runtime:ClearDelayedCastSuccessTimers()
-    wipe(delayedCastSuccess)
-    if next(cooldowns) == nil and updating then
-        updating = false
-        updateElapsed = 0
-        frame:SetScript("OnUpdate", nil)
+    for _, record in pairs(delayedCastSuccess) do
+        local timer = record and record.timer
+        if timer and type(timer.Cancel) == "function" then
+            timer:Cancel()
+        end
     end
+    wipe(delayedCastSuccess)
     return true
 end
 
@@ -293,6 +280,37 @@ function Runtime:EstimateCharges(cd)
         currentCharge = maxCharge
     end
     return currentCharge
+end
+
+function Runtime:ProcessCooldownRecord(primaryKey, cd, now, processVoice)
+    if not cd then
+        return false
+    end
+    cd.primaryKey = primaryKey
+    cd = self:SyncCooldownState(primaryKey, now)
+    if not cd then
+        return false
+    end
+
+    local maxCharge = math.max(1, math.floor(tonumber(cd.charge) or 1))
+    local isFull = self:EstimateCharges(cd) >= maxCharge
+    local remaining = 0
+    if not isFull then
+        local nextChargeAt = tonumber(cd.nextChargeAt) or 0
+        remaining = nextChargeAt > 0 and math.max(0, nextChargeAt - now) or 0
+    end
+
+    if processVoice ~= false then
+        CheckAndNotifyChannel(cd, "voice", remaining)
+    end
+    CheckAndUpdateVisualChannels(cd, remaining)
+    cd.previousRemaining = remaining
+
+    if isFull then
+        cooldowns[primaryKey] = nil
+        return false
+    end
+    return true
 end
 
 function Runtime:ApplyEditorVisualState(primaryKey, cfg)
@@ -359,110 +377,49 @@ function Runtime:RefreshRuntimeCooldowns(mappedRuntimeCfg)
             cd = nil
         end
 
-        if cd then
-            cd = self:SyncCooldownState(primaryKey, now)
-            if cd then
-                local maxCharge = math.max(1, math.floor(tonumber(cd.charge) or 1))
-                local isFull = self:EstimateCharges(cd) >= maxCharge
-                local remaining = 0
-                if not isFull then
-                    local nextChargeAt = tonumber(cd.nextChargeAt) or 0
-                    remaining = nextChargeAt > 0 and math.max(0, nextChargeAt - now) or 0
-                end
-
-                -- Re-apply visual state immediately after editing an entry.  This
-                -- makes removing Image/Text hide current visuals right away and
-                -- makes adding them take effect during an active cooldown without
-                -- waiting for the next spell use.
-                CheckAndUpdateVisualChannels(cd, remaining)
-
-                if isFull then
-                    cooldowns[primaryKey] = nil
-                else
-                    active = true
-                end
-            end
+        if cd and self:ProcessCooldownRecord(primaryKey, cd, now, false) then
+            active = true
         end
     end
 
-    if active or next(delayedCastSuccess) ~= nil then
+    if active then
         self:StartUpdate()
-    elseif updating then
-        updating = false
-        updateElapsed = 0
-        frame:SetScript("OnUpdate", nil)
+    else
+        StopUpdate()
     end
     return true
 end
 
-function Runtime:StartUpdate()
-    if updating then
+local function RuntimeOnUpdate(_, elapsed)
+    updateElapsed = updateElapsed + elapsed
+    if updateElapsed < UPDATE_INTERVAL_COMBAT then
         return
     end
+    local interval = GetRuntimeUpdateInterval()
+    if updateElapsed < interval then
+        return
+    end
+    updateElapsed = math.min(math.max(0, updateElapsed - interval), interval)
 
+    local now = GetTime()
+    local active = false
+    for primaryKey, cd in pairs(cooldowns) do
+        if Runtime:ProcessCooldownRecord(primaryKey, cd, now, true) then
+            active = true
+        end
+    end
+    if not active then
+        StopUpdate()
+    end
+end
+
+function Runtime:StartUpdate()
+    if updating or next(cooldowns) == nil then
+        return
+    end
     updating = true
     updateElapsed = 0
-    frame:SetScript("OnUpdate", function(_, elapsed)
-        updateElapsed = updateElapsed + elapsed
-        if updateElapsed < GetRuntimeUpdateInterval() then
-            return
-        end
-        updateElapsed = 0
-
-        local now = GetTime()
-        local active = false
-
-        for spellId, cd in pairs(cooldowns) do
-            if cd then cd.primaryKey = spellId end
-            cd = self:SyncCooldownState(spellId, now)
-            if cd then
-                local maxCharge = math.max(1, math.floor(tonumber(cd.charge) or 1))
-                local isFull = self:EstimateCharges(cd) >= maxCharge
-                local remaining = 0
-                if not isFull then
-                    local nextChargeAt = tonumber(cd.nextChargeAt) or 0
-                    remaining = nextChargeAt > 0 and math.max(0, nextChargeAt - now) or 0
-                end
-
-                -- Cooldown-end visual semantics:
-                -- 1) While the cooldown exists, use the live Remaining value.
-                -- 2) When the timer reaches the ready state, do one final pass with Remaining = 0.
-                -- 3) Delete the cooldown timer immediately after that final pass.
-                -- This keeps <=2 / <=0 / =0 visual alerts visible when their condition is
-                -- still true at 0, without keeping long-lived OnUpdate cooldown records.
-                CheckAndNotifyChannel(cd, "voice", remaining)
-                CheckAndUpdateVisualChannels(cd, remaining)
-
-                if isFull then
-                    cooldowns[spellId] = nil
-                else
-                    active = true
-                end
-            end
-        end
-
-        for triggerSpellID, timer in pairs(delayedCastSuccess) do
-            local fireAt = tonumber(timer and timer.fireAt) or 0
-            if fireAt > 0 and now >= fireAt then
-                if tostring(timer and timer.mode or "show") == "hide" then
-                    local key = tostring((timer and timer.primaryKey) or "")
-                    if key ~= "" then
-                        SafeCall("hideVisual", key)
-                    end
-                else
-                    SafeCall("playCastSuccess", timer.cfg)
-                end
-                delayedCastSuccess[triggerSpellID] = nil
-            else
-                active = true
-            end
-        end
-
-        if not active then
-            updating = false
-            frame:SetScript("OnUpdate", nil)
-        end
-    end)
+    frame:SetScript("OnUpdate", RuntimeOnUpdate)
 end
 
 function Runtime:QueueCastSuccessNotification(triggerSpellID, cfg)
@@ -472,77 +429,37 @@ function Runtime:QueueCastSuccessNotification(triggerSpellID, cfg)
 
     triggerSpellID = tonumber(triggerSpellID) or tonumber(cfg.triggerSpellID) or tonumber(cfg.spellId) or 0
     local delaySeconds = math.max(0, tonumber(cfg.delaySeconds) or 0)
-    local delayMode = NormalizeCastDelayMode(cfg.castDelayMode)
-
-    local function CopyCastConfig(source)
-        source = type(source) == "table" and source or {}
-        local copy = {
-            primaryKey = tostring(source.primaryKey or (triggerSpellID > 0 and ("cast:" .. tostring(triggerSpellID)) or "")),
-            spellId = tonumber(source.spellId) or 0,
-            objectID = tonumber(source.objectID or source.spellId) or 0,
-            objectType = tostring(source.objectType or OBJECT_TYPE_SPELL),
-            triggerSpellID = triggerSpellID,
-            spellName = tostring(source.spellName or ""),
-            notifyMode = tostring(source.notifyMode or MODE_SOUND),
-            ttsText = tostring(source.ttsText or ""),
-            ttsRate = math.max(-10, math.min(10, tonumber(source.ttsRate) or 0)),
-            soundPath = NormalizeSoundPath(source.soundPath or ""),
-            soundSource = tostring(source.soundSource or ""),
-            sharedMediaSound = tostring(source.sharedMediaSound or source.sharedMediaName or ""),
-            voiceEnabled = source.voiceEnabled ~= false,
-            voiceConditionOp = NormalizeConditionOp(source.voiceConditionOp),
-            voiceConditionTime = NormalizeConditionTime(source.voiceConditionTime, source.cooldownAlertTime or source.alertLeadTime),
-            imageEnabled = source.imageEnabled == true,
-            imageConditionOp = NormalizeConditionOp(source.imageConditionOp),
-            imageConditionTime = NormalizeConditionTime(source.imageConditionTime, source.cooldownAlertTime or source.alertLeadTime),
-            imageSource = tostring(source.imageSource or "auto"),
-            imageIconID = math.max(0, tonumber(source.imageIconID) or 0),
-            imagePath = tostring(source.imagePath or ""),
-            imageSize = math.max(16, tonumber(source.imageSize) or 96),
-            imageDurationEnabled = source.imageDurationEnabled == true,
-            imageDuration = math.max(0.1, tonumber(source.imageDuration) or 2),
-            imageX = tonumber(source.imageX) or 0,
-            imageY = tonumber(source.imageY) or 120,
-            textEnabled = source.textEnabled == true,
-            textConditionOp = NormalizeConditionOp(source.textConditionOp),
-            textConditionTime = NormalizeConditionTime(source.textConditionTime, source.cooldownAlertTime or source.alertLeadTime),
-            textAlert = tostring(source.textAlert or ""),
-            textSize = math.max(8, tonumber(source.textSize) or 24),
-            textDurationEnabled = source.textDurationEnabled == true,
-            textDuration = math.max(0.1, tonumber(source.textDuration) or 2),
-            textX = tonumber(source.textX) or 0,
-            textY = tonumber(source.textY) or 120,
-            textAttachMode = tostring(source.textAttachMode or "outside"),
-            textVAlign = tostring(source.textVAlign or "bottom"),
-            textHAlign = tostring(source.textHAlign or "center"),
-            textOffsetX = tonumber(source.textOffsetX) or 0,
-            textOffsetY = tonumber(source.textOffsetY) or 0,
-            delayEnabled = source.delayEnabled == true,
-            delaySeconds = delaySeconds,
-            castDelayMode = delayMode,
-        }
-        if Utils.SyncLinkedVisualDurations then
-            Utils.SyncLinkedVisualDurations(copy)
+    local oldRecord = delayedCastSuccess[triggerSpellID]
+    if oldRecord then
+        if oldRecord.timer and type(oldRecord.timer.Cancel) == "function" then
+            oldRecord.timer:Cancel()
         end
-        return copy
+        delayedCastSuccess[triggerSpellID] = nil
     end
 
     if not (cfg.delayEnabled == true and delaySeconds > 0 and triggerSpellID > 0) then
-        return SafeCall("playCastSuccess", CopyCastConfig(cfg)) == true
+        return SafeCall("playCastSuccess", cfg, triggerSpellID) == true
     end
 
-    local castCfg = CopyCastConfig(cfg)
+    if not (C_Timer and type(C_Timer.NewTimer) == "function") then
+        return SafeCall("playCastSuccess", cfg, triggerSpellID) == true
+    end
 
-    -- 同一个成功施法触发器再次命中时，覆盖旧倒计时并从当前时刻重新计时。
-    -- 1.0.158: cast-success has only two execution modes: immediate or delayed.
-    -- Image/Text lifetime is controlled by their own duration checkboxes, so the
-    -- old "delay then hide" mode is no longer scheduled here.
-    delayedCastSuccess[triggerSpellID] = {
-        mode = "show",
-        fireAt = GetTime() + delaySeconds,
-        cfg = castCfg,
-    }
-    self:StartUpdate()
+    delayedCastToken = delayedCastToken + 1
+    local token = delayedCastToken
+    local record = { cfg = cfg, token = token }
+    delayedCastSuccess[triggerSpellID] = record
+    local timer
+    timer = C_Timer.NewTimer(delaySeconds, function()
+        local current = delayedCastSuccess[triggerSpellID]
+        if current ~= record or record.token ~= token or record.timer ~= timer then
+            return
+        end
+        delayedCastSuccess[triggerSpellID] = nil
+        record.timer = nil
+        SafeCall("playCastSuccess", cfg, triggerSpellID)
+    end)
+    record.timer = timer
     return true
 end
 
@@ -550,9 +467,7 @@ ApplyAlertFields = function(target, cfg)
     target.notifyMode = tostring(cfg.notifyMode or MODE_SOUND)
     target.ttsText = tostring(cfg.ttsText or "")
     target.ttsRate = math.max(-10, math.min(10, tonumber(cfg.ttsRate) or 0))
-    target.soundPath = NormalizeSoundPath(cfg.soundPath or "")
-    target.soundSource = tostring(cfg.soundSource or "")
-    target.sharedMediaSound = tostring(cfg.sharedMediaSound or cfg.sharedMediaName or "")
+    target.resolvedSoundPath = tostring(cfg.resolvedSoundPath ~= nil and cfg.resolvedSoundPath or cfg.soundPath or "")
     target.cooldownAlertTime = math.max(0, tonumber(cfg.cooldownAlertTime or cfg.alertLeadTime) or 0)
     target.voiceEnabled = cfg.voiceEnabled ~= false
     target.voiceConditionOp = NormalizeConditionOp(cfg.voiceConditionOp)
@@ -563,6 +478,7 @@ ApplyAlertFields = function(target, cfg)
     target.imageSource = tostring(cfg.imageSource or "auto")
     target.imageIconID = math.max(0, tonumber(cfg.imageIconID) or 0)
     target.imagePath = tostring(cfg.imagePath or "")
+    target.resolvedImageTexture = cfg.resolvedImageTexture
     target.imageSize = math.max(16, tonumber(cfg.imageSize) or 96)
     target.imageDurationEnabled = cfg.imageDurationEnabled == true
     target.imageDuration = math.max(0.1, tonumber(cfg.imageDuration) or 2)
@@ -585,6 +501,11 @@ ApplyAlertFields = function(target, cfg)
     target.textHAlign = tostring(cfg.textHAlign or "center")
     target.textOffsetX = tonumber(cfg.textOffsetX) or 0
     target.textOffsetY = tonumber(cfg.textOffsetY) or 0
+    target.index = tonumber(cfg.index) or 0
+    target.scopeClassID = tonumber(cfg.scopeClassID) or 0
+    target.scopeSpecID = tonumber(cfg.scopeSpecID) or 0
+    target.visualEntryKey = cfg.visualEntryKey
+    target.visualUID = cfg.visualUID
 end
 
 function Runtime:StartCooldown(spellId, mappedSpellToPrimary, mappedRuntimeCfg)
@@ -606,7 +527,7 @@ function Runtime:StartCooldown(spellId, mappedSpellToPrimary, mappedRuntimeCfg)
     -- 12.0.5：急速API在受污染插件逻辑中可能返回 Secret Number。
     -- 为避免 “attempt to compare/use a secret number value” 报错，冷却只按用户填写的固定CD计算。
     local singleCD = tonumber(cfg.baseCD) or 0
-    singleCD = tonumber(string.format("%.2f", singleCD)) or singleCD
+    singleCD = math.floor((singleCD * 100) + 0.5) / 100
     if singleCD <= 0 then
         return
     end
@@ -634,12 +555,12 @@ function Runtime:StartCooldown(spellId, mappedSpellToPrimary, mappedRuntimeCfg)
             cd.nextChargeAt = now + singleCD
         end
         if cd.currentCharge <= 0 then
-            cd.notified = false
             cd.voiceNotified = false
             cd.imageNotified = false
             cd.textNotified = false
             cd.visualActive = false
             cd.visualChannel = nil
+            cd.previousRemaining = nil
             if not cd.nextChargeAt then
                 cd.nextChargeAt = now + singleCD
             end
@@ -659,12 +580,12 @@ function Runtime:StartCooldown(spellId, mappedSpellToPrimary, mappedRuntimeCfg)
                 spellName = displayName,
                 objectType = cfg.objectType,
                 objectID = cfg.objectID or cfg.spellId,
-                notified = (currentCharge > 0),
                 voiceNotified = (currentCharge > 0),
                 imageNotified = (currentCharge > 0),
                 textNotified = (currentCharge > 0),
                 visualActive = false,
                 visualChannel = nil,
+                previousRemaining = nil,
                 spellId = cfg.objectID or cfg.spellId,
             }
             ApplyAlertFields(newCd, cfg)
@@ -672,6 +593,10 @@ function Runtime:StartCooldown(spellId, mappedSpellToPrimary, mappedRuntimeCfg)
         end
     end
 
-    self:RefreshRuntimeCooldowns()
-    self:StartUpdate()
+    local activeCd = cooldowns[primaryKey]
+    if activeCd and self:ProcessCooldownRecord(primaryKey, activeCd, now, true) then
+        self:StartUpdate()
+    elseif next(cooldowns) == nil then
+        StopUpdate()
+    end
 end

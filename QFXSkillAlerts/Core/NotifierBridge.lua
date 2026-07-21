@@ -34,18 +34,18 @@ function Bridge:ResolveEntrySoundPath(entry)
     return self:NormalizeSoundPath(type(entry) == "table" and entry.soundPath or entry)
 end
 
-function Bridge:PlayReadyNotification(cfg)
+function Bridge:PlayReadyNotification(cfg, alertChannel, remaining, primaryKey)
     local notifier = GetNotifier()
     if notifier and type(notifier.PlayReadyNotification) == "function" then
-        return notifier:PlayReadyNotification(cfg)
+        return notifier:PlayReadyNotification(cfg, alertChannel, remaining, primaryKey)
     end
     return false
 end
 
-function Bridge:PlayCastSuccessNotification(cfg)
+function Bridge:PlayCastSuccessNotification(cfg, triggerSpellID, castGUID)
     local notifier = GetNotifier()
     if notifier and type(notifier.PlayCastSuccessNotification) == "function" then
-        return notifier:PlayCastSuccessNotification(cfg)
+        return notifier:PlayCastSuccessNotification(cfg, triggerSpellID, castGUID)
     end
     return false
 end

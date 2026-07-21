@@ -7,6 +7,9 @@ NS.Core.Startup = NS.Core.Startup or {}
 local Startup = NS.Core.Startup
 
 local callbacks = {}
+local rebuildTimer
+local rebuildReasons = {}
+local scheduledResetCooldowns = false
 
 local function SafeCall(name, ...)
     local fn = callbacks[name]
@@ -21,17 +24,44 @@ local function InitializeMinimapButton()
     SafeCall("showMinimapButton")
 end
 
+function Startup:CancelScheduledProfileRefresh()
+    if rebuildTimer and type(rebuildTimer.Cancel) == "function" then
+        rebuildTimer:Cancel()
+    end
+    rebuildTimer = nil
+    scheduledResetCooldowns = false
+    wipe(rebuildReasons)
+end
+
+function Startup:ScheduleProfileRefresh(reason, resetCooldowns)
+    rebuildReasons[tostring(reason or "unknown")] = true
+    if resetCooldowns == true then
+        scheduledResetCooldowns = true
+    end
+    if rebuildTimer then
+        return true
+    end
+
+    local function apply()
+        rebuildTimer = nil
+        local reset = scheduledResetCooldowns
+        scheduledResetCooldowns = false
+        wipe(rebuildReasons)
+        SafeCall("prepareProfileRefresh")
+        SafeCall("onProfileChanged", reset)
+    end
+    if C_Timer and type(C_Timer.NewTimer) == "function" then
+        rebuildTimer = C_Timer.NewTimer(0.10, apply)
+    else
+        apply()
+    end
+    return true
+end
+
 function Startup:Configure(opts)
     opts = type(opts) == "table" and opts or {}
     callbacks.initializeDatabase = opts.initializeDatabase
     callbacks.ensureDB = opts.ensureDB
-    callbacks.purgeDeletedEntries = opts.purgeDeletedEntries
-    callbacks.resolveAllStoredItemTriggers = opts.resolveAllStoredItemTriggers
-    callbacks.rebuildRuntimeConfig = opts.rebuildRuntimeConfig
-    callbacks.rebuildCastSuccessConfig = opts.rebuildCastSuccessConfig
-    callbacks.rebuildCustomConfig = opts.rebuildCustomConfig
-    callbacks.rebuildBloodlustConfig = opts.rebuildBloodlustConfig
-    callbacks.refreshRuntimeCooldowns = opts.refreshRuntimeCooldowns
     callbacks.initializeAceOptions = opts.initializeAceOptions
     callbacks.initializeConfigPanel = opts.initializeConfigPanel
     callbacks.initializeCommands = opts.initializeCommands
@@ -39,7 +69,6 @@ function Startup:Configure(opts)
     callbacks.showMinimapButton = opts.showMinimapButton
     callbacks.printLoadedMessage = opts.printLoadedMessage
     callbacks.onProfileChanged = opts.onProfileChanged
-    callbacks.markBagItemCacheDirty = opts.markBagItemCacheDirty
     callbacks.resolvePendingItems = opts.resolvePendingItems
     callbacks.clearDelayedCastSuccessTimers = opts.clearDelayedCastSuccessTimers
     callbacks.startCooldown = opts.startCooldown
@@ -47,41 +76,40 @@ function Startup:Configure(opts)
     callbacks.handleBloodlustAura = opts.handleBloodlustAura
     callbacks.handleItemInventoryChanged = opts.handleItemInventoryChanged
     callbacks.handleCustomEvent = opts.handleCustomEvent
+    callbacks.invalidateTalentCache = opts.invalidateTalentCache
+    callbacks.prepareProfileRefresh = opts.prepareProfileRefresh
     return true
 end
 
 function Startup:OnPlayerLogin()
+    SafeCall("invalidateTalentCache")
     SafeCall("initializeDatabase")
     SafeCall("ensureDB")
-    SafeCall("purgeDeletedEntries")
-    SafeCall("resolveAllStoredItemTriggers", true)
-    SafeCall("rebuildRuntimeConfig")
-    SafeCall("rebuildCastSuccessConfig")
-    SafeCall("rebuildCustomConfig")
-    SafeCall("rebuildBloodlustConfig")
-    SafeCall("refreshRuntimeCooldowns")
     SafeCall("initializeAceOptions")
     SafeCall("initializeConfigPanel")
     SafeCall("initializeCommands")
     InitializeMinimapButton()
     SafeCall("printLoadedMessage")
+    self:ScheduleProfileRefresh("PLAYER_LOGIN", false)
+end
+
+function Startup:OnPlayerLogout()
+    self:CancelScheduledProfileRefresh()
+    SafeCall("clearDelayedCastSuccessTimers")
 end
 
 function Startup:OnProfileRefresh(event)
     if event == "PLAYER_ENTERING_WORLD" then
         InitializeMinimapButton()
     end
-    SafeCall("purgeDeletedEntries")
-    SafeCall("resolveAllStoredItemTriggers", true)
-    SafeCall("markBagItemCacheDirty")
-    SafeCall("onProfileChanged", false)
+    SafeCall("invalidateTalentCache")
+    self:ScheduleProfileRefresh(event, false)
 end
 
 function Startup:OnSpecializationChanged(unit)
     if unit == "player" then
-        SafeCall("purgeDeletedEntries")
-        SafeCall("resolveAllStoredItemTriggers", true)
-        SafeCall("onProfileChanged", true)
+        SafeCall("invalidateTalentCache")
+        self:ScheduleProfileRefresh("PLAYER_SPECIALIZATION_CHANGED", true)
     end
 end
 
@@ -91,7 +119,6 @@ end
 
 function Startup:OnPlayerRegenEnabled()
     SafeCall("resolvePendingItems")
-    SafeCall("clearDelayedCastSuccessTimers")
     SafeCall("handleItemInventoryChanged", "PLAYER_REGEN_ENABLED")
     -- 只清除施法成功“延时播放”队列；固定CD计时器 cooldowns 必须继续保留。
     SafeCall("clearDelayedCastSuccessTimers")
@@ -123,6 +150,9 @@ function Startup:GetEventHandlers()
         end,
         OnPlayerLogin = function()
             return self:OnPlayerLogin()
+        end,
+        OnPlayerLogout = function()
+            return self:OnPlayerLogout()
         end,
         OnProfileRefresh = function(event)
             return self:OnProfileRefresh(event)

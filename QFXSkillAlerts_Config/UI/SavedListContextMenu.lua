@@ -164,6 +164,49 @@ function ContextMenu:OpenEntryMenu(list, key, entryType)
         list:SelectKey(key, entryType)
     end
 
+    if tostring(entryType or "") == "cdmVoice" then
+        self:Open(list, {
+            {
+                text = L("EDIT_ENTRY"),
+                func = function()
+                    if list and type(list.SelectKey) == "function" then
+                        list:SelectKey(key, entryType)
+                    end
+                    if NS.UI and NS.UI.CDMVoiceEditor then
+                        NS.UI.CDMVoiceEditor:OpenForEdit(key)
+                    end
+                end,
+            },
+            {
+                text = L("EXPORT_ENTRY"),
+                func = function()
+                    if list and type(list.SelectKey) == "function" then
+                        list:SelectKey(key, entryType)
+                    end
+                    local api = NS.API or {}
+                    local exportText = type(api.ExportCDMVoiceEntryString) == "function"
+                        and api.ExportCDMVoiceEntryString(key) or ""
+                    if exportText ~= "" and NS.UI and NS.UI.MainFrame
+                        and type(NS.UI.MainFrame.OpenExportDialog) == "function" then
+                        NS.UI.MainFrame:OpenExportDialog(L("CDM_EXPORT_SINGLE_TITLE"), exportText)
+                    end
+                end,
+            },
+            {
+                text = L("DELETE_ENTRY"),
+                func = function()
+                    if list and type(list.SelectKey) == "function" then
+                        list:SelectKey(key, entryType)
+                    end
+                    if NS.UI and NS.UI.MainFrame and type(NS.UI.MainFrame.DeleteCDMVoiceByKey) == "function" then
+                        NS.UI.MainFrame:DeleteCDMVoiceByKey(key)
+                    end
+                end,
+            },
+        })
+        return
+    end
+
     self:Open(list, {
         {
             text = L("EDIT_ENTRY"),

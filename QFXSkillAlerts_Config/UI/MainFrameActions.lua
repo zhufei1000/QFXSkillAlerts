@@ -35,7 +35,7 @@ local function EnsureAddTypeSelector(owner)
     end
 
     local frame = CreateFrame("Frame", "QFXSkillAlertsAddTypeSelectorFrame", UIParent, "BackdropTemplate")
-    frame:SetSize(460, 330)
+    frame:SetSize(460, 405)
     frame:SetPoint("CENTER", UIParent, "CENTER", 100, 0)
     frame:SetFrameStrata("FULLSCREEN_DIALOG")
     frame:SetFrameLevel(120)
@@ -73,12 +73,14 @@ local function EnsureAddTypeSelector(owner)
     if Skin and Skin.SkinCloseButton then Skin:SkinCloseButton(close) end
     close:SetScript("OnClick", function() frame:Hide() end)
 
-    local function AddChoice(entryType, label, hint, y)
+    local function AddChoice(entryType, label, hint, y, callback)
         local btn = CreateButton(frame, label, 360, 44)
         btn:SetPoint("TOP", frame, "TOP", 0, y)
         btn:SetScript("OnClick", function()
             frame:Hide()
-            if NS.UI and NS.UI.EditorFrame and type(NS.UI.EditorFrame.OpenForNew) == "function" then
+            if type(callback) == "function" then
+                callback()
+            elseif NS.UI and NS.UI.EditorFrame and type(NS.UI.EditorFrame.OpenForNew) == "function" then
                 NS.UI.EditorFrame:OpenForNew(entryType)
             end
         end)
@@ -93,15 +95,22 @@ local function EnsureAddTypeSelector(owner)
     frame.cooldownBtn, frame.cooldownHint = AddChoice("cooldown", L("TAB_COOLDOWN"), L("SELECT_ALERT_TYPE_COOLDOWN_DESC"), -82)
     frame.castBtn, frame.castHint = AddChoice("cast", L("TAB_CAST"), L("SELECT_ALERT_TYPE_CAST_DESC"), -156)
     frame.bloodlustBtn, frame.bloodlustHint = AddChoice("bloodlust", L("TAB_BLOODLUST"), L("SELECT_ALERT_TYPE_BLOODLUST_DESC"), -230)
+    frame.cdmVoiceBtn, frame.cdmVoiceHint = AddChoice("cdmVoice", L("CDM_VOICE"), L("CDM_VOICE_DESC"), -304, function()
+        if NS.UI and NS.UI.CDMVoiceEditor and type(NS.UI.CDMVoiceEditor.Open) == "function" then
+            NS.UI.CDMVoiceEditor:Open()
+        end
+    end)
     frame.RefreshLocale = function(selfFrame)
         title:SetText(L("TITLE_SELECT_ALERT_TYPE"))
         desc:SetText(L("SELECT_ALERT_TYPE_DESC"))
         selfFrame.cooldownBtn:SetText(L("TAB_COOLDOWN"))
         selfFrame.castBtn:SetText(L("TAB_CAST"))
         selfFrame.bloodlustBtn:SetText(L("TAB_BLOODLUST"))
+        selfFrame.cdmVoiceBtn:SetText(L("CDM_VOICE"))
         selfFrame.cooldownHint:SetText(L("SELECT_ALERT_TYPE_COOLDOWN_DESC"))
         selfFrame.castHint:SetText(L("SELECT_ALERT_TYPE_CAST_DESC"))
         selfFrame.bloodlustHint:SetText(L("SELECT_ALERT_TYPE_BLOODLUST_DESC"))
+        selfFrame.cdmVoiceHint:SetText(L("CDM_VOICE_DESC"))
     end
 
     owner.addTypeSelector = frame
@@ -115,6 +124,68 @@ function MainFrame:OpenAddTypeSelector()
     end
     frame:Show()
     frame:Raise()
+end
+
+local function FindCDMSavedEntry(key)
+    local api = NS.API or {}
+    local entries = type(api.GetCDMVoiceSavedEntries) == "function" and api.GetCDMVoiceSavedEntries() or {}
+    for _, entry in ipairs(type(entries) == "table" and entries or {}) do
+        if tostring(entry.key or "") == tostring(key or "") then
+            return entry
+        end
+    end
+end
+
+local function EnsureCDMDeletePopup()
+    if not StaticPopupDialogs or StaticPopupDialogs.QFXSKILLALERTS_DELETE_CDM_VOICE then
+        return
+    end
+    StaticPopupDialogs.QFXSKILLALERTS_DELETE_CDM_VOICE = {
+        text = "%s",
+        button1 = YES,
+        button2 = NO,
+        timeout = 0,
+        whileDead = true,
+        hideOnEscape = true,
+        preferredIndex = 3,
+        OnAccept = function(_, data)
+            local api = NS.API or {}
+            if type(data) ~= "table" or type(api.DeleteCDMVoiceAlertByKey) ~= "function" then
+                return
+            end
+            local ok, reason = api.DeleteCDMVoiceAlertByKey(data.key)
+            if ok then
+                local state = NS.AceOptions and NS.AceOptions:GetState()
+                if state and tostring(state.selectedKey or "") == tostring(data.key or "") then
+                    state.selectedKey = nil
+                    state.entryType = "cooldown"
+                end
+                print("[QFX-SA] " .. L("CDM_DELETED"))
+            else
+                local message = reason == "combat" and L("CDM_COMBAT_BLOCKED") or L("CDM_DELETE_FAILED")
+                print("[QFX-SA] " .. message)
+            end
+        end,
+    }
+end
+
+function MainFrame:DeleteCDMVoiceByKey(key)
+    if type(InCombatLockdown) == "function" and InCombatLockdown() then
+        print("[QFX-SA] " .. L("CDM_COMBAT_BLOCKED"))
+        return false
+    end
+    local entry = FindCDMSavedEntry(key)
+    if not entry then
+        print("[QFX-SA] " .. L("CDM_DELETE_FAILED"))
+        return false
+    end
+    EnsureCDMDeletePopup()
+    if type(StaticPopup_Show) ~= "function" then
+        return false
+    end
+    local text = L("CDM_DELETE_CONFIRM", entry.spellName or "", entry.eventText or "", entry.voiceName or "")
+    StaticPopup_Show("QFXSKILLALERTS_DELETE_CDM_VOICE", text, nil, { key = key })
+    return true
 end
 
 
@@ -137,7 +208,10 @@ addGroupBtn:SetScript("OnClick", function()
 end)
 editBtn:SetScript("OnClick", function()
     local selectedKey = tostring(NS.AceOptions:GetState().selectedKey or "")
-    if NS.AceOptions and type(NS.AceOptions.IsGroupKey) == "function" and NS.AceOptions:IsGroupKey(selectedKey) then
+    local entryType = tostring(NS.AceOptions:GetState().entryType or "")
+    if entryType == "cdmVoice" then
+        NS.UI.CDMVoiceEditor:OpenForEdit(selectedKey)
+    elseif NS.AceOptions and type(NS.AceOptions.IsGroupKey) == "function" and NS.AceOptions:IsGroupKey(selectedKey) then
         self:OpenRenameCollectionDialog(selectedKey)
     else
         NS.UI.EditorFrame:OpenForEdit()
@@ -145,7 +219,10 @@ editBtn:SetScript("OnClick", function()
 end)
 deleteBtn:SetScript("OnClick", function()
     local selectedKey = tostring(NS.AceOptions:GetState().selectedKey or "")
-    if NS.AceOptions and type(NS.AceOptions.IsGroupKey) == "function" and NS.AceOptions:IsGroupKey(selectedKey) then
+    local entryType = tostring(NS.AceOptions:GetState().entryType or "")
+    if entryType == "cdmVoice" then
+        self:DeleteCDMVoiceByKey(selectedKey)
+    elseif NS.AceOptions and type(NS.AceOptions.IsGroupKey) == "function" and NS.AceOptions:IsGroupKey(selectedKey) then
         if NS.AceOptions:DeleteCollection(selectedKey, true) then
             self:RequestRefresh("list")
         end
@@ -155,7 +232,14 @@ deleteBtn:SetScript("OnClick", function()
     end
 end)
 refreshBtn:SetScript("OnClick", function()
-    self:Refresh()
+    local api = NS.API or {}
+    local synchronized = false
+    if type(api.SyncCurrentSpecCDMVoices) == "function" then
+        synchronized = api.SyncCurrentSpecCDMVoices("manual_refresh") == true
+    end
+    if not synchronized then
+        self:Refresh()
+    end
 end)
 importBtn:SetScript("OnClick", function()
     self:OpenImportDialog()
@@ -173,6 +257,9 @@ savedList:SetOnSelectionChanged(function(key, entryType, oldKey)
     state.selectedKey = key
     if isGroup then
         state.selectedCollectionKey = key
+    elseif entryType == "cdmVoice" then
+        state.selectedCollectionKey = nil
+        state.entryType = "cdmVoice"
     else
         state.selectedCollectionKey = nil
         state.entryType = entryType or state.entryType or "cooldown"

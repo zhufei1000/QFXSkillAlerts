@@ -86,54 +86,24 @@ local function NormalizeConditionOp(value)
     return "<="
 end
 
-local function NormalizeCastDelayMode(value)
-    return "show"
-end
-
-
-local function CopyNumberBoolMap(source)
-    local copy = {}
+local function ScopeMapMatches(source, allID, fallbackID, currentID)
+    local hasSelection = false
     if type(source) == "table" then
         for key, value in pairs(source) do
             local numberKey = tonumber(key)
             if value == true and numberKey and numberKey >= 0 then
-                copy[numberKey] = true
+                hasSelection = true
+                if numberKey == allID or numberKey == currentID then
+                    return true
+                end
             end
         end
     end
-    return copy
-end
-
-local function NormalizeScopeClassMap(source, fallbackClassID)
-    local copy = CopyNumberBoolMap(source)
-    if next(copy) == nil then
-        local classID = tonumber(fallbackClassID) or 0
-        copy[classID > 0 and classID or ALL_CLASSES_ID] = true
+    if not hasSelection then
+        fallbackID = tonumber(fallbackID) or allID
+        return fallbackID == allID or fallbackID == currentID
     end
-    if copy[ALL_CLASSES_ID] == true then
-        return { [ALL_CLASSES_ID] = true }
-    end
-    return copy
-end
-
-local function NormalizeScopeSpecMap(source, fallbackSpecID)
-    local copy = CopyNumberBoolMap(source)
-    if next(copy) == nil then
-        local specID = tonumber(fallbackSpecID) or 0
-        copy[specID > 0 and specID or ALL_SPECS_ID] = true
-    end
-    if copy[ALL_SPECS_ID] == true then
-        return { [ALL_SPECS_ID] = true }
-    end
-    return copy
-end
-
-local function NormalizeScopeRaceMap(source)
-    local copy = CopyNumberBoolMap(source)
-    if next(copy) == nil or copy[ALL_RACES_ID] == true then
-        return { [ALL_RACES_ID] = true }
-    end
-    return copy
+    return false
 end
 
 local function GetCurrentRaceID()
@@ -151,16 +121,13 @@ local function IsScopeMatched(entry, scopeClassID, scopeSpecID, currentClassID, 
     currentClassID = tonumber(currentClassID) or 0
     currentSpecID = tonumber(currentSpecID) or 0
     currentRaceID = tonumber(currentRaceID) or 0
-    local raceIDs = NormalizeScopeRaceMap(entry.alertRaceIDs)
-    if raceIDs[ALL_RACES_ID] ~= true and raceIDs[currentRaceID] ~= true then
+    if not ScopeMapMatches(entry.alertRaceIDs, ALL_RACES_ID, ALL_RACES_ID, currentRaceID) then
         return false
     end
-    local classIDs = NormalizeScopeClassMap(entry.alertClassIDs or entry.customClassIDs, scopeClassID)
-    if classIDs[ALL_CLASSES_ID] ~= true and classIDs[currentClassID] ~= true then
+    if not ScopeMapMatches(entry.alertClassIDs or entry.customClassIDs, ALL_CLASSES_ID, scopeClassID, currentClassID) then
         return false
     end
-    local specIDs = NormalizeScopeSpecMap(entry.alertSpecIDs or entry.customSpecIDs, scopeSpecID)
-    if specIDs[ALL_SPECS_ID] ~= true and specIDs[currentSpecID] ~= true then
+    if not ScopeMapMatches(entry.alertSpecIDs or entry.customSpecIDs, ALL_SPECS_ID, scopeSpecID, currentSpecID) then
         return false
     end
     return true
@@ -172,6 +139,11 @@ local function ResolveEntrySoundPath(entry)
         return value
     end
     return tostring(type(entry) == "table" and entry.soundPath or "")
+end
+
+local function ResolveImageTexture(entry)
+    local value = SafeCall("resolveImageTexture", entry)
+    return value ~= nil and value or false
 end
 
 local function GetObjectTriggerSpellID(objectID, objectType, triggerSpellID)
@@ -226,6 +198,7 @@ function CastSuccess:Configure(opts)
     callbacks.isItemLoadRequirementMet = opts.isItemLoadRequirementMet
     callbacks.getObjectTriggerSpellID = opts.getObjectTriggerSpellID
     callbacks.resolveEntrySoundPath = opts.resolveEntrySoundPath
+    callbacks.resolveImageTexture = opts.resolveImageTexture
     callbacks.queueNotification = opts.queueNotification
     return true
 end
@@ -275,19 +248,13 @@ function CastSuccess:Rebuild()
                 spellId = objectID,
                 objectID = objectID,
                 objectType = objectType,
-                itemLoadMode = tostring(entry.itemLoadMode or ""),
                 triggerSpellID = triggerSpellID,
                 primaryKey = "cast:" .. tostring(scopeClassID or 0) .. ":" .. tostring(scopeSpecID or 0) .. ":" .. tostring(index or triggerSpellID),
                 spellName = tostring(entry.spellName or ""),
                 notifyMode = tostring(entry.notifyMode or MODE_SOUND),
                 ttsText = tostring(entry.ttsText or ""),
                 ttsRate = math.max(-10, math.min(10, tonumber(entry.ttsRate) or 0)),
-                soundPath = ResolveEntrySoundPath(entry),
-                soundSource = tostring(entry.soundSource or ""),
-                builtinSoundPath = tostring(entry.builtinSoundPath or ""),
-                customSoundPath = tostring(entry.customSoundPath or ""),
-                customSoundPaths = type(entry.customSoundPaths) == "table" and entry.customSoundPaths or nil,
-                sharedMediaSound = tostring(entry.sharedMediaSound or entry.sharedMediaName or ""),
+                resolvedSoundPath = ResolveEntrySoundPath(entry),
                 voiceEnabled = entry.voiceEnabled ~= false,
                 voiceConditionOp = NormalizeConditionOp(entry.voiceConditionOp),
                 voiceConditionTime = math.max(0, tonumber(entry.voiceConditionTime or entry.cooldownAlertTime or entry.alertLeadTime) or 0),
@@ -297,6 +264,7 @@ function CastSuccess:Rebuild()
                 imageSource = tostring(entry.imageSource or "auto"),
                 imageIconID = math.max(0, tonumber(entry.imageIconID) or 0),
                 imagePath = tostring(entry.imagePath or ""),
+                resolvedImageTexture = ResolveImageTexture(entry),
                 imageSize = math.max(16, tonumber(entry.imageSize) or 96),
                 imageDurationEnabled = entry.imageDurationEnabled == true,
                 imageDuration = math.max(0.1, tonumber(entry.imageDuration) or 2),
@@ -318,13 +286,9 @@ function CastSuccess:Rebuild()
                 textOffsetY = tonumber(entry.textOffsetY) or 0,
                 delayEnabled = entry.delayEnabled == true,
                 delaySeconds = math.max(0, tonumber(entry.delaySeconds) or 0),
-                castDelayMode = NormalizeCastDelayMode(entry.castDelayMode),
                 index = index,
                 scopeClassID = tonumber(scopeClassID) or 0,
                 scopeSpecID = tonumber(scopeSpecID) or 0,
-                alertRaceIDs = NormalizeScopeRaceMap(entry.alertRaceIDs),
-                alertClassIDs = NormalizeScopeClassMap(entry.alertClassIDs or entry.customClassIDs, scopeClassID),
-                alertSpecIDs = NormalizeScopeSpecMap(entry.alertSpecIDs or entry.customSpecIDs, scopeSpecID),
             }
             if Utils.SyncLinkedVisualDurations then
                 Utils.SyncLinkedVisualDurations(builtCfg)

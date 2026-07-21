@@ -49,6 +49,20 @@ local defaults = {
         collectionData = {},
         collectionSerial = 0,
         deletedEntries = {},
+        cdmVoiceRegistry = {
+            byIdentity = {},
+            byPayload = {},
+            collisionMap = {},
+        },
+        cdmVoiceUI = {
+            lastCategory = nil,
+        },
+        cdmVoiceProfiles = {},
+        cdmVoiceDisabledPresets = {},
+        cdmVoiceSyncState = {
+            importedVersion = 0,
+            pendingRuntimeReload = false,
+        },
         languageMode = "auto",
         uiSkinMode = "auto",
     },
@@ -108,6 +122,22 @@ local function ApplyKnownSpecScopeMigration(db)
         return migration:ApplyKnownSpecScopes(db)
     end
     return 0
+end
+
+local function ClearLegacyCDMPendingApply(db)
+    local cleared = 0
+    for _, classMap in pairs(type(db) == "table" and type(db.cdmVoiceProfiles) == "table"
+        and db.cdmVoiceProfiles or {}) do
+        for _, specMap in pairs(type(classMap) == "table" and classMap or {}) do
+            for _, record in pairs(type(specMap) == "table" and specMap or {}) do
+                if type(record) == "table" and record.pendingApply ~= nil then
+                    record.pendingApply = nil
+                    cleared = cleared + 1
+                end
+            end
+        end
+    end
+    return cleared
 end
 
 local function PurgeRemovedCustomEntries(db)
@@ -183,7 +213,10 @@ local function CopyKnownSavedFields(target, source)
     end
 
     local sourceProfile = type(source.profile) == "table" and source.profile or source
-    for _, key in ipairs({ "specConfigs", "castSuccessConfigs", "bloodlustConfig", "minimap", "collectionData", "deletedEntries" }) do
+    for _, key in ipairs({
+        "specConfigs", "castSuccessConfigs", "bloodlustConfig", "minimap", "collectionData", "deletedEntries",
+        "cdmVoiceRegistry", "cdmVoiceUI", "cdmVoiceProfiles", "cdmVoiceDisabledPresets", "cdmVoiceSyncState",
+    }) do
         if type(sourceProfile[key]) == "table" then
             if type(target[key]) ~= "table" then
                 target[key] = {}
@@ -226,6 +259,7 @@ function Database:Initialize()
         MigrateLegacyCastSuccessConfigs(aceDB.profile)
         ApplyKnownSpecScopeMigration(aceDB.profile)
         PurgeRemovedCustomEntries(aceDB.profile)
+        ClearLegacyCDMPendingApply(aceDB.profile)
         if type(NS.SetLanguageMode) == "function" then
             NS.SetLanguageMode(aceDB.profile.languageMode or "auto")
         end
@@ -274,6 +308,20 @@ function Database:Initialize()
         collectionData = {},
         collectionSerial = 0,
         deletedEntries = {},
+        cdmVoiceRegistry = {
+            byIdentity = {},
+            byPayload = {},
+            collisionMap = {},
+        },
+        cdmVoiceUI = {
+            lastCategory = nil,
+        },
+        cdmVoiceProfiles = {},
+        cdmVoiceDisabledPresets = {},
+        cdmVoiceSyncState = {
+            importedVersion = 0,
+            pendingRuntimeReload = false,
+        },
         languageMode = "auto",
         uiSkinMode = "auto",
     })
@@ -281,6 +329,7 @@ function Database:Initialize()
     MigrateLegacyCastSuccessConfigs(legacy)
     ApplyKnownSpecScopeMigration(legacy)
     PurgeRemovedCustomEntries(legacy)
+    ClearLegacyCDMPendingApply(legacy)
     if type(NS.SetLanguageMode) == "function" then
         NS.SetLanguageMode(legacy.languageMode or "auto")
     end
