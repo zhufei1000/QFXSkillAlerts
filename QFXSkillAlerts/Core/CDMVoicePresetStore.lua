@@ -40,6 +40,11 @@ local function EnsureDatabase()
     local db = QFXSkillAlertsDB
     db.cdmVoiceProfiles = type(db.cdmVoiceProfiles) == "table" and db.cdmVoiceProfiles or {}
     db.cdmVoiceDisabledPresets = type(db.cdmVoiceDisabledPresets) == "table" and db.cdmVoiceDisabledPresets or {}
+    db.cdmVoicePendingRemovals = type(db.cdmVoicePendingRemovals) == "table" and db.cdmVoicePendingRemovals or {}
+    db.cdmVoiceApplyState = type(db.cdmVoiceApplyState) == "table" and db.cdmVoiceApplyState or {}
+    if db.cdmVoiceApplyState.applyInProgress == nil then
+        db.cdmVoiceApplyState.applyInProgress = false
+    end
     db.cdmVoiceSyncState = type(db.cdmVoiceSyncState) == "table" and db.cdmVoiceSyncState or {}
     db.cdmVoiceSyncState.importedVersion = tonumber(db.cdmVoiceSyncState.importedVersion) or 0
     if db.cdmVoiceSyncState.pendingRuntimeReload == nil then
@@ -138,7 +143,8 @@ function Store:BuildRecordKey(category, spellID, eventKey)
     category = Trim(category)
     spellID = tonumber(spellID)
     eventKey = Trim(eventKey):upper()
-    if not VALID_CATEGORIES[category] or not spellID or spellID <= 0 or eventKey == "" then
+    if not VALID_CATEGORIES[category] or not spellID or spellID <= 0
+        or spellID ~= math.floor(spellID) or eventKey == "" then
         return nil
     end
     return string.format("%s:%d:%s", category, math.floor(spellID), eventKey)
@@ -164,7 +170,9 @@ function Store:SanitizeRecord(data, forcedSource)
         voiceIdentity = Registry:BuildIdentity(voiceName, voicePath) or ""
     end
     local recordKey = self:BuildRecordKey(category, spellID, eventKey)
-    if not classID or not specID or not recordKey or not eventTypeHint
+    if not classID or classID <= 0 or classID ~= math.floor(classID)
+        or not specID or specID <= 0 or specID ~= math.floor(specID)
+        or not recordKey or not eventTypeHint or eventTypeHint ~= math.floor(eventTypeHint)
         or (voiceIdentity == "" and voiceName == "" and voicePath == "") then
         return nil
     end
@@ -201,7 +209,48 @@ function Store:SaveAppliedRecord(data)
     if disabled then
         disabled[record.recordKey] = nil
     end
+    local pendingRemovals = GetScope(db.cdmVoicePendingRemovals, record.classID, record.specID)
+    if pendingRemovals then
+        pendingRemovals[record.recordKey] = nil
+    end
     return record.recordKey, record
+end
+
+function Store:GetPendingRemovals(classID, specID)
+    return GetScope(EnsureDatabase().cdmVoicePendingRemovals, classID, specID) or {}
+end
+
+function Store:GetPendingRemoval(classID, specID, recordKey)
+    local value = self:GetPendingRemovals(classID, specID)[Trim(recordKey)]
+    return type(value) == "table" and CopyRecord(value) or nil
+end
+
+function Store:SetPendingRemoval(record)
+    local sanitized = self:SanitizeRecord(record, record and record.source or "user")
+    if not sanitized then
+        return nil, "invalid_record"
+    end
+    local tombstone = CopyRecord(sanitized)
+    tombstone.createdAt = tonumber(record and record.createdAt)
+        or (type(time) == "function" and time() or 0)
+    tombstone.enabled = nil
+    local scope = EnsureScope(
+        EnsureDatabase().cdmVoicePendingRemovals,
+        tombstone.classID,
+        tombstone.specID
+    )
+    scope[tombstone.recordKey] = tombstone
+    return tombstone.recordKey, CopyRecord(tombstone)
+end
+
+function Store:ClearPendingRemoval(classID, specID, recordKey)
+    local scope = GetScope(EnsureDatabase().cdmVoicePendingRemovals, classID, specID)
+    recordKey = Trim(recordKey)
+    local existed = scope and scope[recordKey] ~= nil or false
+    if scope then
+        scope[recordKey] = nil
+    end
+    return existed
 end
 
 function Store:GetUserRecords(classID, specID)
@@ -273,7 +322,8 @@ function Store:BuildSingleRecordProfiles(classID, specID, recordKey)
     return result
 end
 
-function Store:RemoveOrDisableRecord(classID, specID, recordKey)
+function Store:RemoveOrDisableRecord(classID, specID, recordKey, options)
+    options = type(options) == "table" and options or {}
     classID, specID = tonumber(classID), tonumber(specID)
     recordKey = Trim(recordKey)
     local effective = self:GetEffectiveRecord(classID, specID, recordKey)
@@ -290,12 +340,19 @@ function Store:RemoveOrDisableRecord(classID, specID, recordKey)
         record = CopyRecord(effective),
         userRecord = userScope and userScope[recordKey] and CopyRecord(userScope[recordKey]) or nil,
         disabledValue = disabledScope and disabledScope[recordKey] or nil,
+        previousPendingRemoval = self:GetPendingRemoval(classID, specID, recordKey),
     }
     if userScope then
         userScope[recordKey] = nil
     end
     if self:IsBuiltInRecord(classID, specID, recordKey) then
         EnsureScope(db.cdmVoiceDisabledPresets, classID, specID)[recordKey] = true
+    end
+    if options.createPendingRemoval ~= false then
+        local pendingKey, pendingRecord = self:SetPendingRemoval(effective)
+        if pendingKey then
+            snapshot.pendingRemoval = pendingRecord
+        end
     end
     return snapshot
 end
@@ -314,6 +371,8 @@ function Store:RestoreRecordMutation(snapshot)
     userScope[recordKey] = snapshot.userRecord and CopyRecord(snapshot.userRecord) or nil
     local disabledScope = EnsureScope(db.cdmVoiceDisabledPresets, classID, specID)
     disabledScope[recordKey] = snapshot.disabledValue
+    local pendingScope = EnsureScope(db.cdmVoicePendingRemovals, classID, specID)
+    pendingScope[recordKey] = snapshot.previousPendingRemoval
     return true
 end
 
@@ -447,7 +506,7 @@ function Store:GetRecordForAlert(classID, specID, category, spellID, eventType)
 end
 
 function Store:ImportProfiles(profiles)
-    local imported = 0
+    local imported, invalid = 0, 0
     for classID, classMap in pairs(type(profiles) == "table" and profiles or {}) do
         for specID, specMap in pairs(type(classMap) == "table" and classMap or {}) do
             for _, data in pairs(type(specMap) == "table" and specMap or {}) do
@@ -457,13 +516,19 @@ function Store:ImportProfiles(profiles)
                 copy.source = "import"
                 if self:SaveAppliedRecord(copy) then
                     imported = imported + 1
+                else
+                    invalid = invalid + 1
                 end
             end
         end
     end
-    return imported
+    return imported, invalid
 end
 
 function Store:GetSyncState()
     return EnsureDatabase().cdmVoiceSyncState
+end
+
+function Store:GetApplyState()
+    return EnsureDatabase().cdmVoiceApplyState
 end

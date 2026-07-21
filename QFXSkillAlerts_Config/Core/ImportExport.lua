@@ -149,12 +149,12 @@ function ImportExport.ImportString(text)
         if payload.type == "cdmVoicePreset" then
             details = type(details) == "table" and details or {}
             print("[QFX-SA] " .. L(
-                "CDM_PRESET_IMPORT_DONE",
+                "CDM_PRESET_IMPORT_LOCAL_DONE",
                 tonumber(count) or 0,
-                tonumber(details.added) or 0,
-                tonumber(details.replaced) or 0,
-                tonumber(details.deduplicated) or 0,
-                tonumber(details.missingVoice) or 0
+                tonumber(details.currentSpec) or 0,
+                tonumber(details.otherScopes) or 0,
+                tonumber(details.pending) or 0,
+                tonumber(details.invalid) or 0
             ))
         else
             print("[QFX-SA] " .. L("MSG_IMPORT_DONE", tostring(payload.type), tonumber(count) or 0))

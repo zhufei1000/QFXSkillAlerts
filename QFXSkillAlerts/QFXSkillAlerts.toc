@@ -6,7 +6,7 @@
 ## Notes-zhCN: QFX 技能提醒：支持冷却、施法成功、嗜血提示，以及声音、图片、文本和 TTS 提醒。
 ## Notes-zhTW: QFX 技能提醒：支援冷卻、施法成功、嗜血提示，以及聲音、圖片、文字和 TTS 提醒。
 ## Author: zhufei1000
-## Version: 1.0.199
+## Version: 1.0.200
 ## X-Compatible-GameVersion: 12.0.5, 12.0.7
 ## SavedVariables: QFXSkillAlertsDB
 ## OptionalDeps: LibSharedMedia-3.0, SharedMedia, SharedMedia_Causese, SharedMedia_MyMedia, SharedMedia_Naowh, NaowhUI

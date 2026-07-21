@@ -356,6 +356,14 @@ local function EnsureDB()
     if type(db.cdmVoiceDisabledPresets) ~= "table" then
         db.cdmVoiceDisabledPresets = {}
     end
+    if type(db.cdmVoicePendingRemovals) ~= "table" then
+        db.cdmVoicePendingRemovals = {}
+    end
+    if type(db.cdmVoiceApplyState) ~= "table" then
+        db.cdmVoiceApplyState = { applyInProgress = false }
+    elseif db.cdmVoiceApplyState.applyInProgress == nil then
+        db.cdmVoiceApplyState.applyInProgress = false
+    end
     if type(db.cdmVoiceSyncState) ~= "table" then
         db.cdmVoiceSyncState = {}
     end
@@ -1045,7 +1053,7 @@ end
 ConfigureItemResolveQueue()
 
 local PublicAPI = NS.Core and NS.Core.PublicAPI
-PublicAPI:Install({
+local InstalledAPI = PublicAPI:Install({
         GetCurrentClassSpec = GetCurrentClassSpec,
         IsActiveScopeLoaded = IsActiveScopeLoaded,
         GetTargetClassSpec = GetTargetClassSpec,
@@ -1123,6 +1131,9 @@ PublicAPI:Install({
         ApplyCDMVoiceAlert = function(cooldownID, eventType, payload, classID, specID, category)
             return NS.Core.CDMVoiceService:ApplySoundAlert(cooldownID, eventType, payload, classID, specID, category)
         end,
+        ApplyCurrentCDMVoiceDraftAndReload = function(draft)
+            return NS.Core.CDMVoicePresetSync:ApplyCurrentDraftAndReload(draft)
+        end,
         SaveCDMVoicePresetOnly = function(cooldownID, eventType, payload, classID, specID, category)
             return NS.Core.CDMVoiceService:SaveVoicePresetOnly(
                 cooldownID, eventType, payload, classID, specID, category
@@ -1143,6 +1154,9 @@ PublicAPI:Install({
             return NS.Core.CDMVoiceService:GetCurrentSpecSavedEntries()
         end,
         DeleteCDMVoiceEntryByKey = function(key)
+            return NS.Core.CDMVoiceService:DeleteSoundAlertByKey(key)
+        end,
+        DeleteCDMVoiceEntryLocalOnly = function(key)
             return NS.Core.CDMVoiceService:DeleteSoundAlertByKey(key)
         end,
         ParseCDMVoiceSavedKey = function(key)
@@ -1189,32 +1203,72 @@ PublicAPI:Install({
                 return false, 0, nil, "invalid_version"
             end
             local store = NS.Core.CDMVoicePresetStore
-            local imported = store:ImportProfiles(payload.profiles)
+            local currentClassID, currentSpecID = NS.Core.CDMVoiceService:GetCurrentClassSpec()
+            local expectedCurrent, expectedOther, expectedInvalid = 0, 0, 0
+            for classID, classMap in pairs(payload.profiles) do
+                for specID, specMap in pairs(type(classMap) == "table" and classMap or {}) do
+                    for _, data in pairs(type(specMap) == "table" and specMap or {}) do
+                        local candidate = {}
+                        for key, value in pairs(type(data) == "table" and data or {}) do
+                            candidate[key] = value
+                        end
+                        candidate.classID = tonumber(candidate.classID) or tonumber(classID)
+                        candidate.specID = tonumber(candidate.specID) or tonumber(specID)
+                        local sanitized = store:SanitizeRecord(candidate, "import")
+                        if not sanitized then
+                            expectedInvalid = expectedInvalid + 1
+                        elseif sanitized.classID == tonumber(currentClassID)
+                            and sanitized.specID == tonumber(currentSpecID) then
+                            expectedCurrent = expectedCurrent + 1
+                        else
+                            expectedOther = expectedOther + 1
+                        end
+                    end
+                end
+            end
+            local imported, invalid = store:ImportProfiles(payload.profiles)
             local state = store:GetSyncState()
             state.importedVersion = math.max(tonumber(state.importedVersion) or 0, 1)
             local sync = NS.Core.CDMVoicePresetSync
-            if type(InCombatLockdown) == "function" and InCombatLockdown() then
-                return imported > 0, imported, {
-                    added = 0,
-                    replaced = 0,
-                    deduplicated = 0,
-                    duplicateRemoved = 0,
-                    alreadyLoaded = 0,
-                    missingSkill = 0,
-                    missingVoice = 0,
-                    unsupportedEvent = 0,
-                    ambiguousSkill = 0,
-                    failed = 0,
-                }, "combat"
+            local evaluated, summary, reason = sync:EvaluateCurrentSpec("preset_import", {
+                prompt = expectedCurrent > 0,
+                promptKind = "import",
+            })
+            summary = type(summary) == "table" and summary or {}
+            local details = {
+                total = tonumber(imported) or 0,
+                currentSpec = expectedCurrent,
+                otherScopes = expectedOther,
+                invalid = math.max(tonumber(invalid) or 0, expectedInvalid),
+                pending = tonumber(summary.pendingCount) or 0,
+                pendingRemoval = tonumber(summary.pendingRemoval) or 0,
+                added = tonumber(summary.pending) or 0,
+                replaced = 0,
+                deduplicated = 0,
+                missingVoice = tonumber(summary.missingVoice) or 0,
+            }
+            if not evaluated and type(NS.Core.CDMVoiceService.RefreshRuntimeData) == "function" then
+                NS.Core.CDMVoiceService:RefreshRuntimeData("preset_import_local")
             end
-            local ok, summary, reason = sync:RunCurrentSpecSync("preset_import", { capture = false })
-            return imported > 0 or ok, imported, summary, reason
+            return imported > 0, imported, details, evaluated and "pending" or (reason or "deferred")
         end,
         SyncCurrentSpecCDMVoices = function(reason, options)
-            return NS.Core.CDMVoicePresetSync:RunCurrentSpecSync(
+            return NS.Core.CDMVoicePresetSync:EvaluateCurrentSpec(
                 reason or "manual",
-                type(options) == "table" and options or { capture = false }
+                type(options) == "table" and options or {}
             )
+        end,
+        EvaluateCurrentSpecCDMVoices = function(reason, options)
+            return NS.Core.CDMVoicePresetSync:EvaluateCurrentSpec(reason or "manual", options)
+        end,
+        GetCurrentSpecCDMPendingSummary = function()
+            return NS.Core.CDMVoicePresetSync:GetCurrentSpecPendingSummary()
+        end,
+        ApplyCurrentCDMVoiceRecordAndReload = function(recordKey)
+            return NS.Core.CDMVoicePresetSync:ApplyCurrentRecordAndReload(recordKey)
+        end,
+        ApplyAllPendingCurrentSpecCDMVoicesAndReload = function(reason, drafts)
+            return NS.Core.CDMVoicePresetSync:ApplyAllPendingCurrentSpecAndReload(reason, drafts)
         end,
         ClearCDMVoiceRuntimeReloadPending = function()
             return NS.Core.CDMVoiceService:ClearPendingRuntimeReload()
@@ -1238,6 +1292,7 @@ PublicAPI:Install({
             return false
         end,
     })
+_G.QFXSkillAlerts = InstalledAPI
 
 local function ConfigureStartup()
     local startup = GetStartup()
