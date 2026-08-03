@@ -134,4 +134,115 @@ runtimeNow = runtimeNow + 0.016
 runtimeFrame.OnUpdate(runtimeFrame, 0.016)
 Equal(intervalQueries, 2, "completed processing period should refresh interval once")
 
+-- Disabling visual channels during a live cooldown must clear an already
+-- visible untimed alert before the disabled-channel hot-path guard returns.
+Runtime:WipeCooldowns(false)
+runtimeNow = 300
+local visualPlays = 0
+local visualHides = 0
+Runtime:Configure({
+    getUpdateInterval = function() return 0.16 end,
+    playReady = function(_, channel)
+        if channel == "image" then
+            visualPlays = visualPlays + 1
+        end
+        return true
+    end,
+    hideVisual = function()
+        visualHides = visualHides + 1
+    end,
+})
+local visualKey = "spell:2001"
+local visualConfig = {
+    spellId = 2001,
+    objectID = 2001,
+    objectType = "spell",
+    spellName = "Visual Test",
+    baseCD = 10,
+    chargeInput = 1,
+    voiceEnabled = false,
+    imageEnabled = true,
+    imageDurationEnabled = false,
+    imageConditionOp = "<=",
+    imageConditionTime = 20,
+    textEnabled = false,
+}
+Runtime:StartCooldown(2001, { [2001] = visualKey }, { [visualKey] = visualConfig })
+Equal(visualPlays, 1, "untimed image should become active")
+local hidesAfterStart = visualHides
+
+local disabledVisualConfig = {
+    spellId = 2001,
+    objectID = 2001,
+    objectType = "spell",
+    spellName = "Visual Test",
+    baseCD = 10,
+    chargeInput = 1,
+    voiceEnabled = false,
+    imageEnabled = false,
+    imageDurationEnabled = false,
+    imageConditionOp = "<=",
+    imageConditionTime = 20,
+    textEnabled = false,
+}
+Runtime:RefreshRuntimeCooldowns({ [visualKey] = disabledVisualConfig })
+local disabledVisual = Runtime:GetCooldownTable()[visualKey]
+Equal(visualHides, hidesAfterStart + 1, "disabling all visual channels must hide the active visual")
+Assert(disabledVisual and disabledVisual.visualActive == false, "disabled visual must not remain active")
+Equal(disabledVisual and disabledVisual.visualChannel, nil, "disabled visual channel must be cleared")
+
+-- The finite-channel completion guard must not skip cleanup when another live
+-- channel is disabled by a config refresh.
+disabledVisual.visualActive = true
+disabledVisual.visualChannel = "image"
+disabledVisual.imageNotified = false
+disabledVisual.textNotified = true
+local mixedVisualConfig = {
+    spellId = 2001,
+    objectID = 2001,
+    objectType = "spell",
+    spellName = "Visual Test",
+    baseCD = 10,
+    chargeInput = 1,
+    voiceEnabled = false,
+    imageEnabled = false,
+    imageDurationEnabled = false,
+    imageConditionOp = "<=",
+    imageConditionTime = 20,
+    textEnabled = true,
+    textDurationEnabled = true,
+    textConditionOp = "<=",
+    textConditionTime = 20,
+}
+local hidesBeforeMixedRefresh = visualHides
+Runtime:RefreshRuntimeCooldowns({ [visualKey] = mixedVisualConfig })
+local mixedVisual = Runtime:GetCooldownTable()[visualKey]
+Equal(visualHides, hidesBeforeMixedRefresh + 1, "completed-channel guard must first hide a disabled active visual")
+Assert(mixedVisual and mixedVisual.visualActive == false, "mixed refresh must clear the disabled active visual")
+
+-- The single-charge fast path must restore the charge and clear its timer at
+-- the same boundary as the former general-purpose loop.
+Runtime:WipeCooldowns(false)
+runtimeNow = 400
+local chargeKey = "spell:3001"
+Runtime:StartCooldown(3001, { [3001] = chargeKey }, {
+    [chargeKey] = {
+        spellId = 3001,
+        objectID = 3001,
+        objectType = "spell",
+        spellName = "Charge Test",
+        baseCD = 10,
+        chargeInput = 1,
+        voiceEnabled = false,
+        imageEnabled = false,
+        textEnabled = false,
+    },
+})
+local chargeCooldown = Runtime:GetCooldownTable()[chargeKey]
+Equal(chargeCooldown and chargeCooldown.currentCharge, 0, "single charge should be spent at cooldown start")
+runtimeNow = 410
+Runtime:SyncCooldownState(chargeKey, runtimeNow)
+Equal(chargeCooldown.currentCharge, 1, "single-charge fast path should restore the charge at expiry")
+Equal(chargeCooldown.nextChargeAt, nil, "single-charge fast path should clear the completed timer")
+
 print("Runtime hot-path regression tests passed")

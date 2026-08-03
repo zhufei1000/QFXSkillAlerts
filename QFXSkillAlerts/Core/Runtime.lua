@@ -63,9 +63,18 @@ local function NormalizeConditionTime(value, fallback)
 end
 
 local function EvaluateCooldownCondition(op, threshold, remaining, previousRemaining)
-    remaining = math.max(0, tonumber(remaining) or 0)
-    threshold = math.max(0, tonumber(threshold) or 0)
-    op = NormalizeConditionOp(op)
+    -- Hot path (runs every OnUpdate tick for every active alert channel):
+    -- op/threshold are always pre-normalized once by ApplyAlertFields when the
+    -- config is applied, so re-normalizing them here on every tick is wasted
+    -- work. Only fall back to full normalization if something unexpected
+    -- (non-numeric threshold / unrecognized op) slips through.
+    if type(threshold) ~= "number" then
+        threshold = NormalizeConditionTime(threshold, 0)
+    end
+    if type(op) ~= "string" then
+        op = NormalizeConditionOp(op)
+    end
+    remaining = remaining or 0
     if op == "<" then
         return remaining < threshold
     elseif op == ">" then
@@ -132,9 +141,60 @@ local function IsVisualAlreadyNotified(cd, channel)
     return true
 end
 
+-- A finite-duration channel (image/text with "limit display time" enabled)
+-- can only ever fire once per cooldown cycle: once cd.xNotified is true it
+-- will never fire again until the next StartCooldown() resets the flags.
+-- Untimed (state-based) channels must keep being re-evaluated every tick so
+-- they can hide again once the condition goes false, so those are never
+-- considered "done" here.
+local function IsChannelWorkDone(enabled, durationEnabled, notified)
+    if enabled ~= true then
+        return true
+    end
+    if durationEnabled ~= true then
+        return false
+    end
+    return notified == true
+end
+
+local function ClearDisabledActiveVisual(cd)
+    if cd.visualActive ~= true then
+        return false
+    end
+
+    local channel = cd.visualChannel
+    local stillEnabled = (channel == "image" and cd.imageEnabled == true)
+        or (channel == "text" and cd.textEnabled == true)
+        or (channel == "visual" and cd.imageEnabled == true and cd.textEnabled == true)
+    if stillEnabled then
+        return false
+    end
+
+    SafeCall("hideVisual", cd.primaryKey)
+    cd.visualActive = false
+    cd.visualChannel = nil
+    return true
+end
+
 local function CheckAndUpdateVisualChannels(cd, remaining)
-    local imageReady = cd.imageEnabled == true and EvaluateCooldownCondition(cd.imageConditionOp, cd.imageConditionTime, remaining, cd.previousRemaining)
-    local textReady = cd.textEnabled == true and EvaluateCooldownCondition(cd.textConditionOp, cd.textConditionTime, remaining, cd.previousRemaining)
+    -- Live config refreshes can disable a channel while its untimed visual is
+    -- still active. Clear that stale visual before any hot-path early return.
+    ClearDisabledActiveVisual(cd)
+
+    -- Hot-path guard: once every configured finite-duration visual channel
+    -- has already fired, there is nothing left this record can do until its
+    -- cooldown resets, so skip the (relatively costly) condition evaluation
+    -- entirely instead of recomputing the same "already notified" result on
+    -- every OnUpdate tick for the rest of the cooldown.
+    if IsChannelWorkDone(cd.imageEnabled, cd.imageDurationEnabled, cd.imageNotified)
+        and IsChannelWorkDone(cd.textEnabled, cd.textDurationEnabled, cd.textNotified) then
+        return false
+    end
+
+    local imageReady = cd.imageEnabled == true and
+    EvaluateCooldownCondition(cd.imageConditionOp, cd.imageConditionTime, remaining, cd.previousRemaining)
+    local textReady = cd.textEnabled == true and
+    EvaluateCooldownCondition(cd.textConditionOp, cd.textConditionTime, remaining, cd.previousRemaining)
     local channel = nil
     if imageReady and textReady then
         channel = "visual"
@@ -256,12 +316,21 @@ function Runtime:SyncCooldownState(spellId, now)
         cd.nextChargeAt = now + singleCD
     end
 
-    while cd.currentCharge < maxCharge and cd.nextChargeAt and now >= cd.nextChargeAt do
-        cd.currentCharge = cd.currentCharge + 1
-        if cd.currentCharge < maxCharge then
-            cd.nextChargeAt = cd.nextChargeAt + singleCD
-        else
+    -- Fast path for single-charge cooldowns (the vast majority):
+    -- skip the while-loop overhead.
+    if maxCharge == 1 then
+        if cd.currentCharge < 1 and cd.nextChargeAt and now >= cd.nextChargeAt then
+            cd.currentCharge = 1
             cd.nextChargeAt = nil
+        end
+    else
+        while cd.currentCharge < maxCharge and cd.nextChargeAt and now >= cd.nextChargeAt do
+            cd.currentCharge = cd.currentCharge + 1
+            if cd.currentCharge < maxCharge then
+                cd.nextChargeAt = cd.nextChargeAt + singleCD
+            else
+                cd.nextChargeAt = nil
+            end
         end
     end
 
@@ -301,10 +370,12 @@ function Runtime:ProcessCooldownRecord(primaryKey, cd, now, processVoice)
         remaining = nextChargeAt > 0 and math.max(0, nextChargeAt - now) or 0
     end
 
-    if processVoice ~= false then
+    if processVoice ~= false and cd.voiceEnabled ~= false then
         CheckAndNotifyChannel(cd, "voice", remaining)
     end
-    CheckAndUpdateVisualChannels(cd, remaining)
+    if cd.imageEnabled == true or cd.textEnabled == true or cd.visualActive == true then
+        CheckAndUpdateVisualChannels(cd, remaining)
+    end
     cd.previousRemaining = remaining
 
     if isFull then
