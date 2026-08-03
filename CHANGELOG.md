@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.0.207 - 2026-08-03
+
+- Added early channel-gating in the cooldown tick loop so disabled voice or visual channels skip their entire evaluation branch per tick, reducing per-frame work for cooldowns that only use one alert type.
+- Added a fast path for single-charge cooldown charge regeneration that replaces the general-purpose while loop with a single conditional check.
+- Reused pre-normalized cooldown condition operators and thresholds in the tick hot path instead of normalizing them again for every active alert channel.
+- Stopped reevaluating finite-duration visual channels after every enabled channel has already fired for the current cooldown cycle.
+- Fixed live config refreshes leaving an untimed image or text alert visible after its active visual channel was disabled.
+- Added regression coverage for disabled active-visual cleanup, finite-channel early-return cleanup, and single-charge regeneration.
+
 ## 1.0.206 - 2026-07-21
 
 - Reduced combat-time `UNIT_AURA` work by using incremental aura updates to skip all exhaustion lookups for unrelated player aura changes, with a safe full-scan fallback when update data is unavailable or unreadable.
