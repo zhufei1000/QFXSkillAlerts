@@ -145,16 +145,7 @@ function Notifier:ResolveEntrySoundPath(entry)
         end
 
         local path = self:NormalizeSoundPath(entry.soundPath or "")
-        if path ~= "" then return path end
-        path = self:NormalizeSoundPath(entry.builtinSoundPath or entry.customSoundPath or "")
-        if path ~= "" then return path end
-        if type(entry.customSoundPaths) == "table" then
-            for i = 1, 5 do
-                path = self:NormalizeSoundPath(entry.customSoundPaths[i] or "")
-                if path ~= "" then return path end
-            end
-        end
-        return ""
+        return path
     end
     return self:NormalizeSoundPath(entry)
 end
@@ -432,6 +423,8 @@ local function StartVisualTimer(frame, duration)
     end
 end
 
+local VISUAL_SLOT_LIMIT = 12
+
 function Notifier:GetVisualSlot(primaryKey)
     primaryKey = tostring(primaryKey or "")
     if primaryKey == "" then
@@ -449,6 +442,28 @@ function Notifier:GetVisualSlot(primaryKey)
     local slot = self.visualSlots[primaryKey]
     if slot and slot.frame then
         return slot
+    end
+
+    -- Bound the number of retained (hidden) visual frames so long sessions
+    -- with many distinct alerts cannot grow memory without limit.  Before
+    -- allocating a new frame, drop one inactive slot (never an actively
+    -- visible alert).
+    local count = 0
+    for _ in pairs(self.visualSlots) do
+        count = count + 1
+    end
+    if count >= VISUAL_SLOT_LIMIT then
+        for key, oldSlot in pairs(self.visualSlots) do
+            local oldFrame = oldSlot and oldSlot.frame
+            if oldFrame and oldFrame.qfxsaVisible ~= true then
+                CancelVisualTimer(oldFrame)
+                oldFrame:Hide()
+                oldFrame:SetParent(nil)
+                self.visualSlots[key] = nil
+                self:ForgetVisualKey(key)
+                break
+            end
+        end
     end
 
     visualFrameSerial = visualFrameSerial + 1
@@ -767,7 +782,7 @@ function Notifier:ShowVisualSlot(primaryKey, kind, cfg, fallbackText, duration)
         frame.text:SetText("")
         frame.text:Hide()
     elseif kind == "text" then
-        local text = TrimText(cfg.textAlert or "")
+        local text = TrimText(cfg.qfxsaTextOverride or cfg.textAlert or "")
         if text == "" then
             text = tostring(fallbackText or cfg.spellName or cfg.spellId or "")
         end
@@ -790,7 +805,7 @@ function Notifier:ShowVisualSlot(primaryKey, kind, cfg, fallbackText, duration)
         frame.text:Show()
     else
         local texture = self:ResolveImageTexture(cfg)
-        local text = TrimText(cfg.textAlert or "")
+        local text = TrimText(cfg.qfxsaTextOverride or cfg.textAlert or "")
         if text == "" then
             text = tostring(fallbackText or cfg.spellName or cfg.spellId or "")
         end
@@ -813,33 +828,68 @@ function Notifier:ShowVisualSlot(primaryKey, kind, cfg, fallbackText, duration)
     return true
 end
 
-function Notifier:ShowImageAlert(textureValue, size, duration, x, y, primaryKey)
-    local cfg
-    if type(textureValue) == "table" then
-        cfg = textureValue
-    else
-        cfg = {
-            imageSource = "path",
-            imagePath = tostring(textureValue or ""),
-            imageSize = size,
-            imageX = x,
-            imageY = y,
-        }
+local COUNTDOWN_KEY_SUFFIX = ":qfxsa-countdown"
+
+function Notifier:FormatCooldownCountdown(remaining)
+    local seconds = math.max(0, math.ceil((tonumber(remaining) or 0) - 0.001))
+    if seconds >= 60 then
+        local minutes = math.floor(seconds / 60)
+        local rest = seconds % 60
+        if rest > 0 then
+            return tostring(minutes) .. "m" .. tostring(rest) .. "s", seconds
+        end
+        return tostring(minutes) .. "m", seconds
     end
-    cfg.imageSize = size or cfg.imageSize
-    cfg.imageX = x or cfg.imageX
-    cfg.imageY = y or cfg.imageY
-    return self:ShowVisualSlot(primaryKey or MakeVisualKey(cfg, "image"), "image", cfg, nil, duration)
+    return tostring(seconds) .. "s", seconds
 end
 
-function Notifier:ShowTextAlert(text, size, duration, x, y, primaryKey)
-    local cfg = {
-        textAlert = tostring(text or ""),
-        textSize = size,
-        textX = x,
-        textY = y,
-    }
-    return self:ShowVisualSlot(primaryKey or "text", "text", cfg, text, duration)
+function Notifier:GetCooldownCountdownKey(primaryKey)
+    primaryKey = tostring(primaryKey or "")
+    if primaryKey == "" then
+        return ""
+    end
+    return primaryKey .. COUNTDOWN_KEY_SUFFIX
+end
+
+function Notifier:UpdateCooldownCountdown(cfg, remaining, primaryKey)
+    if type(cfg) ~= "table" or cfg.textEnabled ~= true or cfg.textCooldownCountdown ~= true then
+        return false
+    end
+    local countdownKey = self:GetCooldownCountdownKey(primaryKey)
+    if countdownKey == "" then
+        return false
+    end
+
+    local countdown = self:FormatCooldownCountdown(remaining)
+    local label = TrimText(cfg.textAlert or "")
+    if label == "" then
+        label = TrimText(cfg.spellName or "")
+    end
+    if label == "" then
+        label = tostring(cfg.objectID or cfg.spellId or "")
+    end
+    local displayText = label ~= "" and (label .. " " .. countdown) or countdown
+    local slot = self.visualSlots and self.visualSlots[countdownKey]
+    local visualFrame = slot and slot.frame
+    if visualFrame and visualFrame.qfxsaVisible == true and visualFrame.text then
+        visualFrame.text:SetText(displayText)
+        visualFrame.text:Show()
+        return true
+    end
+
+    cfg.qfxsaTextOverride = displayText
+    local kind = cfg.imageEnabled == true and "visual" or "text"
+    local shown = self:ShowVisualSlot(countdownKey, kind, cfg, displayText, nil)
+    cfg.qfxsaTextOverride = nil
+    return shown
+end
+
+function Notifier:HideCooldownCountdown(primaryKey)
+    local countdownKey = self:GetCooldownCountdownKey(primaryKey)
+    if countdownKey == "" then
+        return false
+    end
+    return self:HideVisualAlertForKey(countdownKey)
 end
 
 function Notifier:ShowImageTextGroup(cfg, fallbackText, primaryKey)
@@ -952,6 +1002,34 @@ function Notifier:PlayCastSuccessNotification(cfg, triggerSpellID, castGUID)
         return visualShown
     end
     return self:PlayVoiceFile(path, cfg.resolvedSoundPath ~= nil) or visualShown
+end
+
+function Notifier:PlayEventNotification(cfg)
+    if type(cfg) ~= "table" or cfg.voiceEnabled == false then
+        return false
+    end
+
+    local fallbackText = TrimText(cfg.eventName or "")
+    if fallbackText == "" then
+        fallbackText = L("ENTRY_TYPE_EVENT")
+    end
+    local mode = tostring(cfg.notifyMode or MODE_SOUND)
+    if mode == MODE_TTS or tostring(cfg.soundSource or "") == "tts" then
+        local text = TrimText(cfg.ttsText or "")
+        if text == "" then
+            text = fallbackText
+        end
+        return self:SpeakTextTTS(text, cfg.ttsRate)
+    end
+
+    local path = self:ResolveEntrySoundPath(cfg)
+    if path == "" then
+        if DEFAULT_CHAT_FRAME then
+            DEFAULT_CHAT_FRAME:AddMessage((NS.ADDON_CHAT_PREFIX or "") .. " " .. L("MSG_NO_EVENT_SOUND_PATH"))
+        end
+        return false
+    end
+    return self:PlayVoiceFile(path, cfg.resolvedSoundPath ~= nil)
 end
 
 function Notifier:PlayBloodlustNotification(cfg, fallbackPaths)

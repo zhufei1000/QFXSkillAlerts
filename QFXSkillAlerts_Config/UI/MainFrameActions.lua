@@ -35,7 +35,7 @@ local function EnsureAddTypeSelector(owner)
     end
 
     local frame = CreateFrame("Frame", "QFXSkillAlertsAddTypeSelectorFrame", UIParent, "BackdropTemplate")
-    frame:SetSize(460, 405)
+    frame:SetSize(460, 480)
     frame:SetPoint("CENTER", UIParent, "CENTER", 100, 0)
     frame:SetFrameStrata("FULLSCREEN_DIALOG")
     frame:SetFrameLevel(120)
@@ -94,8 +94,9 @@ local function EnsureAddTypeSelector(owner)
 
     frame.cooldownBtn, frame.cooldownHint = AddChoice("cooldown", L("TAB_COOLDOWN"), L("SELECT_ALERT_TYPE_COOLDOWN_DESC"), -82)
     frame.castBtn, frame.castHint = AddChoice("cast", L("TAB_CAST"), L("SELECT_ALERT_TYPE_CAST_DESC"), -156)
-    frame.bloodlustBtn, frame.bloodlustHint = AddChoice("bloodlust", L("TAB_BLOODLUST"), L("SELECT_ALERT_TYPE_BLOODLUST_DESC"), -230)
-    frame.cdmVoiceBtn, frame.cdmVoiceHint = AddChoice("cdmVoice", L("CDM_VOICE"), L("CDM_VOICE_DESC"), -304, function()
+    frame.eventBtn, frame.eventHint = AddChoice("event", L("TAB_EVENT_VOICE"), L("SELECT_ALERT_TYPE_EVENT_DESC"), -230)
+    frame.bloodlustBtn, frame.bloodlustHint = AddChoice("bloodlust", L("TAB_BLOODLUST"), L("SELECT_ALERT_TYPE_BLOODLUST_DESC"), -304)
+    frame.cdmVoiceBtn, frame.cdmVoiceHint = AddChoice("cdmVoice", L("CDM_VOICE"), L("CDM_VOICE_DESC"), -378, function()
         if NS.UI and NS.UI.CDMVoiceEditor and type(NS.UI.CDMVoiceEditor.Open) == "function" then
             NS.UI.CDMVoiceEditor:Open()
         end
@@ -105,10 +106,12 @@ local function EnsureAddTypeSelector(owner)
         desc:SetText(L("SELECT_ALERT_TYPE_DESC"))
         selfFrame.cooldownBtn:SetText(L("TAB_COOLDOWN"))
         selfFrame.castBtn:SetText(L("TAB_CAST"))
+        selfFrame.eventBtn:SetText(L("TAB_EVENT_VOICE"))
         selfFrame.bloodlustBtn:SetText(L("TAB_BLOODLUST"))
         selfFrame.cdmVoiceBtn:SetText(L("CDM_VOICE"))
         selfFrame.cooldownHint:SetText(L("SELECT_ALERT_TYPE_COOLDOWN_DESC"))
         selfFrame.castHint:SetText(L("SELECT_ALERT_TYPE_CAST_DESC"))
+        selfFrame.eventHint:SetText(L("SELECT_ALERT_TYPE_EVENT_DESC"))
         selfFrame.bloodlustHint:SetText(L("SELECT_ALERT_TYPE_BLOODLUST_DESC"))
         selfFrame.cdmVoiceHint:SetText(L("CDM_VOICE_DESC"))
     end
@@ -223,6 +226,8 @@ deleteBtn:SetScript("OnClick", function()
     local entryType = tostring(NS.AceOptions:GetState().entryType or "")
     if entryType == "cdmVoice" then
         self:DeleteCDMVoiceByKey(selectedKey)
+    elseif entryType == "bloodlust" then
+        return
     elseif NS.AceOptions and type(NS.AceOptions.IsGroupKey) == "function" and NS.AceOptions:IsGroupKey(selectedKey) then
         if NS.AceOptions:DeleteCollection(selectedKey, true) then
             self:RequestRefresh("list")

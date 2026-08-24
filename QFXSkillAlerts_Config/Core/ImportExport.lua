@@ -92,6 +92,23 @@ local function ImportCollectionPayload(payload)
     return false, 0
 end
 
+local function ImportBloodlustPayload(payload)
+    if type(payload) ~= "table" or type(payload.bloodlustConfig) ~= "table" then
+        return false, 0
+    end
+    local db = type(QFXSkillAlertsDB) == "table" and QFXSkillAlertsDB or nil
+    if not db then
+        QFXSkillAlertsDB = {}
+        db = QFXSkillAlertsDB
+    end
+    if ImportExportUtil and type(ImportExportUtil.DeepCopyTable) == "function" then
+        db.bloodlustConfig = ImportExportUtil:DeepCopyTable(payload.bloodlustConfig)
+    else
+        db.bloodlustConfig = payload.bloodlustConfig
+    end
+    return true, 1
+end
+
 function ImportExport.ImportString(text)
     local payload, err = DecodeExportPayload(text)
     if not payload then
@@ -104,6 +121,8 @@ function ImportExport.ImportString(text)
         ok, count = ImportEntryPayload(payload)
     elseif payload.type == "collection" then
         ok, count = ImportCollectionPayload(payload)
+    elseif payload.type == "bloodlust" then
+        ok, count = ImportBloodlustPayload(payload)
     elseif payload.type == "full" then
         ok, count = ImportFullPayload(payload)
     elseif payload.type == "cdmVoicePreset" then
@@ -133,6 +152,9 @@ function ImportExport.ImportString(text)
                     end
                     if type(api.RebuildCustomConfig) == "function" then
                         api.RebuildCustomConfig()
+                    end
+                    if type(api.RebuildEventVoiceConfig) == "function" then
+                        api.RebuildEventVoiceConfig()
                     end
                     if type(api.RefreshRuntimeCooldowns) == "function" then
                         api.RefreshRuntimeCooldowns()

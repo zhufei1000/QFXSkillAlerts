@@ -23,6 +23,7 @@ local OBJECT_TYPE_ITEM = CONST.OBJECT_TYPE_ITEM or "item"
 local ITEM_LOAD_NONE = CONST.ITEM_LOAD_NONE or "none"
 local ITEM_LOAD_EQUIPPED = CONST.ITEM_LOAD_EQUIPPED or "equipped"
 local ITEM_LOAD_BAGS = CONST.ITEM_LOAD_BAGS or "bags"
+local BLOODLUST_ENTRY_KEY = "bloodlust"
 
 local function GetOptions(owner)
     return owner or NS.AceOptions or {}
@@ -396,8 +397,32 @@ local function NormalizeEntryTypeValue(value)
     value = tostring(value or "cooldown")
     if value == "cast" then
         return value
+    elseif value == "event" then
+        return value
     end
     return "cooldown"
+end
+
+local function NormalizeEventVoiceKey(api, value)
+    value = tostring(value or "")
+    if api and type(api.NormalizeEventVoiceKey) == "function" then
+        return api.NormalizeEventVoiceKey(value)
+    end
+    return value ~= "" and value or nil
+end
+
+local function ResolveEventVoiceName(api, value)
+    if api and type(api.ResolveEventVoiceName) == "function" then
+        return TrimText(api.ResolveEventVoiceName(value))
+    end
+    return tostring(value or "")
+end
+
+local function ResolveEventVoiceIcon(api, value)
+    if api and type(api.ResolveEventVoiceIcon) == "function" then
+        return api.ResolveEventVoiceIcon(value)
+    end
+    return 134400
 end
 
 local function NormalizeObjectTypeValue(value)
@@ -418,16 +443,39 @@ local function IsEntryItemLoadRequirementMet(api, entry, objectType)
     return true
 end
 
+local function IsEntryTalentLoadRequirementMet(api, entry)
+    local hasIndependentLoadTalent = entry.loadTalentEnabled ~= nil
+        or entry.loadTalentId ~= nil or entry.loadTalentName ~= nil
+    local talentId = tonumber(entry.loadTalentId) or 0
+    local enabled = entry.loadTalentEnabled == true and talentId > 0
+    if not hasIndependentLoadTalent and entry.talentLoadFilter == true then
+        talentId = tonumber(entry.talentId) or 0
+        enabled = entry.checkTalent == true and talentId > 0
+    end
+    if not enabled then
+        return true
+    end
+    if api and type(api.IsTalentSelected) == "function" then
+        return api.IsTalentSelected(talentId) == true
+    end
+    return true
+end
+
 local function SameEntryIdentity(left, right)
     if type(left) ~= "table" or type(right) ~= "table" then
         return false
     end
+    local entryType = NormalizeEntryTypeValue(left.entryType)
+    if entryType ~= NormalizeEntryTypeValue(right.entryType) then
+        return false
+    end
+    if entryType == "event" then
+        local leftKey = tostring(left.eventKey or "")
+        return leftKey ~= "" and leftKey == tostring(right.eventKey or "")
+    end
     local leftID = tonumber(left.spellId or left.itemID) or 0
     local rightID = tonumber(right.spellId or right.itemID) or 0
     if leftID <= 0 or rightID <= 0 or math.floor(leftID) ~= math.floor(rightID) then
-        return false
-    end
-    if NormalizeEntryTypeValue(left.entryType) ~= NormalizeEntryTypeValue(right.entryType) then
         return false
     end
     local objectType = NormalizeObjectTypeValue(left.objectType)
@@ -576,10 +624,14 @@ function EntryStore:GetCurrentScopeEntryList(owner)
         if entry then
             local spellId = tonumber(entry.spellId) or 0
             local entryType = NormalizeEntryTypeValue(entry.entryType)
+            local eventKey = entryType == "event" and NormalizeEventVoiceKey(api, entry.eventKey) or nil
             local objectType = type(api.ResolveObjectType) == "function" and api.ResolveObjectType(spellId, entry.objectType) or tostring(entry.objectType or OBJECT_TYPE_SPELL)
             local spellName = TrimText(entry.spellName)
             local icon = nil
-            if spellName == "" and spellId > 0 then
+            if eventKey then
+                spellName = ResolveEventVoiceName(api, eventKey)
+                icon = ResolveEventVoiceIcon(api, eventKey)
+            elseif spellName == "" and spellId > 0 then
                 spellName = type(api.ResolveObjectName) == "function" and api.ResolveObjectName(spellId, objectType) or api.ResolveSpellName(spellId)
             end
             if not icon then
@@ -589,6 +641,8 @@ function EntryStore:GetCurrentScopeEntryList(owner)
             entries[#entries + 1] = {
                 key = BuildEntryKey(state.classID, state.specID, index),
                 entryType = entryType,
+                eventKey = eventKey,
+                eventThrottle = eventKey and math.max(0, math.min(300, tonumber(entry.eventThrottle) or 1)) or nil,
                 index = index,
                 spellId = spellId,
                 objectType = objectType,
@@ -607,6 +661,7 @@ function EntryStore:GetCurrentScopeEntryList(owner)
                 talentId = tonumber(entry.talentId) or 0,
                 talentName = TrimText(entry.talentName or ""),
                 talentCD = tonumber(entry.talentCD) or 0,
+                talentLoadFilter = entry.talentLoadFilter == true,
                 alertRaceIDs = NormalizeCustomRaceMap(entry.alertRaceIDs),
                 icon = icon,
             }
@@ -614,6 +669,41 @@ function EntryStore:GetCurrentScopeEntryList(owner)
     end
 
     return entries
+end
+
+function EntryStore:GetBloodlustSavedEntry(owner)
+    local api = GetApi()
+    local options = GetOptions(owner)
+    local db = type(QFXSkillAlertsDB) == "table" and QFXSkillAlertsDB or nil
+    local cfg = db and type(db.bloodlustConfig) == "table" and db.bloodlustConfig or nil
+    if not api or not cfg then
+        return nil
+    end
+
+    local modeTts, modeSound = api.GetModes()
+    local icon = type(api.ResolveSpellIcon) == "function" and api.ResolveSpellIcon(2825) or nil
+    local soundDetail = ""
+    if cfg.voiceEnabled ~= false then
+        soundDetail = BuildSoundDetailForEntry(options, cfg, modeTts, modeSound)
+    end
+
+    return {
+        key = BLOODLUST_ENTRY_KEY,
+        itemType = "entry",
+        entryType = "bloodlust",
+        isSpecial = true,
+        canDrag = false,
+        canDrop = false,
+        isLoaded = true,
+        spellId = 0,
+        spellName = L("SECTION_BLOODLUST_BUILTIN"),
+        modeText = BuildAlertActionDetailForEntry(cfg, modeTts, modeSound),
+        soundDetail = soundDetail,
+        notifyMode = tostring(cfg.notifyMode or modeSound),
+        soundPath = tostring(cfg.soundPath or ""),
+        ttsText = tostring(cfg.ttsText or ""),
+        icon = icon or 136012,
+    }
 end
 
 function EntryStore:GetAllSavedEntryList(owner)
@@ -648,22 +738,28 @@ function EntryStore:GetAllSavedEntryList(owner)
                         if entry then
                             local spellId = tonumber(entry.spellId) or 0
                             local entryType = NormalizeEntryTypeValue(entry.entryType)
+                            local eventKey = entryType == "event" and NormalizeEventVoiceKey(api, entry.eventKey) or nil
                             local objectType = type(api.ResolveObjectType) == "function" and api.ResolveObjectType(spellId, entry.objectType) or tostring(entry.objectType or OBJECT_TYPE_SPELL)
                             local spellName = TrimText(entry.spellName)
                             local icon = nil
-                            if spellName == "" and spellId > 0 then
+                            if eventKey then
+                                spellName = ResolveEventVoiceName(api, eventKey)
+                                icon = ResolveEventVoiceIcon(api, eventKey)
+                            elseif spellName == "" and spellId > 0 then
                                 spellName = type(api.ResolveObjectName) == "function" and api.ResolveObjectName(spellId, objectType) or api.ResolveSpellName(spellId)
                             end
                             if not icon then
                                 icon = type(api.ResolveObjectIcon) == "function" and api.ResolveObjectIcon(spellId, objectType) or (type(api.ResolveSpellIcon) == "function" and api.ResolveSpellIcon(spellId) or nil)
                             end
 
-                            local entryLoaded = scopeLoaded and EntryAlertScopeMatchesCurrent(entry, classID, specID, currentClassID, currentSpecID) and IsEntryItemLoadRequirementMet(api, entry, objectType)
+                            local entryLoaded = scopeLoaded and EntryAlertScopeMatchesCurrent(entry, classID, specID, currentClassID, currentSpecID) and IsEntryItemLoadRequirementMet(api, entry, objectType) and IsEntryTalentLoadRequirementMet(api, entry)
                             local loadedTag = entryLoaded and L("LOADED_TAG") or L("UNLOADED_TAG")
 
                             entries[#entries + 1] = {
                                 key = BuildEntryKey(classID, specID, index),
                                 entryType = entryType,
+                                eventKey = eventKey,
+                                eventThrottle = eventKey and math.max(0, math.min(300, tonumber(entry.eventThrottle) or 1)) or nil,
                                 objectType = objectType,
                                 itemLoadMode = (objectType == OBJECT_TYPE_ITEM) and NormalizeItemLoadMode(entry.itemLoadMode) or ITEM_LOAD_NONE,
                                 itemLoadSameName = objectType == OBJECT_TYPE_ITEM and NormalizeItemLoadMode(entry.itemLoadMode) == ITEM_LOAD_BAGS and entry.itemLoadSameName == true,
@@ -685,6 +781,7 @@ function EntryStore:GetAllSavedEntryList(owner)
                                 talentId = tonumber(entry.talentId) or 0,
                                 talentName = TrimText(entry.talentName or ""),
                                 talentCD = tonumber(entry.talentCD) or 0,
+                                talentLoadFilter = entry.talentLoadFilter == true,
                                 icon = icon,
                                 scopeText = string.format("%s / %s%s", className, specName, loadedTag),
                                 isLoaded = entryLoaded,
@@ -717,6 +814,15 @@ function EntryStore:LoadSelectedEntry(owner)
         return
     end
 
+    if tostring(state.selectedKey or "") == BLOODLUST_ENTRY_KEY then
+        if type(options.LoadBloodlustConfig) == "function" then
+            options:LoadBloodlustConfig()
+            state.selectedKey = BLOODLUST_ENTRY_KEY
+            state.selectedCollectionKey = nil
+        end
+        return
+    end
+
     local classID, specID, selectedIndex = ParseEntryKey(state.selectedKey)
     if classID < 0 or specID < 0 or selectedIndex <= 0 then
         return
@@ -735,17 +841,42 @@ function EntryStore:LoadSelectedEntry(owner)
     state.classID = classID
     state.specID = specID
     state.entryType = NormalizeEntryTypeValue(entry.entryType)
+    state.eventKey = state.entryType == "event" and NormalizeEventVoiceKey(api, entry.eventKey) or nil
+    state.eventThrottle = state.entryType == "event" and math.max(0, math.min(300, tonumber(entry.eventThrottle) or 1)) or 1
     state.spellId = tonumber(entry.spellId) or 0
-    state.objectType = type(api.ResolveObjectType) == "function" and api.ResolveObjectType(state.spellId, entry.objectType) or tostring(entry.objectType or OBJECT_TYPE_SPELL)
+    state.objectType = state.entryType == "event" and OBJECT_TYPE_SPELL
+        or (type(api.ResolveObjectType) == "function" and api.ResolveObjectType(state.spellId, entry.objectType) or tostring(entry.objectType or OBJECT_TYPE_SPELL))
     state.itemLoadMode = (state.objectType == OBJECT_TYPE_ITEM) and NormalizeItemLoadMode(entry.itemLoadMode) or ITEM_LOAD_NONE
     state.itemLoadSameName = state.objectType == OBJECT_TYPE_ITEM and state.itemLoadMode == ITEM_LOAD_BAGS and entry.itemLoadSameName == true
     state.spellName = TrimText(entry.spellName)
+    if state.entryType == "event" then
+        state.spellName = ResolveEventVoiceName(api, state.eventKey)
+    end
     state.baseCD = tonumber(entry.baseCD) or 0
     state.fixedCD = true
     state.checkTalent = entry.checkTalent == true and (tonumber(entry.talentId) or 0) > 0
     state.talentId = tonumber(entry.talentId) or 0
     state.talentName = TrimText(entry.talentName or "")
     state.talentCD = tonumber(entry.talentCD) or 0
+    state.talentLoadFilter = entry.talentLoadFilter == true
+    local hasIndependentLoadTalent = entry.loadTalentEnabled ~= nil
+        or entry.loadTalentId ~= nil or entry.loadTalentName ~= nil
+    state.loadTalentEnabled = entry.loadTalentEnabled == true
+    state.loadTalentId = tonumber(entry.loadTalentId) or 0
+    state.loadTalentName = TrimText(entry.loadTalentName or "")
+    -- Legacy saves used the CD-change talent identity for the load filter too.
+    -- Translate that shape only while the new independent fields are absent.
+    if not hasIndependentLoadTalent and entry.talentLoadFilter == true
+        and entry.checkTalent == true and (tonumber(entry.talentId) or 0) > 0 then
+        state.loadTalentEnabled = true
+        state.loadTalentId = tonumber(entry.talentId) or 0
+        state.loadTalentName = TrimText(entry.talentName or "")
+        if (tonumber(entry.talentCD) or 0) <= 0 then
+            state.checkTalent = false
+            state.talentId = 0
+            state.talentName = ""
+        end
+    end
     state.delayEnabled = entry.delayEnabled == true
     state.delaySeconds = math.max(0, tonumber(entry.delaySeconds) or 0)
     state.castDelayMode = NormalizeCastDelayMode(entry.castDelayMode)
@@ -769,7 +900,7 @@ function EntryStore:LoadSelectedEntry(owner)
     state.voiceConditionOp = NormalizeConditionOp(entry.voiceConditionOp)
     state.voiceConditionTime = NormalizeConditionTime(entry.voiceConditionTime, legacyAlertTime)
     state.activeAlertTab = "settings"
-    state.imageEnabled = entry.imageEnabled == true
+    state.imageEnabled = state.entryType ~= "event" and entry.imageEnabled == true
     state.imageConditionOp = NormalizeConditionOp(entry.imageConditionOp)
     state.imageConditionTime = NormalizeConditionTime(entry.imageConditionTime, legacyAlertTime)
     state.imageSource = tostring(entry.imageSource or ((TrimText(entry.imagePath or "") ~= "") and "path" or "auto"))
@@ -781,7 +912,8 @@ function EntryStore:LoadSelectedEntry(owner)
     state.imageDuration = math.max(0.1, tonumber(entry.imageDuration) or 2)
     state.imageX = tonumber(entry.imageX) or 0
     state.imageY = tonumber(entry.imageY) or 120
-    state.textEnabled = entry.textEnabled == true
+    state.textEnabled = state.entryType ~= "event" and entry.textEnabled == true
+    state.textCooldownCountdown = entry.textCooldownCountdown == true
     state.textConditionOp = NormalizeConditionOp(entry.textConditionOp)
     state.textConditionTime = NormalizeConditionTime(entry.textConditionTime, legacyAlertTime)
     state.textAlert = tostring(entry.textAlert or "")
@@ -908,6 +1040,9 @@ function EntryStore:SaveEntry(owner)
     local talentId = tonumber(state.talentId) or 0
     local talentName = TrimText(state.talentName or "")
     local talentCD = tonumber(state.talentCD) or 0
+    local loadTalentEnabled = state.loadTalentEnabled == true
+    local loadTalentId = tonumber(state.loadTalentId) or 0
+    local loadTalentName = TrimText(state.loadTalentName or "")
     local notifyMode = tostring(state.notifyMode or select(2, api.GetModes()))
     local ttsText = tostring(state.ttsText or "")
     local delayEnabled = state.delayEnabled == true
@@ -933,6 +1068,7 @@ function EntryStore:SaveEntry(owner)
     local imageX = math.floor((tonumber(state.imageX) or 0) + 0.5)
     local imageY = math.floor((tonumber(state.imageY) or 120) + 0.5)
     local textEnabled = state.textEnabled == true
+    local textCooldownCountdown = state.textCooldownCountdown == true
     local textConditionOp = NormalizeConditionOp(state.textConditionOp)
     local textConditionTime = NormalizeConditionTime(state.textConditionTime, cooldownAlertTime)
     if cooldownAlertTime <= 0 then
@@ -953,6 +1089,10 @@ function EntryStore:SaveEntry(owner)
     if textHAlign ~= "left" and textHAlign ~= "right" then textHAlign = "center" end
     local textOffsetX = math.floor((tonumber(state.textOffsetX) or 0) + 0.5)
     local textOffsetY = math.floor((tonumber(state.textOffsetY) or 0) + 0.5)
+    local visualUID = tostring(state._qfxPendingVisualUID or state.visualUID or "")
+    if visualUID == "" then
+        visualUID = nil
+    end
     if imageEnabled and textEnabled and (imageDurationEnabled or textDurationEnabled) then
         imageDurationEnabled = true
         textDurationEnabled = true
@@ -1000,6 +1140,9 @@ function EntryStore:SaveEntry(owner)
     local entryType = NormalizeEntryTypeValue(state.entryType)
     local isCooldownEntry = entryType == "cooldown"
     local isCastEntry = entryType == "cast"
+    local isEventEntry = entryType == "event"
+    local eventKey = isEventEntry and NormalizeEventVoiceKey(api, state.eventKey) or nil
+    local eventThrottle = isEventEntry and math.max(0, math.min(300, tonumber(state.eventThrottle) or 1)) or nil
 
     local alertRaceIDs = NormalizeCustomRaceMap(state.alertRaceIDs)
     local alertClassIDs = NormalizeCustomClassMap(state.alertClassIDs, classID)
@@ -1018,7 +1161,11 @@ function EntryStore:SaveEntry(owner)
         print("[QFX-SA] " .. L("MSG_INVALID_CLASS_SPEC"))
         return
     end
-    if spellId <= 0 then
+    if isEventEntry and not eventKey then
+        print("[QFX-SA] " .. L("MSG_INVALID_EVENT_VOICE"))
+        return
+    end
+    if not isEventEntry and spellId <= 0 then
         print("[QFX-SA] " .. L("MSG_INVALID_SPELL_ID"))
         return
     end
@@ -1026,7 +1173,22 @@ function EntryStore:SaveEntry(owner)
         print("[QFX-SA] " .. L("MSG_INVALID_FIXED_CD"))
         return
     end
-    if (not isCooldownEntry) then
+    if not isCooldownEntry and not isCastEntry then
+        spellId = 0
+        objectType = OBJECT_TYPE_SPELL
+        baseCD = 0
+        checkTalent = false
+        talentId = 0
+        talentName = ""
+        talentCD = 0
+        loadTalentEnabled = false
+        loadTalentId = 0
+        loadTalentName = ""
+        delayEnabled = false
+        delaySeconds = 0
+        imageEnabled = false
+        textEnabled = false
+    elseif isCastEntry then
         baseCD = 0
         checkTalent = false
         talentId = 0
@@ -1045,13 +1207,23 @@ function EntryStore:SaveEntry(owner)
         print("[QFX-SA] " .. L("MSG_NEED_TALENT_ID"))
         return
     end
-    if checkTalent and talentCD <= 0 then
-        print("[QFX-SA] " .. L("MSG_NEED_TALENT_CD"))
+    if loadTalentEnabled and loadTalentId <= 0 then
+        print("[QFX-SA] " .. L("MSG_NEED_LOAD_TALENT_ID"))
         return
     end
+    -- "CD Changes To" is optional: leave it empty to keep the fixed CD and
+    -- only use the talent as a load condition.
     if checkTalent and talentName == "" and type(api.ResolveTalentName) == "function" then
         talentName = api.ResolveTalentName(talentId)
         state.talentName = talentName
+    end
+    if loadTalentEnabled and loadTalentName == "" and type(api.ResolveTalentName) == "function" then
+        loadTalentName = api.ResolveTalentName(loadTalentId)
+        state.loadTalentName = loadTalentName
+    end
+    if isEventEntry and not voiceEnabled then
+        print("[QFX-SA] " .. L("MSG_EVENT_VOICE_REQUIRED"))
+        return
     end
     if not voiceEnabled and not imageEnabled and not textEnabled then
         print("[QFX-SA] " .. L("MSG_NEED_ALERT_ACTIONS"))
@@ -1081,14 +1253,18 @@ function EntryStore:SaveEntry(owner)
         local entry = api.GetEntry(map, index)
         local existingID = tonumber(entry and entry.spellId) or 0
         local existingType = api and type(api.ResolveObjectType) == "function" and api.ResolveObjectType(existingID, entry and entry.objectType) or tostring(entry and entry.objectType or OBJECT_TYPE_SPELL)
-        if entry
-            and index ~= targetIndex
+        local duplicateEvent = isEventEntry and entry and NormalizeEntryTypeValue(entry.entryType) == "event"
+            and tostring(entry.eventKey or "") == tostring(eventKey or "")
+        local duplicateObject = not isEventEntry and entry
             and (tonumber(entry.spellId) or 0) == spellId
             and NormalizeEntryTypeValue(entry.entryType) == entryType
             and tostring(existingType) == tostring(objectType)
             and (objectType ~= OBJECT_TYPE_ITEM or ItemLoadModesOverlap(entry.itemLoadMode, itemLoadMode))
+        if entry
+            and index ~= targetIndex
+            and (duplicateEvent or duplicateObject)
             and EntryAlertScopeOverlaps(entry, classID, specID, alertRaceIDs, alertClassIDs, alertSpecIDs) then
-            print("[QFX-SA] " .. L("MSG_DUP_SPELL"))
+            print("[QFX-SA] " .. L(isEventEntry and "MSG_DUP_EVENT_VOICE" or "MSG_DUP_SPELL"))
             return
         end
     end
@@ -1101,18 +1277,26 @@ function EntryStore:SaveEntry(owner)
     local oldEntry = api.GetEntry(map, targetIndex)
     local savedEntry = {
         entryType = entryType,
+        eventKey = isEventEntry and eventKey or nil,
+        eventThrottle = isEventEntry and eventThrottle or nil,
         objectType = objectType,
-        spellName = tostring(state.spellName or ""),
-        spellId = math.floor(spellId),
+        spellName = isEventEntry and "" or tostring(state.spellName or ""),
+        spellId = isEventEntry and 0 or math.floor(spellId),
         itemID = (objectType == OBJECT_TYPE_ITEM) and math.floor(spellId) or nil,
         itemLoadMode = (objectType == OBJECT_TYPE_ITEM) and itemLoadMode or nil,
         itemLoadSameName = (objectType == OBJECT_TYPE_ITEM and itemLoadMode == ITEM_LOAD_BAGS and state.itemLoadSameName == true) or nil,
         baseCD = isCooldownEntry and tonumber(string.format("%.2f", baseCD)) or 0,
         fixedCD = true,
-        checkTalent = isCooldownEntry and checkTalent and talentId > 0,
-        talentId = (isCooldownEntry and checkTalent) and math.floor(talentId) or 0,
-        talentName = (isCooldownEntry and checkTalent) and talentName or "",
+        checkTalent = objectType ~= OBJECT_TYPE_ITEM and checkTalent and talentId > 0,
+        talentId = (objectType ~= OBJECT_TYPE_ITEM and checkTalent) and math.floor(talentId) or 0,
+        talentName = (objectType ~= OBJECT_TYPE_ITEM and checkTalent) and talentName or "",
         talentCD = (isCooldownEntry and checkTalent) and tonumber(string.format("%.2f", talentCD)) or 0,
+        -- Keep the legacy flag explicitly false so older runtimes do not apply
+        -- the independent load filter to the CD-change talent by mistake.
+        talentLoadFilter = false,
+        loadTalentEnabled = objectType ~= OBJECT_TYPE_ITEM and loadTalentEnabled and loadTalentId > 0,
+        loadTalentId = (objectType ~= OBJECT_TYPE_ITEM and loadTalentEnabled) and math.floor(loadTalentId) or 0,
+        loadTalentName = (objectType ~= OBJECT_TYPE_ITEM and loadTalentEnabled) and loadTalentName or "",
         chargeInput = 1,
         notifyMode = notifyMode,
         ttsText = ttsText,
@@ -1130,7 +1314,7 @@ function EntryStore:SaveEntry(owner)
         voiceEnabled = voiceEnabled,
         voiceConditionOp = isCooldownEntry and voiceConditionOp or "<=",
         voiceConditionTime = isCooldownEntry and tonumber(string.format("%.2f", voiceConditionTime)) or 0,
-        imageEnabled = imageEnabled,
+        imageEnabled = not isEventEntry and imageEnabled,
         imageConditionOp = isCooldownEntry and imageConditionOp or "<=",
         imageConditionTime = isCooldownEntry and tonumber(string.format("%.2f", imageConditionTime)) or 0,
         imageSource = imageSource,
@@ -1141,7 +1325,8 @@ function EntryStore:SaveEntry(owner)
         imageDuration = imageDuration,
         imageX = imageX,
         imageY = imageY,
-        textEnabled = textEnabled,
+        textEnabled = not isEventEntry and textEnabled,
+        textCooldownCountdown = isCooldownEntry and textEnabled and textCooldownCountdown,
         textConditionOp = isCooldownEntry and textConditionOp or "<=",
         textConditionTime = isCooldownEntry and tonumber(string.format("%.2f", textConditionTime)) or 0,
         textAlert = textAlert,
@@ -1155,6 +1340,7 @@ function EntryStore:SaveEntry(owner)
         textHAlign = textHAlign,
         textOffsetX = textOffsetX,
         textOffsetY = textOffsetY,
+        visualUID = visualUID,
         alertRaceIDs = alertRaceIDs,
         alertClassIDs = alertClassIDs,
         alertSpecIDs = alertSpecIDs,
@@ -1217,6 +1403,9 @@ function EntryStore:SaveEntry(owner)
     if type(api.RebuildCustomConfig) == "function" then
         api.RebuildCustomConfig()
     end
+    if type(api.RebuildEventVoiceConfig) == "function" then
+        api.RebuildEventVoiceConfig()
+    end
     HideRuntimeVisualAlerts(true)
     api.RefreshRuntimeCooldowns()
     state.selectedKey = BuildEntryKey(classID, specID, targetIndex)
@@ -1265,6 +1454,9 @@ function EntryStore:DeleteSelectedEntry(owner, suppressRefresh)
     end
     if type(api.RebuildCustomConfig) == "function" then
         api.RebuildCustomConfig()
+    end
+    if type(api.RebuildEventVoiceConfig) == "function" then
+        api.RebuildEventVoiceConfig()
     end
     HideRuntimeVisualAlerts()
     api.RefreshRuntimeCooldowns()

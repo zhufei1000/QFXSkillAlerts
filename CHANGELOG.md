@@ -1,5 +1,16 @@
 # Changelog
 
+## 1.0.222 - 2026-08-25
+
+- Added immediate event-voice alerts for combat, Mythic+, encounters, ready checks, and player death, with dynamic event registration, timestamp-only duplicate guards, and no event OnUpdate, timer, or ticker.
+- Integrated event voices into saved entries, ordering, collections, deletion cleanup, localized names/icons, and single-entry, collection, and full import/export flows.
+- Made event import identity scope-aware so the same event can coexist across different class, specialization, and race scopes without overwriting another saved entry.
+- Added cooldown countdown text, independent load-talent and CD-change talent controls, and preserved the expanded settings through import/export.
+- Integrated Bloodlust into saved entries and repaired custom, built-in, and SharedMedia voice playback paths.
+- Made Cooldown Manager presets movable in collections, cascade-delete with their containing collection, and automatically remove stale collection references.
+- Reduced saved-list and export-related UI stalls with cached/lazy work while preserving combat hot-path performance.
+- Expanded regression, codec, collection, saved-list, and runtime performance coverage; updated compatibility metadata for game version 12.1.0.
+
 ## 1.0.206 - 2026-07-21
 
 - Reduced combat-time `UNIT_AURA` work by using incremental aura updates to skip all exhaustion lookups for unrelated player aura changes, with a safe full-scan fallback when update data is unavailable or unreadable.

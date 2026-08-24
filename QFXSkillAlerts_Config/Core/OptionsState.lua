@@ -163,6 +163,12 @@ function NS.OptionsState:GetState(owner)
     owner.state.talentId = tonumber(owner.state.talentId) or 0
     owner.state.talentName = tostring(owner.state.talentName or "")
     owner.state.talentCD = tonumber(owner.state.talentCD) or 0
+    owner.state.talentLoadFilter = owner.state.talentLoadFilter == true
+    owner.state.loadTalentEnabled = owner.state.loadTalentEnabled == true
+    owner.state.loadTalentId = tonumber(owner.state.loadTalentId) or 0
+    owner.state.loadTalentName = tostring(owner.state.loadTalentName or "")
+    owner.state.eventKey = tostring(owner.state.eventKey or "combat_start")
+    owner.state.eventThrottle = math.max(0, math.min(300, tonumber(owner.state.eventThrottle) or 1))
     owner.state.delayEnabled = owner.state.delayEnabled == true
     owner.state.delaySeconds = math.max(0, tonumber(owner.state.delaySeconds) or 0)
     owner.state.castDelayMode = "show"
@@ -190,6 +196,7 @@ function NS.OptionsState:GetState(owner)
     owner.state.imageX = tonumber(owner.state.imageX) or 0
     owner.state.imageY = tonumber(owner.state.imageY) or 120
     owner.state.textEnabled = owner.state.textEnabled == true
+    owner.state.textCooldownCountdown = owner.state.textCooldownCountdown == true
     owner.state.textConditionOp = NormalizeConditionOp(owner.state.textConditionOp)
     owner.state.textConditionTime = math.max(0, tonumber(owner.state.textConditionTime) or legacyAlertTime)
     owner.state.textAlert = tostring(owner.state.textAlert or "")
@@ -398,6 +405,12 @@ function NS.OptionsState:ClearEditorFields(owner)
     state.talentId = 0
     state.talentName = ""
     state.talentCD = 0
+    state.talentLoadFilter = false
+    state.loadTalentEnabled = false
+    state.loadTalentId = 0
+    state.loadTalentName = ""
+    state.eventKey = "combat_start"
+    state.eventThrottle = 1
     state.delayEnabled = false
     state.delaySeconds = 0
     state.castDelayMode = "show"
@@ -429,6 +442,7 @@ function NS.OptionsState:ClearEditorFields(owner)
     state.imageX = 0
     state.imageY = 120
     state.textEnabled = false
+    state.textCooldownCountdown = false
     state.textConditionOp = "<="
     state.textConditionTime = 0
     state.textAlert = ""
@@ -493,6 +507,12 @@ function NS.OptionsState:SyncStateFromWidgets(owner)
     if widgets.baseCD then
         state.baseCD = tonumber(widgets.baseCD:GetText() or "") or 0
     end
+    if widgets.eventTypeDrop and widgets.eventTypeDrop.qfxsaValue ~= nil then
+        state.eventKey = tostring(widgets.eventTypeDrop.qfxsaValue or "")
+    end
+    if widgets.eventThrottle then
+        state.eventThrottle = math.max(0, math.min(300, tonumber(widgets.eventThrottle:GetText() or "") or 1))
+    end
     if widgets.checkTalent then
         if type(widgets.checkTalent.GetValue) == "function" then
             state.checkTalent = widgets.checkTalent:GetValue() == true
@@ -511,6 +531,24 @@ function NS.OptionsState:SyncStateFromWidgets(owner)
     end
     if widgets.talentCD then
         state.talentCD = tonumber(widgets.talentCD:GetText() or "") or 0
+    end
+    if widgets.talentLoadFilter then
+        if type(widgets.talentLoadFilter.GetValue) == "function" then
+            state.talentLoadFilter = widgets.talentLoadFilter:GetValue() == true
+        elseif type(widgets.talentLoadFilter.GetChecked) == "function" then
+            state.talentLoadFilter = widgets.talentLoadFilter:GetChecked() == true
+        else
+            state.talentLoadFilter = false
+        end
+    end
+    if widgets.loadTalentEnabled then
+        state.loadTalentEnabled = widgets.loadTalentEnabled:GetChecked() == true
+    end
+    if widgets.loadTalentId then
+        state.loadTalentId = tonumber(widgets.loadTalentId:GetText() or "") or 0
+    end
+    if widgets.loadTalentName then
+        state.loadTalentName = tostring(widgets.loadTalentName:GetText() or "")
     end
     if widgets.delayEnabled then
         if type(widgets.delayEnabled.GetValue) == "function" then

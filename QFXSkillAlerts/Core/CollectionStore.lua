@@ -65,6 +65,10 @@ function Store.ParseEntryKey(key)
     return tonumber(classID) or 0, tonumber(specID) or 0, tonumber(index) or 0
 end
 
+function Store.IsCDMEntryKey(key)
+    return TrimText(key):match("^cdmpreset:%d+:%d+:[^:]+:%d+:[^:]+$") ~= nil
+end
+
 function Store.BuildGroupKey(classID, specID, groupID)
     return string.format("group:%d:%d:%s", tonumber(classID) or 0, tonumber(specID) or 0, tostring(groupID or ""))
 end
@@ -210,6 +214,54 @@ local function EntryKeyExists(api, key)
 end
 Store.EntryKeyExists = EntryKeyExists
 
+local cdmSnapshotCache = nil
+
+function Store.GetCDMEntrySnapshot(api)
+    if not api or type(api.GetCDMVoiceSavedEntries) ~= "function" then
+        return { entries = {}, byKey = {}, validKeys = {} }
+    end
+    local hasRevision = type(api.GetCDMVoiceRefreshSerial) == "function"
+    local revision = hasRevision and (tonumber(api.GetCDMVoiceRefreshSerial()) or 0) or nil
+    if hasRevision and type(cdmSnapshotCache) == "table"
+        and cdmSnapshotCache.api == api and cdmSnapshotCache.revision == revision then
+        return cdmSnapshotCache.snapshot
+    end
+
+    local snapshot = { entries = {}, byKey = {}, validKeys = {} }
+    for _, entry in ipairs(api.GetCDMVoiceSavedEntries() or {}) do
+        local key = TrimText(entry and entry.key)
+        if key ~= "" and not snapshot.byKey[key] then
+            snapshot.entries[#snapshot.entries + 1] = entry
+            snapshot.byKey[key] = entry
+            snapshot.validKeys[key] = true
+        end
+    end
+    if hasRevision then
+        cdmSnapshotCache = { api = api, revision = revision, snapshot = snapshot }
+    end
+    return snapshot
+end
+
+local function CDMEntryKeyExists(api, key)
+    key = TrimText(key)
+    if not Store.IsCDMEntryKey(key) or not api then
+        return false
+    end
+    local parsed = type(api.ParseCDMVoiceSavedKey) == "function" and api.ParseCDMVoiceSavedKey(key) or nil
+    if type(parsed) ~= "table" or parsed.keyType ~= "preset" then
+        return false
+    end
+    if type(api.HasCDMVoicePresetRecord) == "function" then
+        return api.HasCDMVoicePresetRecord(parsed.classID, parsed.specID, parsed.recordKey) == true
+    end
+    if type(api.GetCDMVoicePresetRecord) == "function" then
+        return type(api.GetCDMVoicePresetRecord(parsed.classID, parsed.specID, parsed.recordKey)) == "table"
+    end
+    local snapshot = Store.GetCDMEntrySnapshot(api)
+    return snapshot.validKeys[key] == true
+end
+Store.CDMEntryKeyExists = CDMEntryKeyExists
+
 function Store.NormalizeGroupBasics(group)
     if type(group) ~= "table" then
         return false
@@ -268,6 +320,12 @@ function Store.NormalizeCollectionScope(scope, entryMap, scopeClassID, scopeSpec
                 if cleanGroup(childGroupID, stack) then
                     cleaned[#cleaned + 1] = groupKey
                     nestedGroupIDs[childGroupID] = true
+                end
+            elseif Store.IsCDMEntryKey(value) then
+                local cdmKey = TrimText(value)
+                if CDMEntryKeyExists(api, cdmKey) and not seenEntryKeys[cdmKey] then
+                    cleaned[#cleaned + 1] = cdmKey
+                    seenEntryKeys[cdmKey] = true
                 end
             else
                 local entryKey, entryClassID, entrySpecID, entryIndex = Store.EntryRefToKey(scopeClassID, scopeSpecID, value)
@@ -351,6 +409,24 @@ function Store.NormalizeCollectionScope(scope, entryMap, scopeClassID, scopeSpec
 end
 
 function Store.RemoveEntryKeyFromCollectionScope(scope, entryKey, scopeClassID, scopeSpecID)
+    local cdmKey = TrimText(entryKey)
+    if Store.IsCDMEntryKey(cdmKey) then
+        if type(scope) ~= "table" then
+            return nil
+        end
+        for groupID, group in pairs(scope.groups or {}) do
+            if type(group) == "table" and type(group.entries) == "table" then
+                for i = #group.entries, 1, -1 do
+                    if TrimText(group.entries[i]) == cdmKey then
+                        table.remove(group.entries, i)
+                        return { container = "group", groupID = tostring(groupID), position = i }
+                    end
+                end
+            end
+        end
+        return nil
+    end
+
     local key, classID, specID, index = Store.EntryRefToKey(scopeClassID, scopeSpecID, entryKey)
     if type(scope) ~= "table" or not key or index <= 0 then
         return nil

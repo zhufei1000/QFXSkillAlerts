@@ -31,10 +31,6 @@ local function GetLibDeflate()
     return nil
 end
 
-function ImportCodec:GetPrefix()
-    return EXPORT_PREFIX
-end
-
 function ImportCodec:Encode(payload)
     local serializer = GetAceSerializer()
     local deflate = GetLibDeflate()

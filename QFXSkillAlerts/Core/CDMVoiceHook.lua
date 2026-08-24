@@ -65,11 +65,19 @@ function Hook:HandleAlert(alert)
     end
 
     local payload = GetAlertPayload(alert)
-    if not payload or not Registry:IsOwnedPayload(payload) then
+    if not payload then
         return
     end
 
-    local path = Registry:GetPathForPayload(payload)
+    -- Almost every Blizzard CDM sound alert is not owned by QFX. Check the
+    -- in-memory registry first so the common path never touches SavedVariables.
+    local item = Registry:GetItemForPayload(payload)
+    if not item then
+        if not Registry:IsOwnedPayload(payload) then return end
+        self:NotifyMissingOnce(payload)
+        return
+    end
+    local path = item.path
     if type(path) ~= "string" or path == "" then
         self:NotifyMissingOnce(payload)
         return

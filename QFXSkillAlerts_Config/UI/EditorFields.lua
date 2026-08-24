@@ -52,14 +52,6 @@ local function GetCachedClassItems()
     return DropdownItemCache.classItems
 end
 
-local function GetCachedSpecItems(classID)
-    local key = "spec:" .. tostring(classID or 0)
-    if not DropdownItemCache[key] then
-        DropdownItemCache[key] = BuildDropdownItems(NS.AceOptions:GetSpecValues(classID))
-    end
-    return DropdownItemCache[key]
-end
-
 local function CopyNumberBoolMap(source)
     local copy = {}
     if type(source) == "table" then
@@ -73,85 +65,9 @@ local function CopyNumberBoolMap(source)
     return copy
 end
 
-local function HasAnySelected(map)
-    return type(map) == "table" and next(map) ~= nil
-end
-
 local NormalizeCustomClassMap
 local NormalizeCustomSpecMap
 local NormalizeCustomRaceMap
-
-local function GetAllConcreteClassIDs()
-    local ids = {}
-    local classOptions = NS.AceOptions and NS.AceOptions.GetClassOptionList and NS.AceOptions:GetClassOptionList() or {}
-    for _, classInfo in ipairs(classOptions or {}) do
-        local classID = tonumber(classInfo and classInfo.classID) or 0
-        if classID > 0 then
-            ids[#ids + 1] = classID
-        end
-    end
-    table.sort(ids)
-    return ids
-end
-
-local function GetAllConcreteSpecIDsForClasses(classMap)
-    local specs = {}
-    local seen = {}
-    local classIDs = {}
-    if type(classMap) == "table" and classMap[0] == true then
-        classIDs = GetAllConcreteClassIDs()
-    else
-        for classID, enabled in pairs(classMap or {}) do
-            classID = tonumber(classID) or 0
-            if enabled == true and classID > 0 then
-                classIDs[#classIDs + 1] = classID
-            end
-        end
-        table.sort(classIDs)
-    end
-    for _, classID in ipairs(classIDs) do
-        local specValues = NS.AceOptions and NS.AceOptions.GetSpecValues and NS.AceOptions:GetSpecValues(classID) or {}
-        for specID in pairs(specValues or {}) do
-            specID = tonumber(specID) or 0
-            if specID > 0 and not seen[specID] then
-                seen[specID] = true
-                specs[#specs + 1] = specID
-            end
-        end
-    end
-    table.sort(specs)
-    return specs
-end
-
-local function ExpandAllClassesForEditor(map, fallbackClassID)
-    local normalized = NormalizeCustomClassMap(map, fallbackClassID)
-    if normalized[0] ~= true then
-        return normalized
-    end
-    local expanded = {}
-    for _, classID in ipairs(GetAllConcreteClassIDs()) do
-        expanded[classID] = true
-    end
-    if next(expanded) == nil then
-        expanded[0] = true
-    end
-    return expanded
-end
-
-local function ExpandAllSpecsForEditor(map, classMap, fallbackSpecID)
-    local normalized = NormalizeCustomSpecMap(map, fallbackSpecID)
-    if normalized[0] ~= true then
-        return normalized
-    end
-    local expanded = {}
-    for _, specID in ipairs(GetAllConcreteSpecIDsForClasses(classMap)) do
-        expanded[specID] = true
-    end
-    if next(expanded) == nil then
-        expanded[0] = true
-    end
-    return expanded
-end
 
 function NormalizeCustomClassMap(map, fallbackClassID)
     local copy = CopyNumberBoolMap(map)
@@ -752,6 +668,14 @@ local function SetNumericControlValue(control, value)
     end
 end
 
+local function GetEventVoiceItems()
+    local api = NS.API or {}
+    if type(api.GetEventVoiceOptions) == "function" then
+        return api.GetEventVoiceOptions() or {}
+    end
+    return {}
+end
+
 local function ForceShowInlineCondition(widgets)
     if not widgets then
         return
@@ -940,6 +864,7 @@ function Fields:PullFromWidgets(editor)
     local isBloodlust = tostring(state.entryType or "") == "bloodlust"
     local isCooldownEntry = tostring(state.entryType or "cooldown") == "cooldown"
     local isCastEntry = tostring(state.entryType or "") == "cast"
+    local isEventEntry = tostring(state.entryType or "") == "event"
     local isCustomEntry = tostring(state.entryType or "") == "custom"
 
     state.activeAlertTab = NormalizeAlertTab(state.activeAlertTab)
@@ -1010,6 +935,17 @@ function Fields:PullFromWidgets(editor)
         state.textConditionOp = "<="
         state.textConditionTime = 0
         state.cooldownAlertTime = 0
+    elseif isEventEntry then
+        state.voiceEnabled = (not widgets.voiceEnabled) or widgets.voiceEnabled:GetChecked() == true
+        state.imageEnabled = false
+        state.textEnabled = false
+        state.voiceConditionOp = "<="
+        state.voiceConditionTime = 0
+        state.imageConditionOp = "<="
+        state.imageConditionTime = 0
+        state.textConditionOp = "<="
+        state.textConditionTime = 0
+        state.cooldownAlertTime = 0
     elseif isCustomEntry then
         ReadCustomNotifyRows(widgets, state)
         if widgets.voiceEnabled then widgets.voiceEnabled:SetChecked(state.voiceEnabled == true) end
@@ -1044,6 +980,8 @@ function Fields:PullFromWidgets(editor)
         state.textConditionTime = math.max(0, tonumber((widgets.textConditionTime and widgets.textConditionTime:GetText()) or "") or 0)
     end
     state.textAlert = tostring((widgets.textAlert and widgets.textAlert:GetText()) or "")
+    state.textCooldownCountdown = isCooldownEntry and widgets.textCooldownCountdown
+        and widgets.textCooldownCountdown:GetChecked() == true or false
     state.textSize = math.max(8, GetNumericControlValue(widgets.textSize, 24))
     state.textDurationEnabled = widgets.textDurationEnabled and widgets.textDurationEnabled:GetChecked() == true or false
     state.textDuration = math.max(0.1, tonumber((widgets.textDuration and widgets.textDuration:GetText()) or "") or 2)
@@ -1093,6 +1031,10 @@ function Fields:PullFromWidgets(editor)
             state.talentId = 0
             state.talentName = ""
             state.talentCD = 0
+            state.talentLoadFilter = false
+            state.loadTalentEnabled = false
+            state.loadTalentId = 0
+            state.loadTalentName = ""
             state.delayEnabled = false
             state.delaySeconds = 0
             state.castDelayMode = "show"
@@ -1104,6 +1046,28 @@ function Fields:PullFromWidgets(editor)
             state.customUseTicker = widgets.customTickerEnabled and widgets.customTickerEnabled:GetChecked() == true or false
             state.customInterval = NormalizeCustomInterval((widgets.customInterval and widgets.customInterval:GetText()) or state.customInterval)
             state.customCode = tostring((widgets.customCode and widgets.customCode:GetText()) or state.customCode or "")
+        elseif isEventEntry then
+            state.eventKey = tostring(Widgets:GetDropdownValue(widgets.eventTypeDrop) or state.eventKey or "")
+            state.eventThrottle = math.max(0, math.min(300, tonumber((widgets.eventThrottle and widgets.eventThrottle:GetText()) or "") or 1))
+            state.spellId = 0
+            state.spellName = ""
+            state.objectType = OBJECT_TYPE_SPELL
+            state.itemLoadMode = ITEM_LOAD_NONE
+            state.itemLoadSameName = false
+            state.baseCD = 0
+            state.checkTalent = false
+            state.talentId = 0
+            state.talentName = ""
+            state.talentCD = 0
+            state.talentLoadFilter = false
+            state.loadTalentEnabled = false
+            state.loadTalentId = 0
+            state.loadTalentName = ""
+            state.delayEnabled = false
+            state.delaySeconds = 0
+            state.castDelayMode = "show"
+            state.imageEnabled = false
+            state.textEnabled = false
         else
             state.objectType = (widgets.objectTypeItem and widgets.objectTypeItem:GetChecked() == true) and OBJECT_TYPE_ITEM or OBJECT_TYPE_SPELL
             if state.objectType == OBJECT_TYPE_ITEM then
@@ -1131,6 +1095,10 @@ function Fields:PullFromWidgets(editor)
             state.talentId = tonumber((widgets.talentId and widgets.talentId:GetText()) or "") or 0
             state.talentName = tostring((widgets.talentName and widgets.talentName:GetText()) or "")
             state.talentCD = tonumber((widgets.talentCD and widgets.talentCD:GetText()) or "") or 0
+            state.talentLoadFilter = widgets.talentLoadFilter and widgets.talentLoadFilter:GetChecked() == true or false
+            state.loadTalentEnabled = widgets.loadTalentEnabled and widgets.loadTalentEnabled:GetChecked() == true or false
+            state.loadTalentId = tonumber((widgets.loadTalentId and widgets.loadTalentId:GetText()) or "") or 0
+            state.loadTalentName = tostring((widgets.loadTalentName and widgets.loadTalentName:GetText()) or "")
             if isCastEntry then
                 local delayChecked = widgets.castDelayEnabled and widgets.castDelayEnabled:GetChecked() == true or false
                 state.delayEnabled = delayChecked == true
@@ -1214,15 +1182,23 @@ function Fields:PushToWidgets(editor)
     local isCooldown = tostring(state.entryType or "cooldown") == "cooldown"
     local isBloodlust = tostring(state.entryType or "") == "bloodlust"
     local isCast = tostring(state.entryType or "") == "cast"
+    local isEvent = tostring(state.entryType or "") == "event"
     local isCustom = tostring(state.entryType or "") == "custom"
+    if isEvent and state.activeAlertTab ~= "settings" and state.activeAlertTab ~= "voice" then
+        state.activeAlertTab = "voice"
+    end
     local activeTab = state.activeAlertTab
     local showSettings = activeTab == "settings"
     local showVoice = activeTab == "voice"
     local showImage = activeTab == "image"
     local showText = activeTab == "text"
 
-    local typeTitle = isBloodlust and L("TAB_BLOODLUST") or (isCustom and L("TAB_CUSTOM") or (isCast and L("TAB_CAST") or L("TAB_COOLDOWN")))
+    local typeTitle = isBloodlust and L("TAB_BLOODLUST") or (isEvent and L("TAB_EVENT_VOICE") or (isCustom and L("TAB_CUSTOM") or (isCast and L("TAB_CAST") or L("TAB_COOLDOWN"))))
     frame.title:SetText((editor.mode == "new" and L("TITLE_NEW_CONFIG") or L("TITLE_EDIT_CONFIG")) .. " - " .. typeTitle)
+    local spellSectionLabel = widgets.spellSection and (widgets.spellSection.qfxsaLabel or widgets.spellSection.label)
+    if spellSectionLabel and spellSectionLabel.SetText then
+        spellSectionLabel:SetText(isEvent and L("SECTION_EVENT_VOICE_PARAMS") or L("SECTION_SPELL_PARAMS"))
+    end
 
     SetManyShown({ widgets.classSection }, showSettings and not isBloodlust)
     SetManyShown({ widgets.spellSection }, showSettings and not isBloodlust and not isCustom)
@@ -1272,6 +1248,8 @@ function Fields:PushToWidgets(editor)
                 contentHeight = widgets.normalSettingsContentHeight or 650
             elseif isCast then
                 contentHeight = widgets.castSettingsContentHeight or widgets.normalSettingsContentHeight or 650
+            elseif isEvent then
+                contentHeight = 300
             elseif isCustom then
                 contentHeight = math.max(widgets.customSettingsContentHeight or 760, math.abs(tonumber(widgets.customConditionTop) or 742) + GetCustomNotifySectionHeight(state) + 72)
             else
@@ -1367,11 +1345,40 @@ function Fields:PushToWidgets(editor)
             SetEnabled(widgets.customInterval, state.customUseTicker == true)
             SetLabelsEnabled({ widgets.customIntervalSecLabel }, state.customUseTicker == true)
             SetManyShown({ widgets.itemLoadEquipped, widgets.itemLoadBags, widgets.itemLoadSameName }, false)
+        elseif isEvent then
+            state.eventKey = tostring(state.eventKey or "combat_start")
+            state.eventThrottle = math.max(0, math.min(300, tonumber(state.eventThrottle) or 1))
+            state.voiceEnabled = state.voiceEnabled ~= false
+            state.imageEnabled = false
+            state.textEnabled = false
+            if widgets.eventTypeDrop then
+                Widgets:SetDropdownItems(widgets.eventTypeDrop, GetEventVoiceItems())
+                Widgets:SetDropdownValue(widgets.eventTypeDrop, state.eventKey, L("PLACEHOLDER_SELECT_EVENT_VOICE"))
+            end
+            if widgets.eventThrottle then widgets.eventThrottle:SetText(tostring(state.eventThrottle)) end
+            SetManyShown({ widgets.eventTypeLabel, widgets.eventTypeDrop, widgets.eventThrottleLabel, widgets.eventThrottle }, true)
+            SetManyShown({
+                widgets.objectTypeItem, widgets.spellIdLabel, widgets.spellNameLabel, widgets.baseCDLabel,
+                widgets.spellId, widgets.spellName, widgets.baseCD, widgets.checkTalent,
+                widgets.talentIdLabel, widgets.talentNameLabel, widgets.talentCDLabel,
+                widgets.talentId, widgets.talentName, widgets.talentCD,
+                widgets.loadTalentEnabled, widgets.loadTalentIdLabel, widgets.loadTalentNameLabel,
+                widgets.loadTalentId, widgets.loadTalentName, widgets.itemLoadEquipped,
+                widgets.itemLoadBags, widgets.itemLoadSameName, widgets.delayEnabled,
+                widgets.delaySecondsLabel, widgets.delaySeconds,
+            }, false)
+            Widgets:SetDropdownEnabled(widgets.eventTypeDrop, true)
+            SetEnabled(widgets.eventThrottle, true)
         else
+            SetManyShown({ widgets.eventTypeLabel, widgets.eventTypeDrop, widgets.eventThrottleLabel, widgets.eventThrottle }, false)
+            SetManyShown({ widgets.objectTypeItem, widgets.spellIdLabel, widgets.spellNameLabel, widgets.spellId, widgets.spellName }, true)
             state.objectType = tostring(state.objectType or OBJECT_TYPE_SPELL)
             if state.objectType ~= OBJECT_TYPE_ITEM then state.objectType = OBJECT_TYPE_SPELL end
             local isItemObject = state.objectType == OBJECT_TYPE_ITEM
-            if isItemObject then state.checkTalent = false end
+            if isItemObject then
+                state.checkTalent = false
+                state.loadTalentEnabled = false
+            end
             if widgets.objectTypeItem then widgets.objectTypeItem:SetChecked(isItemObject) end
             if widgets.spellIdLabel then widgets.spellIdLabel:SetText(isItemObject and L("LABEL_ITEM_ID") or L("LABEL_OBJECT_SPELL_ID")) end
             state.itemLoadMode = isItemObject and NormalizeItemLoadMode(state.itemLoadMode) or ITEM_LOAD_NONE
@@ -1387,6 +1394,12 @@ function Fields:PushToWidgets(editor)
             widgets.talentId:SetText((tonumber(state.talentId) or 0) > 0 and tostring(state.talentId) or "")
             widgets.talentName:SetText(tostring(state.talentName or ""))
             widgets.talentCD:SetText((tonumber(state.talentCD) or 0) > 0 and tostring(state.talentCD) or "")
+            if widgets.talentLoadFilter then
+                widgets.talentLoadFilter:SetChecked(state.loadTalentEnabled == true)
+            end
+            if widgets.loadTalentEnabled then widgets.loadTalentEnabled:SetChecked(state.loadTalentEnabled == true) end
+            if widgets.loadTalentId then widgets.loadTalentId:SetText((tonumber(state.loadTalentId) or 0) > 0 and tostring(state.loadTalentId) or "") end
+            if widgets.loadTalentName then widgets.loadTalentName:SetText(tostring(state.loadTalentName or "")) end
             if widgets.delayEnabled then widgets.delayEnabled:SetChecked(false) end
             if widgets.delaySeconds then widgets.delaySeconds:SetText("") end
             if widgets.castImmediateEnabled then widgets.castImmediateEnabled:SetChecked(isCast and state.delayEnabled ~= true) end
@@ -1395,17 +1408,25 @@ function Fields:PushToWidgets(editor)
             widgets.baseCD:SetText((tonumber(state.baseCD) or 0) > 0 and tostring(state.baseCD) or "")
             state.fixedCD = true
 
-            local talentControlsVisible = isCooldown and (not isItemObject)
-            SetManyShown({ widgets.talentIdLabel, widgets.talentNameLabel, widgets.talentCDLabel, widgets.checkTalent, widgets.talentId, widgets.talentName, widgets.talentCD }, talentControlsVisible)
+            local talentControlsVisible = (isCooldown or isCast) and (not isItemObject)
+            SetManyShown({ widgets.talentIdLabel, widgets.talentNameLabel, widgets.checkTalent, widgets.talentId, widgets.talentName }, talentControlsVisible and isCooldown)
+            SetManyShown({ widgets.talentCDLabel, widgets.talentCD }, talentControlsVisible and isCooldown)
+            SetManyShown({ widgets.loadTalentEnabled, widgets.loadTalentIdLabel, widgets.loadTalentNameLabel, widgets.loadTalentId, widgets.loadTalentName }, talentControlsVisible)
             SetManyShown({ widgets.baseCDLabel, widgets.baseCD }, isCooldown)
             SetManyShown({ widgets.delayEnabled, widgets.delaySecondsLabel, widgets.delaySeconds }, false)
 
             local talentEnabled = talentControlsVisible and (state.checkTalent == true)
-            SetEnabled(widgets.checkTalent, talentControlsVisible)
+            SetEnabled(widgets.checkTalent, talentControlsVisible and isCooldown)
             SetEnabled(widgets.talentId, talentEnabled)
             SetEnabled(widgets.talentName, talentEnabled)
-            SetEnabled(widgets.talentCD, talentEnabled)
-            SetLabelsEnabled({ widgets.talentIdLabel, widgets.talentNameLabel, widgets.talentCDLabel }, talentEnabled)
+            SetEnabled(widgets.talentCD, talentEnabled and isCooldown)
+            local loadTalentControlsEnabled = talentControlsVisible and state.loadTalentEnabled == true
+            SetEnabled(widgets.loadTalentEnabled, talentControlsVisible)
+            SetEnabled(widgets.loadTalentId, loadTalentControlsEnabled)
+            SetEnabled(widgets.loadTalentName, loadTalentControlsEnabled)
+            SetLabelsEnabled({ widgets.talentIdLabel, widgets.talentNameLabel }, talentEnabled)
+            SetLabelsEnabled({ widgets.talentCDLabel }, talentEnabled and isCooldown)
+            SetLabelsEnabled({ widgets.loadTalentIdLabel, widgets.loadTalentNameLabel }, loadTalentControlsEnabled)
 
             local delayInputEnabled = isCast and (state.delayEnabled == true)
             SetEnabled(widgets.delayEnabled, false)
@@ -1508,6 +1529,7 @@ function Fields:PushToWidgets(editor)
     if widgets.imageX then widgets.imageX:SetText(tostring(state.imageX or 0)) end
     if widgets.imageY then widgets.imageY:SetText(tostring(state.imageY or 120)) end
     if widgets.textAlert then widgets.textAlert:SetText(tostring(state.textAlert or "")) end
+    if widgets.textCooldownCountdown then widgets.textCooldownCountdown:SetChecked(isCooldown and state.textCooldownCountdown == true) end
     SetNumericControlValue(widgets.textSize, state.textSize or 24)
     if widgets.textDurationEnabled then widgets.textDurationEnabled:SetChecked(state.textDurationEnabled == true) end
     if widgets.textDuration then widgets.textDuration:SetText(tostring(state.textDuration or 2)) end
@@ -1571,7 +1593,7 @@ function Fields:PushToWidgets(editor)
         widgets.imageNudgeLeft, widgets.imageNudgeRight, widgets.imageNudgeReset,
     }
     local textControls = {
-        widgets.textEnabled, widgets.textAlertLabel, widgets.textAlert, widgets.textSizeLabel, widgets.textSize, widgets.textDurationEnabled,
+        widgets.textEnabled, widgets.textCooldownCountdown, widgets.textAlertLabel, widgets.textAlert, widgets.textSizeLabel, widgets.textSize, widgets.textDurationEnabled,
         widgets.textDurationLabel, widgets.textDuration,
     }
     local textPositionControls = {
@@ -1704,21 +1726,26 @@ function Fields:PushToWidgets(editor)
         local enabled = state.textEnabled == true
         local linked = linkedVisualLayout == true
         local textOnly = textOnlyPositionLayout == true
-        SetControlsEnabled({ widgets.textAlert, widgets.textSize, widgets.textDurationEnabled }, enabled)
+        local countdownEnabled = isCooldown and state.textCooldownCountdown == true
+        SetControlsEnabled({ widgets.textAlert, widgets.textSize, widgets.textCooldownCountdown }, enabled)
+        SetControlsEnabled({ widgets.textDurationEnabled }, enabled and not countdownEnabled)
+        SetManyShown({ widgets.textCooldownCountdown }, isCooldown)
         if Layout.SetValueSliderLabelEnabled then Layout.SetValueSliderLabelEnabled(widgets.textSize, enabled) end
-        SetControlsEnabled({ widgets.textDuration }, enabled and state.textDurationEnabled == true)
+        SetControlsEnabled({ widgets.textDuration }, enabled and not countdownEnabled and state.textDurationEnabled == true)
         SetControlsEnabled({ widgets.textX, widgets.textY, widgets.textPreviewButton, widgets.textHidePreviewButton, widgets.textSingleNudgeUp, widgets.textSingleNudgeDown, widgets.textSingleNudgeLeft, widgets.textSingleNudgeRight, widgets.textSingleNudgeReset }, enabled and textOnly)
         SetControlsEnabled({ widgets.textAttachDrop, widgets.textVAlignDrop, widgets.textHAlignDrop, widgets.textNudgeUp, widgets.textNudgeDown, widgets.textNudgeLeft, widgets.textNudgeRight, widgets.textNudgeReset, widgets.layoutPreviewButton, widgets.layoutHidePreviewButton }, enabled and linked)
         Widgets:SetDropdownEnabled(widgets.textAttachDrop, enabled and linked)
         Widgets:SetDropdownEnabled(widgets.textVAlignDrop, enabled and linked)
         Widgets:SetDropdownEnabled(widgets.textHAlignDrop, enabled and linked)
         SetLabelsEnabled({ widgets.textAlertLabel, widgets.textSizeLabel }, enabled)
-        SetLabelsEnabled({ widgets.textDurationLabel }, enabled and state.textDurationEnabled == true)
+        SetLabelsEnabled({ widgets.textDurationLabel }, enabled and not countdownEnabled and state.textDurationEnabled == true)
         SetLabelsEnabled({ widgets.textXLabel, widgets.textYLabel, widgets.textSingleNudgeLabel }, enabled and textOnly)
         SetLabelsEnabled({ widgets.textAttachLabel, widgets.textVAlignLabel, widgets.textHAlignLabel, widgets.textNudgeLabel }, enabled and linked)
     end
 
     SetManyShown({ widgets.tabTypeLabel, widgets.tabCooldown, widgets.tabCast, widgets.tabBloodlust, widgets.subTabLabel }, false)
+    if widgets.tabImage then widgets.tabImage:SetShown(not isEvent) end
+    if widgets.tabText then widgets.tabText:SetShown(not isEvent) end
     if widgets.actionTest then
         if showVoice then widgets.actionTest:Show() else widgets.actionTest:Hide() end
     end
@@ -1792,7 +1819,7 @@ function Fields:RefreshLocale(editor)
     local entryType = tostring(state.entryType or "cooldown")
 
     if frame.title then
-        local typeTitle = entryType == "bloodlust" and L("TAB_BLOODLUST") or (entryType == "custom" and L("TAB_CUSTOM") or (entryType == "cast" and L("TAB_CAST") or L("TAB_COOLDOWN")))
+        local typeTitle = entryType == "bloodlust" and L("TAB_BLOODLUST") or (entryType == "event" and L("TAB_EVENT_VOICE") or (entryType == "custom" and L("TAB_CUSTOM") or (entryType == "cast" and L("TAB_CAST") or L("TAB_COOLDOWN"))))
         frame.title:SetText((editor.mode == "new" and L("TITLE_NEW_CONFIG") or L("TITLE_EDIT_CONFIG")) .. " - " .. typeTitle)
     end
     SetLocaleText(frame.description, L("EDITOR_DESC"))
@@ -1810,7 +1837,7 @@ function Fields:RefreshLocale(editor)
     SetLocaleText(widgets.actionTest, L("BTN_TEST"))
 
     SetSectionLocaleText(widgets.classSection, L("SECTION_CLASS_SPEC"))
-    SetSectionLocaleText(widgets.spellSection, L("SECTION_SPELL_PARAMS"))
+    SetSectionLocaleText(widgets.spellSection, entryType == "event" and L("SECTION_EVENT_VOICE_PARAMS") or L("SECTION_SPELL_PARAMS"))
     SetSectionLocaleText(widgets.conditionSection, L("SECTION_NOTIFY_CONDITIONS"))
     SetSectionLocaleText(widgets.bloodlustInfoSection, L("SECTION_BLOODLUST_BUILTIN"))
     SetLocaleText(widgets.bloodlustInfoText, L("BLOODLUST_BUILTIN_HINT"))
@@ -1828,9 +1855,13 @@ function Fields:RefreshLocale(editor)
     SetLocaleText(widgets.spellIdLabel, tostring(state.objectType or "") == OBJECT_TYPE_ITEM and L("LABEL_ITEM_ID") or L("LABEL_OBJECT_SPELL_ID"))
     SetLocaleText(widgets.spellNameLabel, L("LABEL_SPELL_NAME"))
     SetLocaleText(widgets.baseCDLabel, L("LABEL_FIXED_CD_SEC"))
+    SetLocaleText(widgets.eventTypeLabel, L("LABEL_EVENT_VOICE_TYPE"))
+    SetLocaleText(widgets.eventThrottleLabel, L("LABEL_EVENT_THROTTLE"))
     SetLocaleText(widgets.talentIdLabel, L("LABEL_TALENT_ID"))
     SetLocaleText(widgets.talentNameLabel, L("LABEL_TALENT_NAME"))
     SetLocaleText(widgets.talentCDLabel, L("LABEL_TALENT_CD_SEC"))
+    SetLocaleText(widgets.loadTalentIdLabel, L("LABEL_TALENT_ID"))
+    SetLocaleText(widgets.loadTalentNameLabel, L("LABEL_TALENT_NAME"))
     SetLocaleText(widgets.delaySecondsLabel, L("LABEL_DELAY_SECONDS"))
     SetLocaleText(widgets.sourceLabel, L("LABEL_SOUND_SOURCE"))
     SetLocaleText(widgets.builtinLabel, L("LABEL_BUILTIN_SOUND"))
@@ -1910,6 +1941,8 @@ function Fields:RefreshLocale(editor)
     SetCheckButtonLocaleText(widgets.imageEnabled, L("LABEL_ENABLE_IMAGE_ALERT"))
     SetCheckButtonLocaleText(widgets.imageDurationEnabled, L("LABEL_LIMIT_IMAGE_DURATION"))
     SetCheckButtonLocaleText(widgets.textEnabled, L("LABEL_ENABLE_TEXT_ALERT"))
+    SetCheckButtonLocaleText(widgets.textCooldownCountdown, L("LABEL_TEXT_COOLDOWN_COUNTDOWN"))
+    SetCheckButtonLocaleText(widgets.loadTalentEnabled, L("LABEL_TALENT_LOAD_FILTER"))
     SetCheckButtonLocaleText(widgets.textDurationEnabled, L("LABEL_LIMIT_TEXT_DURATION"))
 
     if frame:IsShown() then

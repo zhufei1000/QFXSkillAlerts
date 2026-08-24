@@ -161,10 +161,6 @@ local BUILTIN_SOUND_ALIASES = nil
 
 local Catalog = NS.MediaCatalog
 
-function Catalog:GetBuiltinSoundFiles()
-    return BUILTIN_SOUND_FILES
-end
-
 function Catalog:EnsureBuiltinSoundTables()
     if BUILTIN_SOUND_LIST and BUILTIN_SOUND_ALIASES then
         return
@@ -262,10 +258,6 @@ function Catalog:GetSharedMediaSoundList()
         end
     end
     return values
-end
-
-function Catalog:HasSharedMediaSounds()
-    return next(self:GetSharedMediaSoundList()) ~= nil
 end
 
 function Catalog:FetchSharedMediaSoundPath(name)
@@ -464,14 +456,12 @@ local function Bridge(methodName)
     end
 end
 
-Bridge("GetBuiltinSoundFiles")
 Bridge("GetBuiltinSoundList")
 Bridge("GetDefaultBuiltinSoundPath")
 Bridge("NormalizeSoundPath")
 Bridge("IsBuiltinSoundPath")
 Bridge("GetBuiltinSoundDisplayName")
 Bridge("GetSharedMediaSoundList")
-Bridge("HasSharedMediaSounds")
 Bridge("FetchSharedMediaSoundPath")
 Bridge("FindSharedMediaSoundNameByPath")
 Bridge("ResolveSharedMediaSoundPath")

@@ -6,6 +6,15 @@ NS.UI.SavedListBuilder = NS.UI.SavedListBuilder or {}
 
 local Builder = NS.UI.SavedListBuilder
 local Utils = NS.Utils or {}
+local CollectionStore = NS.CollectionStore or {}
+
+local function CopyTableShallow(source)
+    local copy = {}
+    for key, value in pairs(type(source) == "table" and source or {}) do
+        copy[key] = value
+    end
+    return copy
+end
 
 local function TrimText(value)
     if Utils.TrimText then
@@ -187,9 +196,10 @@ function Builder.ExpandCachedGroupRows(rows, groupKey)
 end
 
 function Builder.BuildLayout(list, state)
-    local entries = NS.AceOptions:GetAllSavedEntryList()
     local api = NS.API
     local currentClassID, currentSpecID = api.GetCurrentClassSpec()
+    local cdmSnapshot = type(CollectionStore.GetCDMEntrySnapshot) == "function"
+        and CollectionStore.GetCDMEntrySnapshot(api) or nil
     local scopeLayoutCache = {}
 
     local function getScopeLayout(scopeClassID, scopeSpecID, includeScopeText)
@@ -241,7 +251,7 @@ function Builder.BuildLayout(list, state)
             local refText = TrimText(ref)
             if refText:match("^group:") then
                 markGroupContainedEntries(refText, seenGroups)
-            elseif refText:match("^%-?%d+:%-?%d+:%-?%d+$") then
+            elseif refText:match("^%-?%d+:%-?%d+:%-?%d+$") or refText:match("^cdmpreset:") then
                 markEntryKeyShown(refText)
             end
         end
@@ -365,17 +375,34 @@ function Builder.BuildLayout(list, state)
         appendRootEntriesForScope(currentClassID, currentSpecID, false)
     end
 
-    for _, entry in ipairs(entries) do
-        local key = TrimText(entry.key)
-        if key ~= "" and not entriesAlreadyShownWithLoaded[key] then
-            local isLoadedScope = entry.isLoaded == true
-            entry.itemType = "entry"
-            if isLoadedScope then
-                loadedEntries[#loadedEntries + 1] = entry
-            else
-                unloadedEntries[#unloadedEntries + 1] = entry
-            end
-            entriesAlreadyShownWithLoaded[key] = true
+    -- Append the remaining scopes through the same per-scope layout cache used
+    -- for collections.  The old path called GetAllSavedEntryList() first and
+    -- then rebuilt every collection scope again, doing nearly all entry work
+    -- twice whenever the window opened.
+    if db and type(db.specConfigs) == "table" then
+        iterSortedNumberKeys(db.specConfigs, function(scopeClassID, classMap)
+            iterSortedNumberKeys(classMap, function(scopeSpecID)
+                local isLoadedRootScope = (scopeClassID == 0 and scopeSpecID == 0)
+                    or (scopeClassID == currentClassID and scopeSpecID == 0)
+                    or (currentSpecID ~= 0 and scopeClassID == currentClassID and scopeSpecID == currentSpecID)
+                if not isLoadedRootScope then
+                    appendRootEntriesForScope(scopeClassID, scopeSpecID, true)
+                end
+            end)
+        end)
+    end
+
+    -- Bloodlust is a single global configuration rather than a class/spec entry.
+    -- Keep it visible in the saved list, but outside collections and drag/drop.
+    if NS.AceOptions and type(NS.AceOptions.GetBloodlustSavedEntry) == "function" then
+        local bloodlustEntry = NS.AceOptions:GetBloodlustSavedEntry()
+        if type(bloodlustEntry) == "table" then
+            bloodlustEntry.depth = 0
+            bloodlustEntry.displaySection = "loaded"
+            bloodlustEntry.canDrag = false
+            bloodlustEntry.canDrop = false
+            loadedEntries[#loadedEntries + 1] = bloodlustEntry
+            markShown(bloodlustEntry)
         end
     end
 
@@ -451,26 +478,32 @@ function Builder.BuildLayout(list, state)
         return result
     end
 
-    loadedEntries = applyDisplayOrder("loaded", loadedEntries)
-    unloadedEntries = applyDisplayOrder("unloaded", unloadedEntries)
-
-    -- CDM voice rows are runtime projections of effective local presets. Append
-    -- them after normal ordering so they never enter savedListOrder or collections.
+    -- CDM rows remain projections of the preset store, but their stable keys can
+    -- now participate in display ordering and collections without moving the
+    -- underlying preset record.
     if api and type(api.GetCDMVoiceSavedEntries) == "function" then
-        local cdmEntries = api.GetCDMVoiceSavedEntries()
-        for _, entry in ipairs(type(cdmEntries) == "table" and cdmEntries or {}) do
-            entry.depth = 0
-            entry.canDrag = false
-            entry.isVirtual = true
-            if entry.displaySection == "unloaded" or entry.isLoaded == false then
-                entry.displaySection = "unloaded"
-                unloadedEntries[#unloadedEntries + 1] = entry
-            else
-                entry.displaySection = "loaded"
-                loadedEntries[#loadedEntries + 1] = entry
+        local cdmEntries = cdmSnapshot and cdmSnapshot.entries or api.GetCDMVoiceSavedEntries()
+        for _, sourceEntry in ipairs(type(cdmEntries) == "table" and cdmEntries or {}) do
+            local entry = CopyTableShallow(sourceEntry)
+            local key = TrimText(entry and entry.key)
+            if key ~= "" and not entriesAlreadyShownWithLoaded[key] then
+                entry.depth = 0
+                entry.canDrag = true
+                entry.isVirtual = false
+                if entry.displaySection == "unloaded" or entry.isLoaded == false then
+                    entry.displaySection = "unloaded"
+                    unloadedEntries[#unloadedEntries + 1] = entry
+                else
+                    entry.displaySection = "loaded"
+                    loadedEntries[#loadedEntries + 1] = entry
+                end
+                markShown(entry)
             end
         end
     end
+
+    loadedEntries = applyDisplayOrder("loaded", loadedEntries)
+    unloadedEntries = applyDisplayOrder("unloaded", unloadedEntries)
 
     return loadedEntries, unloadedEntries, Builder.CountVisibleHeaderItems(loadedEntries), Builder.CountVisibleHeaderItems(unloadedEntries)
 end

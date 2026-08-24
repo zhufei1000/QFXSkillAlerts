@@ -136,6 +136,17 @@ function Sync:BuildCooldownCatalog()
     if not service then
         return catalog
     end
+    local classID, specID = service:GetCurrentClassSpec()
+    local generation = type(service.GetCooldownCacheGeneration) == "function"
+        and service:GetCooldownCacheGeneration() or 0
+    local cacheKey = table.concat({
+        tostring(tonumber(classID) or 0),
+        tostring(tonumber(specID) or 0),
+        tostring(tonumber(generation) or 0),
+    }, ":")
+    if self.cooldownCatalogCacheKey == cacheKey and type(self.cooldownCatalogCache) == "table" then
+        return self.cooldownCatalogCache
+    end
     local seen = {}
     for _, category in ipairs(service:GetCategories() or {}) do
         local cooldowns = service:GetCooldownsForCategory(category.key) or {}
@@ -151,6 +162,8 @@ function Sync:BuildCooldownCatalog()
             end
         end
     end
+    self.cooldownCatalogCacheKey = cacheKey
+    self.cooldownCatalogCache = catalog
     return catalog
 end
 
@@ -305,21 +318,6 @@ local function CountEventSounds(service, cooldownID, eventType, targetPayload)
         end
     end
     return soundCount, targetCount, firstPayload
-end
-
-function Sync:BuildTargetForRecord(record)
-    local store = GetStore()
-    local info = self:FindCooldownForRecord(record)
-    local voice = store and store:ResolveVoice(record) or nil
-    local eventType = store and store:EventKeyToType(record.eventKey, record.eventTypeHint) or nil
-    if not info or not voice or not tonumber(eventType) or not tonumber(voice.payload) then
-        return nil
-    end
-    return {
-        cooldownID = tonumber(info.cooldownID),
-        eventType = tonumber(eventType),
-        payload = tonumber(voice.payload),
-    }
 end
 
 function Sync:EvaluateRecord(record, cooldownCatalog)
@@ -533,10 +531,6 @@ function Sync:BuildPendingPlan(records, pendingRemovals)
     end
     summary.pendingCount = #operations
     return operations, summary
-end
-
-function Sync:BuildSyncPlan(records)
-    return self:BuildPendingPlan(records, {})
 end
 
 function Sync:GetCurrentSpecPendingSummary()
@@ -761,10 +755,6 @@ function Sync:EvaluateCurrentSpec(reason, options)
     return true, summary
 end
 
-function Sync:RunCurrentSpecSync(reason, options)
-    return self:EvaluateCurrentSpec(reason or "compat_evaluate", options)
-end
-
 function Sync:ValidateAndSaveDrafts(drafts)
     local service, store = GetService(), GetStore()
     if not service or not store then
@@ -817,10 +807,6 @@ function Sync:ApplyPlanAndReload(plan, summary, reason)
         reason = reason or "explicit_apply",
         scopeToken = self:CaptureScopeToken(),
     })
-end
-
-function Sync:ApplySyncPlan(plan, summary, reason)
-    return self:ApplyPlanAndReload(plan, summary, reason)
 end
 
 function Sync:ApplyCurrentDraftAndReload(draft)
@@ -893,10 +879,6 @@ function Sync:ApplyPendingRemovalByKey(recordKey)
         reason = "manual_delete",
         scopeToken = self:CaptureScopeToken(),
     })
-end
-
-function Sync:ApplyPendingRemovalByKeyAndReload(recordKey)
-    return self:ApplyPendingRemovalByKey(recordKey)
 end
 
 function Sync:ApplyAllPendingCurrentSpecAndReload(reason, drafts)
@@ -1069,10 +1051,6 @@ function Sync:ScheduleEvaluation(reason, options)
     return token
 end
 
-function Sync:ScheduleSync(reason, options)
-    return self:ScheduleEvaluation(reason or "compat_evaluate", options)
-end
-
 function Sync:GetLastSummary()
     return self.lastSummary or NewSummary()
 end
@@ -1092,17 +1070,39 @@ function Sync:Initialize()
         "PLAYER_ENTERING_WORLD",
         "COOLDOWN_VIEWER_DATA_LOADED",
         "COOLDOWN_VIEWER_TABLE_HOTFIXED",
-        "COOLDOWN_VIEWER_SPELL_OVERRIDE_UPDATED",
         "PLAYER_SPECIALIZATION_CHANGED",
-        "PLAYER_TALENT_UPDATE",
         "PLAYER_REGEN_ENABLED",
-        "SPELLS_CHANGED",
     }) do
         pcall(frame.RegisterEvent, frame, event)
     end
     frame:SetScript("OnEvent", function(_, event, arg1)
+        local resumeDeferredData = false
         if event == "ADDON_LOADED" and arg1 ~= "Blizzard_CooldownViewer" then
             return
+        end
+        if event == "PLAYER_REGEN_ENABLED" then
+            local pending = Sync.pendingEvaluationRequest
+            if Sync.deferredDataEvaluation then
+                Sync.deferredDataEvaluation = nil
+                resumeDeferredData = true
+            elseif type(pending) ~= "table" or pending.prompt ~= true then
+                return
+            end
+        end
+        if (event == "COOLDOWN_VIEWER_DATA_LOADED" or event == "COOLDOWN_VIEWER_TABLE_HOTFIXED")
+            and IsInCombat() then
+            Sync.deferredDataEvaluation = true
+            return
+        end
+        local service = GetService()
+        if service and type(service.InvalidateCooldownCache) == "function"
+            and (event == "COOLDOWN_VIEWER_DATA_LOADED"
+                or event == "COOLDOWN_VIEWER_TABLE_HOTFIXED"
+                or event == "PLAYER_SPECIALIZATION_CHANGED"
+                or resumeDeferredData) then
+            service:InvalidateCooldownCache(resumeDeferredData and "COMBAT_DEFERRED_CDM_DATA" or event)
+            Sync.cooldownCatalogCacheKey = nil
+            Sync.cooldownCatalogCache = nil
         end
         local scopeEvent = event == "PLAYER_SPECIALIZATION_CHANGED"
             or event == "PLAYER_ENTERING_WORLD"

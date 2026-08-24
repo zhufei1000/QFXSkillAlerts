@@ -138,8 +138,24 @@ function Processor:Import(payload)
         return false, 0
     end
 
+    local importedCDM = 0
+    if type(payload.cdmVoiceProfiles) == "table" and next(payload.cdmVoiceProfiles) ~= nil then
+        if type(api.ImportCDMVoicePresetPayload) ~= "function" then
+            return false, 0
+        end
+        local ok, count = api.ImportCDMVoicePresetPayload({
+            type = "cdmVoicePreset",
+            version = 1,
+            profiles = payload.cdmVoiceProfiles,
+        })
+        if ok ~= true then
+            return false, 0
+        end
+        importedCDM = tonumber(count) or 0
+    end
+
     local keyMap = {}
-    local imported = 0
+    local imported = importedCDM
     for _, record in ipairs(payload.entries or {}) do
         local newKey = ImportEntryRecord(record, true)
         if newKey then
@@ -198,10 +214,15 @@ function Processor:Import(payload)
                                 remappedEntries[#remappedEntries + 1] = BuildGroupKey(classID, specID, mappedGroupID)
                             end
                         else
-                            local oldKey = EntryRefToKey(classID, specID, oldRef)
-                            local newKey = oldKey and keyMap[tostring(oldKey)] or nil
-                            if newKey then
-                                remappedEntries[#remappedEntries + 1] = newKey
+                            if CollectionStore.IsCDMEntryKey and CollectionStore.IsCDMEntryKey(oldRef)
+                                and (not CollectionStore.CDMEntryKeyExists or CollectionStore.CDMEntryKeyExists(api, oldRef)) then
+                                remappedEntries[#remappedEntries + 1] = TrimText(oldRef)
+                            else
+                                local oldKey = EntryRefToKey(classID, specID, oldRef)
+                                local newKey = oldKey and keyMap[tostring(oldKey)] or nil
+                                if newKey then
+                                    remappedEntries[#remappedEntries + 1] = newKey
+                                end
                             end
                         end
                     end
@@ -235,10 +256,15 @@ function Processor:Import(payload)
 
     local groupEntries = {}
     for _, oldRef in ipairs(payload.group.entries or {}) do
-        local oldKey = EntryRefToKey(classID, specID, oldRef)
-        local newKey = oldKey and keyMap[tostring(oldKey)] or nil
-        if newKey then
-            groupEntries[#groupEntries + 1] = newKey
+        if CollectionStore.IsCDMEntryKey and CollectionStore.IsCDMEntryKey(oldRef)
+            and (not CollectionStore.CDMEntryKeyExists or CollectionStore.CDMEntryKeyExists(api, oldRef)) then
+            groupEntries[#groupEntries + 1] = TrimText(oldRef)
+        else
+            local oldKey = EntryRefToKey(classID, specID, oldRef)
+            local newKey = oldKey and keyMap[tostring(oldKey)] or nil
+            if newKey then
+                groupEntries[#groupEntries + 1] = newKey
+            end
         end
     end
 

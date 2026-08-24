@@ -17,7 +17,22 @@ local function CallSoon(callback)
     end
 end
 
-function Refresh:RefreshSavedListOnly(main)
+local function CachedListContainsKey(list, key)
+    key = tostring(key or "")
+    if key == "" or not list then
+        return false
+    end
+    for _, rows in ipairs({ list._cachedLoadedEntries, list._cachedUnloadedEntries }) do
+        for _, entry in ipairs(type(rows) == "table" and rows or {}) do
+            if tostring(entry and entry.key or "") == key then
+                return true
+            end
+        end
+    end
+    return false
+end
+
+function Refresh:RefreshSavedListOnly(main, allowCached)
     if not main or not main.frame then
         return
     end
@@ -29,13 +44,17 @@ function Refresh:RefreshSavedListOnly(main)
 
     local state = ace:GetState()
     if tostring(state.entryType or "") == "cdmVoice" and tostring(state.selectedKey or "") ~= "" then
-        local found = false
-        local api = NS.API or {}
-        local entries = type(api.GetCDMVoiceSavedEntries) == "function" and api.GetCDMVoiceSavedEntries() or {}
-        for _, entry in ipairs(type(entries) == "table" and entries or {}) do
-            if tostring(entry.key or "") == tostring(state.selectedKey or "") then
-                found = true
-                break
+        local found = allowCached == true and main.savedList
+            and main.savedList._layoutDirty ~= true
+            and CachedListContainsKey(main.savedList, state.selectedKey)
+        if not found then
+            local api = NS.API or {}
+            local entries = type(api.GetCDMVoiceSavedEntries) == "function" and api.GetCDMVoiceSavedEntries() or {}
+            for _, entry in ipairs(type(entries) == "table" and entries or {}) do
+                if tostring(entry.key or "") == tostring(state.selectedKey or "") then
+                    found = true
+                    break
+                end
             end
         end
         if not found then
@@ -48,7 +67,7 @@ function Refresh:RefreshSavedListOnly(main)
     end
     if main.savedList then
         main.savedList:SetSelectedKey(state.selectedKey)
-        main.savedList:Refresh()
+        main.savedList:Refresh(allowCached == true)
     end
     self:RefreshActionButtons(main)
 end
@@ -67,7 +86,8 @@ function Refresh:RefreshActionButtons(main)
     if main.deleteBtn then
         local combatBlocked = tostring(state.entryType or "") == "cdmVoice"
             and type(InCombatLockdown) == "function" and InCombatLockdown() == true
-        main.deleteBtn:SetEnabled(hasSelected and not combatBlocked)
+        local isGlobalSingleton = tostring(state.entryType or "") == "bloodlust"
+        main.deleteBtn:SetEnabled(hasSelected and not combatBlocked and not isGlobalSingleton)
     end
 end
 
@@ -77,9 +97,14 @@ function Refresh:RequestRefresh(main, reason)
     end
 
     reason = tostring(reason or "full")
+    if reason ~= "buttons" and main.savedList and type(main.savedList.InvalidateLayout) == "function" then
+        main.savedList:InvalidateLayout(reason)
+    end
     if main._refreshPending then
         if reason == "full" then
             main._refreshReason = "full"
+        elseif reason == "list" and tostring(main._refreshReason or "") == "buttons" then
+            main._refreshReason = "list"
         elseif not main._refreshReason then
             main._refreshReason = reason
         end
@@ -103,9 +128,12 @@ function Refresh:RequestRefresh(main, reason)
     end)
 end
 
-function Refresh:Refresh(main)
+function Refresh:Refresh(main, allowCached)
     if not main or not main.frame then
         return
     end
-    self:RefreshSavedListOnly(main)
+    if allowCached ~= true and main.savedList and type(main.savedList.InvalidateLayout) == "function" then
+        main.savedList:InvalidateLayout("full")
+    end
+    self:RefreshSavedListOnly(main, allowCached == true)
 end

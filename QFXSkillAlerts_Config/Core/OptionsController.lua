@@ -310,6 +310,8 @@ function Controller:SaveBloodlustConfig(aceOptions)
     cfg.textOffsetY = math.floor((tonumber(state.textOffsetY) or 0) + 0.5)
 
     self:LoadBloodlustConfig(aceOptions)
+    state.selectedKey = "bloodlust"
+    state.selectedCollectionKey = nil
 
     if api and type(api.RebuildBloodlustConfig) == "function" then
         api.RebuildBloodlustConfig()
@@ -386,6 +388,9 @@ end
 
 function Controller:RefreshSavedList()
     if NS.UI and NS.UI.MainFrame and NS.UI.MainFrame.savedList and type(NS.UI.MainFrame.savedList.Refresh) == "function" then
+        if type(NS.UI.MainFrame.savedList.InvalidateLayout) == "function" then
+            NS.UI.MainFrame.savedList:InvalidateLayout("api")
+        end
         NS.UI.MainFrame.savedList:Refresh()
         return true
     end
@@ -393,8 +398,13 @@ function Controller:RefreshSavedList()
 end
 
 function Controller:RefreshUI()
-    if NS.UI and NS.UI.MainFrame and NS.UI.MainFrame.frame and type(NS.UI.MainFrame.Refresh) == "function" then
-        NS.UI.MainFrame:Refresh()
+    local main = NS.UI and NS.UI.MainFrame
+    if main and main.savedList and type(main.savedList.InvalidateLayout) == "function" then
+        main.savedList:InvalidateLayout("runtime")
+    end
+    if main and main.frame and main.frame.IsShown and main.frame:IsShown()
+        and type(main.RequestRefresh) == "function" then
+        main:RequestRefresh("list")
     end
     if NS.UI and NS.UI.EditorFrame and NS.UI.EditorFrame.frame and NS.UI.EditorFrame.frame.IsShown and NS.UI.EditorFrame.frame:IsShown() and type(NS.UI.EditorFrame.Refresh) == "function" then
         NS.UI.EditorFrame:Refresh()

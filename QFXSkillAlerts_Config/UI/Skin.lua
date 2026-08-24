@@ -110,17 +110,6 @@ function Skin:GetSkinMode()
     return mode
 end
 
-function Skin:SetSkinMode(mode)
-    mode = tostring(mode or "auto")
-    if mode ~= "auto" and mode ~= "external" and mode ~= "qfx" then
-        mode = "auto"
-    end
-    local db = rawget(_G, "QFXSkillAlertsDB")
-    if type(db) == "table" then
-        db.uiSkinMode = mode
-    end
-end
-
 function Skin:DetectExternalSkin()
     if rawget(_G, "ElvUI") then
         return "ElvUI"
@@ -336,18 +325,6 @@ function Skin:SkinScrollBar(slider)
     self:MarkExternalSkinTarget(slider, "scrollbar")
     if self:UseExternalSkin() then
         self:TryExternalSkin(slider, "scrollbar")
-    end
-    return slider
-end
-
-function Skin:SkinSlider(slider)
-    if not slider then
-        return slider
-    end
-
-    self:MarkExternalSkinTarget(slider, "slider")
-    if self:UseExternalSkin() then
-        self:TryExternalSkin(slider, "slider")
     end
     return slider
 end

@@ -97,6 +97,8 @@ local function GetEntryTypeText(entry)
     local entryType = tostring((entry and entry.entryType) or "cooldown")
     if entryType == "cast" then
         return L("ENTRY_TYPE_CAST")
+    elseif entryType == "event" then
+        return L("ENTRY_TYPE_EVENT")
     elseif entryType == "custom" then
         return L("ENTRY_TYPE_CUSTOM")
     elseif entryType == "bloodlust" then
@@ -162,6 +164,9 @@ function Rows.BuildEntryRowText(entry, includeScopeText)
     end
     if tostring(entry and entry.entryType or "") == "cast" and entry.delayEnabled == true and (tonumber(entry.delaySeconds) or 0) > 0 then
         parts[#parts + 1] = string.format("|cff808080%s|r", L("SAVED_CAST_DELAY", tonumber(entry.delaySeconds) or 0))
+    end
+    if tostring(entry and entry.entryType or "") == "event" and (tonumber(entry.eventThrottle) or 0) > 0 then
+        parts[#parts + 1] = string.format("|cff808080%s|r", L("SAVED_EVENT_THROTTLE", tonumber(entry.eventThrottle) or 0))
     end
     if entry and entry.checkTalent == true and (tonumber(entry.talentId) or 0) > 0 then
         local talentText = TrimText(entry.talentName)

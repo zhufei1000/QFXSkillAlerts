@@ -113,6 +113,14 @@ local function CreateNotifyControls(content, ctx)
     nw.sharedMediaLabel = CreateFieldLabel(notifySection, L("LABEL_SHAREDMEDIA_SOUND"), SHAREDMEDIA_X, NOTIFY_SOUND_LABEL_Y, SHAREDMEDIA_W)
     nw.sharedMediaDrop = PlaceControl(Widgets:CreateDropdown(notifySection, "QFXSkillAlertsEditorSharedMediaDropDown", SHAREDMEDIA_W), notifySection, SHAREDMEDIA_X, NOTIFY_SOUND_CONTROL_Y)
     Widgets:SetDropdownSearchable(nw.sharedMediaDrop, true, L("SEARCH_SHAREDMEDIA_SOUND"))
+    -- Keep the searchable voice list above this editor but below WoW's IME
+    -- composition/candidate layer (same as the Cooldown Manager voice list).
+    nw.sharedMediaDrop.qfxsaPopupStrata = "FULLSCREEN_DIALOG"
+    nw.sharedMediaDrop.qfxsaPopupFrameLevel = 260
+    -- Clicking the already-selected voice again clears the selection so a
+    -- voice can be cancelled instead of only replaced.
+    nw.builtinDrop.qfxsaToggleClear = true
+    nw.sharedMediaDrop.qfxsaToggleClear = true
     nw.customPathLabel = CreateFieldLabel(notifySection, L("LABEL_CUSTOM_SOUND_PATH"), CUSTOM_X, NOTIFY_CUSTOM_LABEL_Y, CUSTOM_W)
     nw.soundPath = PlaceControl(Widgets:CreateEditBox(notifySection, CUSTOM_W, 30, false), notifySection, CUSTOM_X, NOTIFY_CUSTOM_CONTROL_Y)
     nw.bloodlustCustomPathLabels = {}
@@ -213,6 +221,9 @@ local function CreateNotifyControls(content, ctx)
     nw.textEnabled = Widgets:CreateCheckButton(notifySection, L("LABEL_ENABLE_TEXT_ALERT"), 220)
     nw.textEnabled:SetPoint("TOPLEFT", notifySection, "TOPLEFT", INNER, ENABLE_Y)
     SetCheckWidth(nw.textEnabled, 220)
+    nw.textCooldownCountdown = Widgets:CreateCheckButton(notifySection, L("LABEL_TEXT_COOLDOWN_COUNTDOWN"), 220)
+    nw.textCooldownCountdown:SetPoint("TOPLEFT", notifySection, "TOPLEFT", SHAREDMEDIA_X, ENABLE_Y)
+    SetCheckWidth(nw.textCooldownCountdown, 220)
     nw.textAlertLabel = CreateFieldLabel(notifySection, L("LABEL_TEXT_CONTENT"), CUSTOM_X, NOTIFY_SOURCE_LABEL_Y, CUSTOM_W)
     nw.textAlert = PlaceControl(Widgets:CreateEditBox(notifySection, CUSTOM_W, 30, false), notifySection, CUSTOM_X, NOTIFY_SOURCE_CONTROL_Y)
     nw.textSizeLabel = CreateFieldLabel(notifySection, L("LABEL_TEXT_SIZE"), BUILTIN_X, NOTIFY_SOUND_LABEL_Y, BUILTIN_W)
@@ -441,8 +452,10 @@ function Builder:EnsureFrame(owner)
     local CLASS_LABEL_Y, CLASS_CONTROL_Y = -38, -62
     local SPELL_ROW1_Y = -46
     local SPELL_ROW2_Y = SPELL_ROW1_Y - ROW_GAP
+    local SPELL_ROW3_Y = SPELL_ROW2_Y - ROW_GAP
     local SPELL_LABEL1_Y, SPELL_CONTROL1_Y = SPELL_ROW1_Y + LABEL_OFFSET, SPELL_ROW1_Y + CONTROL_OFFSET
     local SPELL_LABEL2_Y, SPELL_CONTROL2_Y = SPELL_ROW2_Y + LABEL_OFFSET, SPELL_ROW2_Y + CONTROL_OFFSET
+    local SPELL_LABEL3_Y, SPELL_CONTROL3_Y = SPELL_ROW3_Y + LABEL_OFFSET, SPELL_ROW3_Y + CONTROL_OFFSET
 
     local ENABLE_Y = -44
     local NOTIFY_ROW1_Y = -88
@@ -509,9 +522,19 @@ function Builder:EnsureFrame(owner)
     local spellName = PlaceControl(Widgets:CreateEditBox(spellSection, PRIMARY_NAME_W, 30, false), spellSection, PRIMARY_NAME_X, SPELL_CONTROL1_Y)
     local baseCD = PlaceControl(Widgets:CreateEditBox(spellSection, CD_W, 30, false), spellSection, CD_X, SPELL_CONTROL1_Y)
 
-    local checkTalent = Widgets:CreateCheckButton(spellSection, L("LABEL_CHECK_TALENT"), CHECK_W - 30)
+    local eventTypeLabel = CreateFieldLabel(spellSection, L("LABEL_EVENT_VOICE_TYPE"), ID_X, SPELL_LABEL1_Y, 320)
+    local eventTypeDrop = PlaceControl(Widgets:CreateDropdown(spellSection, "QFXSkillAlertsEditorEventVoiceDropDown", 320), spellSection, ID_X, SPELL_CONTROL1_Y)
+    local eventThrottleLabel = CreateFieldLabel(spellSection, L("LABEL_EVENT_THROTTLE"), CD_X, SPELL_LABEL1_Y, CD_W)
+    local eventThrottle = PlaceControl(Widgets:CreateEditBox(spellSection, CD_W, 30, false), spellSection, CD_X, SPELL_CONTROL1_Y)
+    eventThrottle:SetText("1")
+    eventTypeLabel:Hide()
+    eventTypeDrop:Hide()
+    eventThrottleLabel:Hide()
+    eventThrottle:Hide()
+
+    local checkTalent = Widgets:CreateCheckButton(spellSection, L("LABEL_CHECK_TALENT"), 146)
     checkTalent:SetPoint("TOPLEFT", spellSection, "TOPLEFT", CHECK_X, SPELL_CONTROL1_Y - 3)
-    SetCheckWidth(checkTalent, CHECK_W)
+    SetCheckWidth(checkTalent, 146)
 
     local itemLoadEquipped = Widgets:CreateCheckButton(spellSection, L("LABEL_ITEM_LOAD_EQUIPPED"), 118)
     itemLoadEquipped:SetPoint("TOPLEFT", spellSection, "TOPLEFT", ID_X, SPELL_CONTROL2_Y - 3)
@@ -529,6 +552,16 @@ function Builder:EnsureFrame(owner)
     local talentId = PlaceControl(Widgets:CreateEditBox(spellSection, ID_W, 30, true), spellSection, ID_X, SPELL_CONTROL2_Y)
     local talentName = PlaceControl(Widgets:CreateEditBox(spellSection, NAME_W, 30, false), spellSection, NAME_X, SPELL_CONTROL2_Y)
     local talentCD = PlaceControl(Widgets:CreateEditBox(spellSection, CD_W, 30, false), spellSection, CD_X, SPELL_CONTROL2_Y)
+    -- Loading and CD-changing talents are independent.  The load filter owns
+    -- its own row/identity so one talent can decide whether an entry is loaded
+    -- while another talent changes the fixed cooldown.
+    local loadTalentEnabled = Widgets:CreateCheckButton(spellSection, L("LABEL_TALENT_LOAD_FILTER"), 126)
+    loadTalentEnabled:SetPoint("TOPLEFT", spellSection, "TOPLEFT", ID_X, SPELL_CONTROL3_Y - 3)
+    SetCheckWidth(loadTalentEnabled, 126)
+    local loadTalentIdLabel = CreateFieldLabel(spellSection, L("LABEL_TALENT_ID"), NAME_X, SPELL_LABEL3_Y, ID_W)
+    local loadTalentNameLabel = CreateFieldLabel(spellSection, L("LABEL_TALENT_NAME"), NAME_X + ID_W + 20, SPELL_LABEL3_Y, NAME_W)
+    local loadTalentId = PlaceControl(Widgets:CreateEditBox(spellSection, ID_W, 30, true), spellSection, NAME_X, SPELL_CONTROL3_Y)
+    local loadTalentName = PlaceControl(Widgets:CreateEditBox(spellSection, NAME_W, 30, false), spellSection, NAME_X + ID_W + 20, SPELL_CONTROL3_Y)
 
     -- Legacy cast-delay controls used to live in the spell section.  They stay
     -- allocated for compatibility with older code paths, but the visible cast
@@ -691,6 +724,10 @@ function Builder:EnsureFrame(owner)
         customCode = nil,
         customTestButton = nil,
         spellIdLabel = spellIdLabel,
+        eventTypeLabel = eventTypeLabel,
+        eventTypeDrop = eventTypeDrop,
+        eventThrottleLabel = eventThrottleLabel,
+        eventThrottle = eventThrottle,
         objectTypeItem = objectTypeItem,
         itemLoadEquipped = itemLoadEquipped,
         itemLoadBags = itemLoadBags,
@@ -699,6 +736,8 @@ function Builder:EnsureFrame(owner)
         talentIdLabel = talentIdLabel,
         talentNameLabel = talentNameLabel,
         talentCDLabel = talentCDLabel,
+        loadTalentIdLabel = loadTalentIdLabel,
+        loadTalentNameLabel = loadTalentNameLabel,
         classDrop = classDrop,
         specDrop = specDrop,
         customClassDrop = customClassDrop,
@@ -710,6 +749,12 @@ function Builder:EnsureFrame(owner)
         talentName = talentName,
         talentCDLabel = talentCDLabel,
         talentCD = talentCD,
+        loadTalentEnabled = loadTalentEnabled,
+        loadTalentId = loadTalentId,
+        loadTalentName = loadTalentName,
+        -- Kept as a widget alias for old shared code; it now represents the
+        -- independent load-talent checkbox rather than the CD-change talent.
+        talentLoadFilter = loadTalentEnabled,
         delayEnabled = delayEnabled,
         delaySecondsLabel = delaySecondsLabel,
         delaySeconds = delaySeconds,
@@ -802,6 +847,7 @@ function Builder:EnsureFrame(owner)
         imageNudgeRight = notifyData.imageNudgeRight,
         imageNudgeReset = notifyData.imageNudgeReset,
         textEnabled = notifyData.textEnabled,
+        textCooldownCountdown = notifyData.textCooldownCountdown,
         textConditionLabel = nil,
         textConditionCdLabel = nil,
         textConditionOp = conditionOp,
@@ -848,8 +894,8 @@ function Builder:EnsureFrame(owner)
         editorHint = notifyData.editorHint,
         normalNotifyTop = modules.notifyTop or -8,
         bloodlustNotifyTop = modules.bloodlustTop or -8,
-        normalSettingsContentHeight = 640,
-        castSettingsContentHeight = 640,
+        normalSettingsContentHeight = 712,
+        castSettingsContentHeight = 712,
         customSettingsContentHeight = 1040,
         normalConditionTop = modules.conditionTop or -382,
         customConditionTop = modules.customConditionTop or -742,
@@ -864,6 +910,7 @@ function Builder:EnsureFrame(owner)
 
     InstallSpellIdAutofill(self, spellId)
     InstallTalentIdAutofill(self, talentId)
+    InstallTalentIdAutofill(self, loadTalentId, "loadTalentId", "loadTalentName")
     if EditorSoundFields and type(EditorSoundFields.InstallHandlers) == "function" then
         EditorSoundFields:InstallHandlers(self, frame)
     end

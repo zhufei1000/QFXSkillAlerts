@@ -107,6 +107,10 @@ function TestController:TestCurrent(aceOptions)
 
     if tostring(state.entryType or "") == "bloodlust" and type(api.PlayBloodlustNotification) == "function" then
         api.PlayBloodlustNotification(cfg)
+    elseif tostring(state.entryType or "") == "event" and type(api.PlayEventNotification) == "function" then
+        cfg.eventKey = tostring(state.eventKey or "")
+        cfg.eventName = type(api.ResolveEventVoiceName) == "function" and api.ResolveEventVoiceName(cfg.eventKey) or ""
+        api.PlayEventNotification(cfg)
     elseif tostring(state.entryType or "") == "cast" then
         local triggerSpellID = tonumber(state.triggerSpellID or state.spellId) or tonumber(state.spellId) or 0
         if type(api.QueueCastSuccessNotification) == "function" then

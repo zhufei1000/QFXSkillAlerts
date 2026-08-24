@@ -9,6 +9,16 @@ local Registry = NS.Core.CDMVoiceRegistry
 
 Service.refreshSerial = Service.refreshSerial or 0
 Service.cdmMutationDepth = tonumber(Service.cdmMutationDepth) or 0
+Service.cooldownCacheGeneration = tonumber(Service.cooldownCacheGeneration) or 0
+Service.cooldownCategoryCache = Service.cooldownCategoryCache or {}
+Service.cooldownInfoCache = Service.cooldownInfoCache or {}
+Service.validEventsCache = Service.validEventsCache or {}
+
+local function ClearCache(values)
+    for key in pairs(type(values) == "table" and values or {}) do
+        values[key] = nil
+    end
+end
 
 local CATEGORY_DEFS = {
     { key = "essential", enumKey = "Essential", localeKey = "CDM_CATEGORY_ESSENTIAL" },
@@ -190,6 +200,33 @@ function Service:GetLayoutManager()
     return GetLayoutManager()
 end
 
+local function EnsureCooldownCacheScope(self)
+    local classID, specID = self:GetCurrentClassSpec()
+    local scope = tostring(tonumber(classID) or 0) .. ":" .. tostring(tonumber(specID) or 0)
+    if self.cooldownCacheScope ~= scope then
+        ClearCache(self.cooldownCategoryCache)
+        ClearCache(self.cooldownInfoCache)
+        ClearCache(self.validEventsCache)
+        self.cooldownCacheScope = scope
+        self.cooldownCacheGeneration = (tonumber(self.cooldownCacheGeneration) or 0) + 1
+    end
+    return scope
+end
+
+function Service:InvalidateCooldownCache(reason)
+    ClearCache(self.cooldownCategoryCache)
+    ClearCache(self.cooldownInfoCache)
+    ClearCache(self.validEventsCache)
+    self.cooldownCacheScope = nil
+    self.cooldownCacheReason = tostring(reason or "unknown")
+    self.cooldownCacheGeneration = (tonumber(self.cooldownCacheGeneration) or 0) + 1
+end
+
+function Service:GetCooldownCacheGeneration()
+    EnsureCooldownCacheScope(self)
+    return tonumber(self.cooldownCacheGeneration) or 0
+end
+
 function Service:BeginCDMMutation(source)
     self.cdmMutationDepth = (tonumber(self.cdmMutationDepth) or 0) + 1
     if self.cdmMutationDepth == 1 then
@@ -264,6 +301,13 @@ function Service:GetCooldownsForCategory(category)
         return {}
     end
 
+    EnsureCooldownCacheScope(self)
+    local cacheKey = tostring(categoryValue)
+    local cached = self.cooldownCategoryCache[cacheKey]
+    if type(cached) == "table" then
+        return cached
+    end
+
     local ids
     if type(provider.GetOrderedCooldownIDsForCategory) == "function" then
         local ok, result = pcall(provider.GetOrderedCooldownIDsForCategory, provider, categoryValue, false)
@@ -294,6 +338,10 @@ function Service:GetCooldownsForCategory(category)
             result[#result + 1] = info
         end
     end
+    self.cooldownCategoryCache[cacheKey] = result
+    if def and def.key then
+        self.cooldownCategoryCache[tostring(def.key)] = result
+    end
     return result
 end
 
@@ -301,6 +349,10 @@ function Service:GetCooldownInfo(cooldownID)
     cooldownID = tonumber(cooldownID)
     if not cooldownID then
         return nil
+    end
+    EnsureCooldownCacheScope(self)
+    if self.cooldownInfoCache[cooldownID] then
+        return self.cooldownInfoCache[cooldownID]
     end
     local provider = GetDataProvider()
     local rawInfo
@@ -324,7 +376,7 @@ function Service:GetCooldownInfo(cooldownID)
         or tonumber(rawInfo.overrideSpellID)
         or tonumber(rawInfo.spellID)
     local name = GetSpellName(spellID) or L("CDM_UNKNOWN_SKILL", cooldownID)
-    return {
+    local info = {
         cooldownID = cooldownID,
         category = rawInfo.category,
         spellID = spellID,
@@ -337,12 +389,18 @@ function Service:GetCooldownInfo(cooldownID)
         isKnown = rawInfo.isKnown ~= false,
         rawInfo = rawInfo,
     }
+    self.cooldownInfoCache[cooldownID] = info
+    return info
 end
 
 function Service:GetValidEvents(cooldownID)
     cooldownID = tonumber(cooldownID)
     if not cooldownID or type(C_CooldownViewer) ~= "table" or type(C_CooldownViewer.GetValidAlertTypes) ~= "function" then
         return {}
+    end
+    EnsureCooldownCacheScope(self)
+    if self.validEventsCache[cooldownID] then
+        return self.validEventsCache[cooldownID]
     end
     local ok, values = pcall(C_CooldownViewer.GetValidAlertTypes, cooldownID)
     if not ok or type(values) ~= "table" then
@@ -365,6 +423,7 @@ function Service:GetValidEvents(cooldownID)
             }
         end
     end
+    self.validEventsCache[cooldownID] = result
     return result
 end
 
@@ -458,12 +517,6 @@ function Service:FindCategoryForCooldown(cooldownID)
         end
     end
     return nil
-end
-
-function Service:RefreshActiveCooldownViewerRuntime()
-    -- Compatibility no-op. Calling Blizzard viewer/data-provider refresh methods
-    -- from addon code can taint secret-value evaluation (notably hasTotem).
-    return false
 end
 
 local function NewBatchSummary(seed)
@@ -1160,14 +1213,6 @@ function Service:ApplySoundAlertsBatch(operations, options)
     return self:ApplyCDMPlanAndReload(operations, options)
 end
 
-function Service:GetLastBatchSummary()
-    return self.lastBatchSummary or NewBatchSummary()
-end
-
-function Service:GetLastBatchResults()
-    return self.lastBatchResults or {}
-end
-
 function Service:BuildCDMVoiceDraft(cooldownID, eventType, payload, expectedClassID, expectedSpecID, expectedCategory)
     local classID, specID = self:GetCurrentClassSpec()
     if (expectedClassID and tonumber(expectedClassID) ~= classID)
@@ -1279,18 +1324,6 @@ function Service:ApplySoundAlert(cooldownID, eventType, payload, expectedClassID
     })
 end
 
-function Service:DeleteSoundAlert(cooldownID, eventType, payload, expectedClassID, expectedSpecID)
-    local classID, specID = self:GetCurrentClassSpec()
-    if (expectedClassID and tonumber(expectedClassID) ~= classID)
-        or (expectedSpecID and tonumber(expectedSpecID) ~= specID) then
-        return false, "spec_changed"
-    end
-    if not cooldownID or not eventType or not payload then
-        return false, "invalid_operation"
-    end
-    return false, "explicit_apply_required"
-end
-
 function Service:ClearPendingRuntimeReload()
     local store = NS.Core and NS.Core.CDMVoicePresetStore
     local state = store and type(store.GetSyncState) == "function" and store:GetSyncState() or nil
@@ -1298,6 +1331,93 @@ function Service:ClearPendingRuntimeReload()
         state.pendingRuntimeReload = false
     end
     return true
+end
+
+local CDM_SAVED_STATUS_DISPLAY = {
+    loaded = { loadState = "green", isLoaded = true, displaySection = "loaded", localeKey = "CDM_STATUS_APPLIED" },
+    pending = { loadState = "yellow", isLoaded = true, displaySection = "loaded", localeKey = "CDM_STATUS_PENDING" },
+    applyFailed = { loadState = "orange", isLoaded = true, displaySection = "loaded", localeKey = "CDM_STATUS_APPLY_FAILED" },
+    eventUnsupported = { loadState = "orange", isLoaded = true, displaySection = "loaded", localeKey = "CDM_STATUS_EVENT_UNSUPPORTED" },
+    voiceMissing = { loadState = "gray", isLoaded = true, displaySection = "loaded", localeKey = "CDM_STATUS_VOICE_MISSING" },
+    skillMissing = { loadState = "red", isLoaded = false, displaySection = "unloaded", localeKey = "CDM_STATUS_SKILL_MISSING" },
+    ambiguousSkill = { loadState = "red", isLoaded = false, displaySection = "unloaded", localeKey = "CDM_STATUS_AMBIGUOUS_SKILL" },
+    dataNotReady = { loadState = "red", isLoaded = false, displaySection = "unloaded", localeKey = "CDM_DATA_NOT_READY" },
+    scopeUnloaded = { loadState = "red", isLoaded = false, displaySection = "unloaded", localeKey = "CDM_STATUS_SCOPE_UNLOADED" },
+}
+
+local function ResolveCDMScopeText(classID, specID, isLoaded)
+    local scope = NS.Core and NS.Core.Scope
+    local className = type(scope) == "table" and type(scope.ResolveClassName) == "function"
+        and scope:ResolveClassName(classID) or L("FALLBACK_CLASS", tostring(classID))
+    local specName = type(scope) == "table" and type(scope.ResolveSpecName) == "function"
+        and scope:ResolveSpecName(classID, specID) or L("FALLBACK_SPEC", tostring(specID))
+    return string.format("%s / %s%s", className, specName, isLoaded and L("LOADED_TAG") or L("UNLOADED_TAG"))
+end
+
+local function BuildCDMSavedEntry(store, record, evaluation, display, includeScopeText)
+    evaluation = type(evaluation) == "table" and evaluation or {}
+    display = type(display) == "table" and display or CDM_SAVED_STATUS_DISPLAY.skillMissing
+    local info = type(evaluation.info) == "table" and evaluation.info or {}
+    local classID = tonumber(record.classID) or 0
+    local specID = tonumber(record.specID) or 0
+    local spellID = tonumber(record.spellID) or 0
+    local eventType = tonumber(evaluation.eventType)
+        or (store and type(store.EventKeyToType) == "function"
+            and tonumber(store:EventKeyToType(record.eventKey, record.eventTypeHint)) or nil)
+    local eventText = tostring(record.eventKey or "")
+    if eventType then
+        eventText = L("CDM_EVENT_FALLBACK", eventType)
+        if type(CooldownViewerAlert_GetEventText) == "function" then
+            local ok, value = pcall(CooldownViewerAlert_GetEventText, eventType)
+            if ok and type(value) == "string" and value ~= "" then
+                eventText = value
+            end
+        end
+    end
+    local voiceItem = evaluation.voiceItem
+    if not voiceItem and store and type(store.ResolveVoice) == "function" then
+        voiceItem = store:ResolveVoice(record)
+    end
+    local voiceName = tostring(record.voiceName or "")
+    if voiceName == "" and voiceItem then
+        voiceName = tostring(voiceItem.name or "")
+    end
+    if voiceName == "" then
+        voiceName = L("CDM_MISSING_VOICE")
+    end
+    local runtimeStatus = tostring(evaluation.status or "skillMissing")
+    return {
+        key = string.format("cdmpreset:%d:%d:%s:%d:%s", classID, specID, record.category, spellID, record.eventKey),
+        entryType = "cdmVoice",
+        itemType = "entry",
+        classID = classID,
+        specID = specID,
+        recordKey = record.recordKey,
+        category = record.category,
+        spellId = spellID,
+        eventKey = record.eventKey,
+        alertEvent = eventType,
+        voiceIdentity = record.voiceIdentity,
+        voiceName = voiceName,
+        voicePath = record.voicePath,
+        cooldownID = evaluation.cooldownID,
+        voicePayload = voiceItem and tonumber(voiceItem.payload) or nil,
+        currentPayload = evaluation.currentPayload,
+        spellName = info.spellName or GetSpellName(spellID) or L("CDM_UNKNOWN_SKILL", spellID),
+        icon = info.icon or GetSpellIcon(spellID),
+        eventText = eventText,
+        statusText = L(display.localeKey),
+        soundDetail = eventText .. " | " .. voiceName,
+        scopeText = includeScopeText and ResolveCDMScopeText(classID, specID, display.isLoaded) or "",
+        runtimeStatus = runtimeStatus,
+        runtimeReason = runtimeStatus,
+        loadState = display.loadState,
+        isLoaded = display.isLoaded,
+        displaySection = display.displaySection,
+        isVirtual = true,
+        canDrag = false,
+        isCurrentScope = includeScopeText ~= true,
+    }
 end
 
 function Service:GetCurrentSpecSavedEntries()
@@ -1310,70 +1430,63 @@ function Service:GetCurrentSpecSavedEntries()
     if not store or not sync or type(sync.EvaluateRecord) ~= "function" then
         return {}
     end
-    local statusDisplay = {
-        loaded = { loadState = "green", isLoaded = true, displaySection = "loaded", localeKey = "CDM_STATUS_APPLIED" },
-        pending = { loadState = "yellow", isLoaded = true, displaySection = "loaded", localeKey = "CDM_STATUS_PENDING" },
-        applyFailed = { loadState = "orange", isLoaded = true, displaySection = "loaded", localeKey = "CDM_STATUS_APPLY_FAILED" },
-        eventUnsupported = { loadState = "orange", isLoaded = true, displaySection = "loaded", localeKey = "CDM_STATUS_EVENT_UNSUPPORTED" },
-        voiceMissing = { loadState = "gray", isLoaded = true, displaySection = "loaded", localeKey = "CDM_STATUS_VOICE_MISSING" },
-        skillMissing = { loadState = "red", isLoaded = false, displaySection = "unloaded", localeKey = "CDM_STATUS_SKILL_MISSING" },
-        ambiguousSkill = { loadState = "red", isLoaded = false, displaySection = "unloaded", localeKey = "CDM_STATUS_AMBIGUOUS_SKILL" },
-    }
     local result = {}
     for _, record in ipairs(store:GetEffectiveRecords(classID, specID)) do
         local evaluation = sync:EvaluateRecord(record)
-        local display = statusDisplay[evaluation.status] or statusDisplay.skillMissing
-        local info = evaluation.info or {}
-        local spellID = tonumber(record.spellID) or 0
-        local eventType = tonumber(evaluation.eventType)
-        local eventText = tostring(record.eventKey or "")
-        if eventType then
-            eventText = L("CDM_EVENT_FALLBACK", eventType)
-            if type(CooldownViewerAlert_GetEventText) == "function" then
-                local ok, value = pcall(CooldownViewerAlert_GetEventText, eventType)
-                if ok and type(value) == "string" and value ~= "" then
-                    eventText = value
+        local display = CDM_SAVED_STATUS_DISPLAY[evaluation.status] or CDM_SAVED_STATUS_DISPLAY.skillMissing
+        result[#result + 1] = BuildCDMSavedEntry(store, record, evaluation, display, false)
+    end
+    return result
+end
+
+function Service:GetSavedEntries()
+    local currentClassID, currentSpecID = self:GetCurrentClassSpec()
+    if not currentClassID or not currentSpecID then
+        return {}
+    end
+    local store = NS.Core and NS.Core.CDMVoicePresetStore
+    if not store then
+        return {}
+    end
+
+    local result = self:GetCurrentSpecSavedEntries()
+    local profiles = type(store.GetAllProfilesForExport) == "function" and store:GetAllProfilesForExport() or {}
+    local inactiveRecords = {}
+    for classIDKey, classMap in pairs(type(profiles) == "table" and profiles or {}) do
+        local classID = tonumber(classIDKey)
+        if classID and type(classMap) == "table" then
+            for specIDKey, specMap in pairs(classMap) do
+                local specID = tonumber(specIDKey)
+                if specID and type(specMap) == "table"
+                    and (classID ~= currentClassID or specID ~= currentSpecID) then
+                    for _, record in pairs(specMap) do
+                        if type(record) == "table" and record.enabled ~= false then
+                            inactiveRecords[#inactiveRecords + 1] = record
+                        end
+                    end
                 end
             end
         end
-        local voiceName = tostring(record.voiceName or "")
-        if voiceName == "" and evaluation.voiceItem then
-            voiceName = tostring(evaluation.voiceItem.name or "")
+    end
+    table.sort(inactiveRecords, function(left, right)
+        local leftClass, rightClass = tonumber(left.classID) or 0, tonumber(right.classID) or 0
+        if leftClass ~= rightClass then
+            return leftClass < rightClass
         end
-        if voiceName == "" then
-            voiceName = L("CDM_MISSING_VOICE")
+        local leftSpec, rightSpec = tonumber(left.specID) or 0, tonumber(right.specID) or 0
+        if leftSpec ~= rightSpec then
+            return leftSpec < rightSpec
         end
-        local statusText = L(display.localeKey)
-        result[#result + 1] = {
-            key = string.format("cdmpreset:%d:%d:%s:%d:%s", classID, specID, record.category, spellID, record.eventKey),
-            entryType = "cdmVoice",
-            itemType = "entry",
-            classID = classID,
-            specID = specID,
-            recordKey = record.recordKey,
-            category = record.category,
-            spellId = spellID,
-            eventKey = record.eventKey,
-            alertEvent = eventType,
-            voiceIdentity = record.voiceIdentity,
-            voiceName = voiceName,
-            voicePath = record.voicePath,
-            cooldownID = evaluation.cooldownID,
-            voicePayload = evaluation.voiceItem and tonumber(evaluation.voiceItem.payload) or nil,
-            currentPayload = evaluation.currentPayload,
-            spellName = info.spellName or GetSpellName(spellID) or L("CDM_UNKNOWN_SKILL", spellID),
-            icon = info.icon or GetSpellIcon(spellID),
-            eventText = eventText,
-            statusText = statusText,
-            soundDetail = eventText .. " | " .. voiceName,
-            runtimeStatus = evaluation.status,
-            runtimeReason = evaluation.status,
-            loadState = display.loadState,
-            isLoaded = display.isLoaded,
-            displaySection = display.displaySection,
-            isVirtual = true,
-            canDrag = false,
-        }
+        return tostring(left.recordKey or "") < tostring(right.recordKey or "")
+    end)
+    for _, record in ipairs(inactiveRecords) do
+        result[#result + 1] = BuildCDMSavedEntry(
+            store,
+            record,
+            { status = "scopeUnloaded" },
+            CDM_SAVED_STATUS_DISPLAY.scopeUnloaded,
+            true
+        )
     end
     return result
 end
@@ -1508,6 +1621,55 @@ end
 
 function Service:DeleteSoundAlertByKeyLocalOnly(key)
     return self:StageSoundAlertRemovalByKey(key)
+end
+
+function Service:DeletePresetEntriesLocalBatch(keys)
+    local store = NS.Core and NS.Core.CDMVoicePresetStore
+    if not store or type(store.RemoveOrDisableRecord) ~= "function" then
+        return false, 0, "not_available"
+    end
+
+    local records = {}
+    local seen = {}
+    for _, key in ipairs(type(keys) == "table" and keys or {}) do
+        key = tostring(key or "")
+        if key ~= "" and not seen[key] then
+            seen[key] = true
+            local parsed = self:ParseSavedEntryKey(key)
+            if not parsed or parsed.keyType ~= "preset"
+                or not store:GetEffectiveRecord(parsed.classID, parsed.specID, parsed.recordKey) then
+                return false, 0, "not_found"
+            end
+            records[#records + 1] = parsed
+        end
+    end
+    if #records == 0 then
+        return true, 0, "empty"
+    end
+
+    local snapshots = {}
+    for _, parsed in ipairs(records) do
+        local snapshot, reason = store:RemoveOrDisableRecord(
+            parsed.classID,
+            parsed.specID,
+            parsed.recordKey,
+            { createPendingRemoval = true }
+        )
+        if not snapshot then
+            for index = #snapshots, 1, -1 do
+                store:RestoreRecordMutation(snapshots[index])
+            end
+            return false, 0, reason or "delete_failed"
+        end
+        snapshots[#snapshots + 1] = snapshot
+    end
+
+    self:RefreshRuntimeData("preset_collection_deleted_local")
+    local sync = NS.Core and NS.Core.CDMVoicePresetSync
+    if sync and type(sync.ScheduleEvaluation) == "function" then
+        sync:ScheduleEvaluation("preset_collection_deleted_local")
+    end
+    return true, #snapshots, "deleted"
 end
 
 function Service:DeleteSoundAlertByKey(key)

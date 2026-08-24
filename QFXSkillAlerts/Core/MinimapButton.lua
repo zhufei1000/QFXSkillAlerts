@@ -153,12 +153,6 @@ function MinimapButton:UpdatePosition()
     RefreshButtonReference()
 end
 
-function MinimapButton:UpdateDragPosition()
-    -- Dragging is now handled by LibDBIcon.  This method is kept so older code
-    -- calling it will not error.
-    self:UpdatePosition()
-end
-
 function MinimapButton:Initialize()
     if self.initialized then
         self:UpdatePosition()

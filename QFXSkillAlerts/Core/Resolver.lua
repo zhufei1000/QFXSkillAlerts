@@ -398,29 +398,6 @@ function Resolver:GetActiveTalentConfigID()
     return nil
 end
 
-function Resolver:TalentDefinitionMatches(definitionID, talentId)
-    talentId = tonumber(talentId) or 0
-    definitionID = tonumber(definitionID) or 0
-    if talentId <= 0 or definitionID <= 0 then
-        return false
-    end
-    if definitionID == talentId then
-        return true
-    end
-    if C_Traits and C_Traits.GetDefinitionInfo then
-        local ok, info = pcall(C_Traits.GetDefinitionInfo, definitionID)
-        if ok and type(info) == "table" then
-            if tonumber(info.spellID) == talentId then
-                return true
-            end
-            if tonumber(info.overriddenSpellID) == talentId then
-                return true
-            end
-        end
-    end
-    return false
-end
-
 function Resolver:InvalidateTalentCache()
     self.talentCacheValid = false
 end

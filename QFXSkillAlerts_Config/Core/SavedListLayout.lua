@@ -246,7 +246,6 @@ function SavedListLayout:GetSavedListLayoutForScope(owner, classID, specID, incl
     end
 
     local storedEntryMapCache = {}
-    local loadedScopeCache = {}
     local classNameCache = {}
     local specNameCache = {}
 
@@ -268,17 +267,30 @@ function SavedListLayout:GetSavedListLayoutForScope(owner, classID, specID, incl
 
     local modeTts, modeSound = api.GetModes()
     local currentClassID, currentSpecID = api.GetCurrentClassSpec()
+    local cdmSnapshot = nil
 
-    local function isLoadedScopeCached(rowClassID, rowSpecID)
-        rowClassID = tonumber(rowClassID) or 0
-        rowSpecID = tonumber(rowSpecID) or 0
-        local cacheKey = rowClassID .. ":" .. rowSpecID
-        if loadedScopeCache[cacheKey] ~= nil then
-            return loadedScopeCache[cacheKey]
+    local function buildCDMEntryRow(entryKey, depth, parentGroupID, parentGroupKey)
+        entryKey = TrimText(entryKey)
+        if not CollectionStore.IsCDMEntryKey or not CollectionStore.IsCDMEntryKey(entryKey)
+            or type(api.GetCDMVoiceSavedEntries) ~= "function" then
+            return nil
         end
-        local loaded = IsLoadedScope(api, rowClassID, rowSpecID, currentClassID, currentSpecID)
-        loadedScopeCache[cacheKey] = loaded
-        return loaded
+        if cdmSnapshot == nil then
+            cdmSnapshot = type(CollectionStore.GetCDMEntrySnapshot) == "function"
+                and CollectionStore.GetCDMEntrySnapshot(api) or { byKey = {} }
+        end
+        local source = cdmSnapshot.byKey[entryKey]
+        if type(source) ~= "table" then
+            return nil
+        end
+        local row = CopyTableShallow(source)
+        row.depth = tonumber(depth) or 0
+        row.groupID = parentGroupID
+        row.groupKey = parentGroupKey
+        row.parentGroupKey = parentGroupKey
+        row.canDrag = true
+        row.isVirtual = false
+        return row
     end
 
     local function resolveClassNameCached(rowClassID)
@@ -367,6 +379,20 @@ function SavedListLayout:GetSavedListLayoutForScope(owner, classID, specID, incl
 
         local entryKey = BuildEntryKey(rowClassID, rowSpecID, rowIndex)
         local spellId = tonumber(entry.spellId) or 0
+        local entryType = tostring(entry.entryType or "cooldown")
+        local eventKey = entryType == "event" and tostring(entry.eventKey or "") or ""
+        if eventKey ~= "" and type(api.NormalizeEventVoiceKey) == "function" then
+            eventKey = tostring(api.NormalizeEventVoiceKey(eventKey) or "")
+        end
+        local eventName = ""
+        local eventIcon = nil
+        if eventKey ~= "" then
+            eventName = type(api.ResolveEventVoiceName) == "function" and TrimText(api.ResolveEventVoiceName(eventKey)) or ""
+            if eventName == "" then
+                eventName = eventKey
+            end
+            eventIcon = type(api.ResolveEventVoiceIcon) == "function" and api.ResolveEventVoiceIcon(eventKey) or nil
+        end
         local objectTypeRaw = tostring(entry.objectType or OBJECT_TYPE_SPELL):lower()
         local cacheKey = table.concat({ entryKey, includeScopeText and "scope" or "plain", tostring(currentClassID or 0), tostring(currentSpecID or 0), tostring(GetCurrentRaceID()) }, ":")
         local signature = table.concat({
@@ -376,7 +402,10 @@ function SavedListLayout:GetSavedListLayoutForScope(owner, classID, specID, incl
             tostring(entry.itemLoadSameName == true),
             (objectTypeRaw == OBJECT_TYPE_ITEM and api and type(api.IsItemLoadRequirementMet) == "function") and tostring(api.IsItemLoadRequirementMet(entry) ~= false) or "",
             TrimText(entry.spellName),
-            tostring(entry.entryType or "cooldown"),
+            entryType,
+            eventKey,
+            eventName,
+            tostring(tonumber(entry.eventThrottle) or 0),
             tostring(entry.notifyMode or modeSound),
             tostring(entry.soundSource or ""),
             tostring(entry.soundPath or ""),
@@ -430,11 +459,14 @@ function SavedListLayout:GetSavedListLayoutForScope(owner, classID, specID, incl
             return row
         end
 
-        local entryType = tostring(entry.entryType or "cooldown")
         local objectType = type(api.ResolveObjectType) == "function" and api.ResolveObjectType(spellId, entry.objectType) or objectTypeRaw
         local spellName = TrimText(entry.spellName)
         local icon = nil
-        if entryType == "custom" then
+        if entryType == "event" then
+            objectType = OBJECT_TYPE_SPELL
+            spellName = eventName
+            icon = eventIcon
+        elseif entryType == "custom" then
             objectType = OBJECT_TYPE_SPELL
             spellName = TrimText(entry.customName or entry.spellName)
             if spellName == "" then spellName = L("ENTRY_TYPE_CUSTOM") end
@@ -453,6 +485,8 @@ function SavedListLayout:GetSavedListLayoutForScope(owner, classID, specID, incl
             itemType = "entry",
             key = entryKey,
             entryType = entryType,
+            eventKey = eventKey ~= "" and eventKey or nil,
+            eventThrottle = eventKey ~= "" and math.max(0, math.min(300, tonumber(entry.eventThrottle) or 1)) or nil,
             objectType = objectType,
             itemLoadMode = (objectType == OBJECT_TYPE_ITEM) and NormalizeItemLoadMode(entry.itemLoadMode) or ITEM_LOAD_NONE,
             itemLoadSameName = objectType == OBJECT_TYPE_ITEM and NormalizeItemLoadMode(entry.itemLoadMode) == ITEM_LOAD_BAGS and entry.itemLoadSameName == true,
@@ -543,8 +577,13 @@ function SavedListLayout:GetSavedListLayoutForScope(owner, classID, specID, incl
                     loadedCount = loadedCount + childLoaded
                     unloadedCount = unloadedCount + childUnloaded
                 else
-                    local entryKey, rowClassID, rowSpecID, rowIndex = EntryRefToKey(classID, specID, ref)
-                    local entryRow = entryKey and buildEntryRow(rowClassID, rowSpecID, rowIndex, (tonumber(depth) or 0) + 1, groupID, groupKey) or nil
+                    local entryRow
+                    if CollectionStore.IsCDMEntryKey and CollectionStore.IsCDMEntryKey(ref) then
+                        entryRow = buildCDMEntryRow(ref, (tonumber(depth) or 0) + 1, groupID, groupKey)
+                    else
+                        local entryKey, rowClassID, rowSpecID, rowIndex = EntryRefToKey(classID, specID, ref)
+                        entryRow = entryKey and buildEntryRow(rowClassID, rowSpecID, rowIndex, (tonumber(depth) or 0) + 1, groupID, groupKey) or nil
+                    end
                     if entryRow then
                         rows[#rows + 1] = entryRow
                         totalCount = totalCount + 1
@@ -582,8 +621,19 @@ function SavedListLayout:GetSavedListLayoutForScope(owner, classID, specID, incl
                         loaded = loaded + cl
                         unloaded = unloaded + cu
                     else
-                        local entryKey, rowClassID, rowSpecID, rowIndex = EntryRefToKey(classID, specID, ref)
-                        if entryKey and rowIndex and rowIndex > 0 then
+                        if CollectionStore.IsCDMEntryKey and CollectionStore.IsCDMEntryKey(ref) then
+                            local cdmRow = buildCDMEntryRow(ref, 0, groupID, BuildGroupKey(classID, specID, groupID))
+                            if cdmRow then
+                                total = total + 1
+                                if cdmRow.isLoaded == false then
+                                    unloaded = unloaded + 1
+                                else
+                                    loaded = loaded + 1
+                                end
+                            end
+                        else
+                            local entryKey, rowClassID, rowSpecID, rowIndex = EntryRefToKey(classID, specID, ref)
+                            if entryKey and rowIndex and rowIndex > 0 then
                             local rowMap = getStoredEntryMap(rowClassID, rowSpecID)
                             local rowEntry = api.GetEntry(rowMap, rowIndex)
                             if rowEntry then
@@ -593,6 +643,7 @@ function SavedListLayout:GetSavedListLayoutForScope(owner, classID, specID, incl
                                 else
                                     unloaded = unloaded + 1
                                 end
+                            end
                             end
                         end
                     end

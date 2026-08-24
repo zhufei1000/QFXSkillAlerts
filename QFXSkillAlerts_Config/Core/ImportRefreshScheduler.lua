@@ -48,6 +48,9 @@ function Scheduler:Schedule(reason)
             if api and type(api.RebuildCustomConfig) == "function" then
                 api.RebuildCustomConfig()
             end
+            if api and type(api.RebuildEventVoiceConfig) == "function" then
+                api.RebuildEventVoiceConfig()
+            end
 
             RunSoon(function()
                 if not stillCurrent() then return end

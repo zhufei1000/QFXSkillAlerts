@@ -78,8 +78,8 @@ end
 
 local function NormalizeEntryType(value)
     value = tostring(value or "cooldown")
-    if value == "cast" then
-        return "cast"
+    if value == "cast" or value == "event" then
+        return value
     end
     return "cooldown"
 end
@@ -117,16 +117,18 @@ local function BuildEntrySignature(classID, specID, entry)
         return nil
     end
     classID, specID = NormalizeClassSpec(classID, specID)
+    local entryType = NormalizeEntryType(entry.entryType)
     local spellID = tonumber(entry.spellId or entry.itemID) or 0
-    if classID < 0 or specID < 0 or spellID <= 0 then
+    local eventKey = entryType == "event" and tostring(entry.eventKey or "") or ""
+    if classID < 0 or specID < 0 or (spellID <= 0 and eventKey == "") then
         return nil
     end
     return table.concat({
         tostring(classID),
         tostring(specID),
-        NormalizeEntryType(entry.entryType),
+        entryType,
         NormalizeObjectType(entry.objectType),
-        tostring(math.floor(spellID)),
+        entryType == "event" and eventKey or tostring(math.floor(spellID)),
     }, ":")
 end
 
@@ -137,7 +139,10 @@ local function CountEntries(db)
             for _, entryMap in pairs(classMap) do
                 if type(entryMap) == "table" then
                     for _, entry in pairs(entryMap) do
-                        if type(entry) == "table" and (tonumber(entry.spellId or entry.itemID) or 0) > 0 then
+                        if type(entry) == "table" and (
+                            (tonumber(entry.spellId or entry.itemID) or 0) > 0
+                            or (NormalizeEntryType(entry.entryType) == "event" and tostring(entry.eventKey or "") ~= ""))
+                        then
                             count = count + 1
                         end
                     end
@@ -174,11 +179,13 @@ end
 local function FindMatchingIndex(entryMap, entry)
     local spellID = tonumber(entry and (entry.spellId or entry.itemID)) or 0
     local entryType = NormalizeEntryType(entry and entry.entryType)
+    local eventKey = entryType == "event" and tostring(entry and entry.eventKey or "") or ""
     local objectType = NormalizeObjectType(entry and entry.objectType)
     for index, current in pairs(type(entryMap) == "table" and entryMap or {}) do
         if type(current) == "table"
-            and (tonumber(current.spellId or current.itemID) or 0) == spellID
             and NormalizeEntryType(current.entryType) == entryType
+            and ((entryType == "event" and eventKey ~= "" and tostring(current.eventKey or "") == eventKey)
+                or (entryType ~= "event" and (tonumber(current.spellId or current.itemID) or 0) == spellID))
             and NormalizeObjectType(current.objectType) == objectType then
             return tonumber(index) or 0
         end
@@ -225,7 +232,8 @@ local function MergeEntryRoot(working, sourceRoot, forcedEntryType, keyMap, stat
                                 entry.entryType = forcedEntryType
                             end
                             local spellID = tonumber(entry.spellId or entry.itemID) or 0
-                            if spellID > 0 then
+                            local isEvent = NormalizeEntryType(entry.entryType) == "event" and tostring(entry.eventKey or "") ~= ""
+                            if spellID > 0 or isEvent then
                                 stats.sourceEntries = stats.sourceEntries + 1
                                 local oldKey = BuildEntryKey(normalizedClassID, normalizedSpecID, oldIndex)
                                 local matchingIndex = FindMatchingIndex(targetMap, entry)
@@ -522,4 +530,3 @@ function Migration:Migrate(legacyDB, currentDB)
     end
     return true, resultOrError
 end
-

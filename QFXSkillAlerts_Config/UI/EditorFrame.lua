@@ -14,18 +14,11 @@ local function NormalizeEntryType(value)
         return EditorDrafts:NormalizeEntryType(value)
     end
     value = tostring(value or "cooldown")
-    if value == "cast" or value == "bloodlust" then
+    if value == "cast" or value == "event" or value == "bloodlust" then
         return value
     end
     return "cooldown"
 end
-
-local function SaveEditorDraft(state, entryType)
-    if EditorDrafts and type(EditorDrafts.Save) == "function" then
-        return EditorDrafts:Save(state, entryType)
-    end
-end
-
 
 local function ResetEditorScroll(frame)
     if not frame or not frame.contentHost then
@@ -68,50 +61,12 @@ local function DeferredRefresh(editor)
     if editor.frame.Raise then editor.frame:Raise() end
 end
 
-local function RestoreEditorDraft(state, entryType)
-    if EditorDrafts and type(EditorDrafts.Restore) == "function" then
-        return EditorDrafts:Restore(state, entryType)
-    end
-end
-
 function EditorFrame:EnsureFrame()
     local builder = NS.UI and NS.UI.EditorFrameBuilder
     if builder and type(builder.EnsureFrame) == "function" then
         return builder:EnsureFrame(self)
     end
     return self.frame
-end
-
-
-function EditorFrame:SwitchEntryType(entryType)
-    local state = NS.AceOptions:GetState()
-    entryType = NormalizeEntryType(entryType)
-
-    if self.mode == "new" then
-        self:PullFromWidgets()
-        local currentType = tostring(state.entryType or "")
-        if currentType == "cooldown" or currentType == "cast" then
-            SaveEditorDraft(state, currentType)
-        end
-        RestoreEditorDraft(state, entryType)
-    else
-        self:PullFromWidgets()
-        state.entryType = entryType
-        if entryType == "cooldown" then
-            state.delayEnabled = false
-            state.delaySeconds = 0
-            state.castDelayMode = "show"
-        elseif entryType == "cast" then
-            state.baseCD = 0
-            state.checkTalent = false
-            state.talentId = 0
-            state.talentName = ""
-            state.talentCD = 0
-        end
-    end
-
-    state.activeAlertTab = "settings"
-    self:Refresh()
 end
 
 
@@ -160,10 +115,16 @@ function EditorFrame:OpenForNew(entryType)
 
     NS.AceOptions:EnsureValidScope()
     NS.AceOptions:ClearEditorFields()
-    state._editorDrafts = {}
     state._mcdCustomNotifyVisibleCount = nil
     state._mcdCustomNotifyManualCount = nil
     state.entryType = NormalizeEntryType(entryType or "cooldown")
+    if state.entryType == "event" then
+        state.voiceEnabled = true
+        state.imageEnabled = false
+        state.textEnabled = false
+        state.eventKey = tostring(state.eventKey or "combat_start")
+        state.eventThrottle = math.max(0, math.min(300, tonumber(state.eventThrottle) or 1))
+    end
     state.activeAlertTab = "settings"
     if state.entryType == "bloodlust" and NS.AceOptions and type(NS.AceOptions.LoadBloodlustConfig) == "function" then
         NS.AceOptions:LoadBloodlustConfig()

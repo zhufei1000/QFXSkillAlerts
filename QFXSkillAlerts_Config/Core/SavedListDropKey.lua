@@ -58,11 +58,6 @@ function DropKey:IsGroupKey(value)
     return tostring(key or ""):match("^group:") ~= nil
 end
 
-function DropKey:IsEntryKey(value)
-    local key = self:StripSuffix(value)
-    return tostring(key or ""):match("^%-?%d+:%-?%d+:%-?%d+$") ~= nil
-end
-
 function DropKey:GetKind(value)
     local key = self:StripSuffix(value)
     if tostring(key or ""):match("^group:") then
@@ -73,6 +68,9 @@ function DropKey:GetKind(value)
     end
     if tostring(key or ""):match("^%-?%d+:%-?%d+:%-?%d+$") then
         return "entry"
+    end
+    if tostring(key or ""):match("^cdmpreset:%d+:%d+:[^:]+:%d+:[^:]+$") then
+        return "cdmEntry"
     end
     return nil
 end
@@ -95,10 +93,4 @@ function DropKey:Split(value)
         hadEmptySuffix = hadEmptySuffix == true,
         kind = self:GetKind(key),
     }
-end
-
-function DropKey:IsSameBaseKey(a, b)
-    local ak = self:StripSuffix(a)
-    local bk = self:StripSuffix(b)
-    return ak ~= "" and ak == bk
 end

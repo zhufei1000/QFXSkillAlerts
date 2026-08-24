@@ -43,6 +43,7 @@ function Controller:Configure(opts)
     callbacks.rebuildRuntimeConfig = opts.rebuildRuntimeConfig
     callbacks.rebuildCastSuccessConfig = opts.rebuildCastSuccessConfig
     callbacks.rebuildCustomConfig = opts.rebuildCustomConfig
+    callbacks.rebuildEventVoiceConfig = opts.rebuildEventVoiceConfig
     callbacks.rebuildBloodlustConfig = opts.rebuildBloodlustConfig
     callbacks.refreshRuntimeCooldowns = opts.refreshRuntimeCooldowns
     callbacks.refreshPanel = opts.refreshPanel
@@ -108,6 +109,7 @@ function Controller:OnProfileChanged(resetCooldowns)
     SafeCall("rebuildRuntimeConfig")
     SafeCall("rebuildCastSuccessConfig")
     SafeCall("rebuildCustomConfig")
+    SafeCall("rebuildEventVoiceConfig")
     SafeCall("rebuildBloodlustConfig")
     SafeCall("refreshRuntimeCooldowns")
     SafeCall("refreshPanel")

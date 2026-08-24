@@ -12,6 +12,10 @@ C.ALL_RACES_ID = 0
 C.OBJECT_TYPE_SPELL = "spell"
 C.OBJECT_TYPE_ITEM = "item"
 
+C.ENTRY_TYPE_COOLDOWN = "cooldown"
+C.ENTRY_TYPE_CAST = "cast"
+C.ENTRY_TYPE_EVENT = "event"
+
 C.ITEM_LOAD_NONE = "none"
 C.ITEM_LOAD_EQUIPPED = "equipped"
 C.ITEM_LOAD_BAGS = "bags"

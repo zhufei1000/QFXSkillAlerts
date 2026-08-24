@@ -16,6 +16,8 @@ local function NormalizeEntryTypeValue(value)
     value = tostring(value or "cooldown")
     if value == "cast" then
         return value
+    elseif value == "event" then
+        return value
     end
     return "cooldown"
 end
@@ -66,11 +68,21 @@ local function BuildSignature(classID, specID, entry)
     if classID == ALL_CLASSES_ID then
         specID = ALL_SPECS_ID
     end
-    local spellId = tonumber(entry.spellId or entry.itemID) or 0
-    if classID < 0 or specID < 0 or spellId <= 0 then
+    if classID < 0 or specID < 0 then
         return nil
     end
     local entryType = NormalizeEntryTypeValue(entry.entryType)
+    if entryType == "event" then
+        local eventKey = tostring(entry.eventKey or "")
+        if eventKey == "" then
+            return nil
+        end
+        return tostring(classID) .. ":" .. tostring(specID) .. ":event:" .. eventKey
+    end
+    local spellId = tonumber(entry.spellId or entry.itemID) or 0
+    if spellId <= 0 then
+        return nil
+    end
     local objectType = NormalizeObjectTypeValue(entry.objectType)
     return tostring(classID) .. ":" .. tostring(specID) .. ":" .. entryType .. ":" .. objectType .. ":" .. tostring(math.floor(spellId))
 end

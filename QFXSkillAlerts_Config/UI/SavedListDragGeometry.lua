@@ -56,22 +56,3 @@ function Geometry:IsCursorInsideAny(...)
     end
     return false
 end
-
-function Geometry:GetVerticalModeForRow(row, beforeRatio, afterRatio)
-    if not row then
-        return nil
-    end
-    local top = row.GetTop and row:GetTop() or 0
-    local bottom = row.GetBottom and row:GetBottom() or 0
-    local height = math.max((top - bottom), 1)
-    local y = self:GetCursorY()
-    beforeRatio = tonumber(beforeRatio) or 0.25
-    afterRatio = tonumber(afterRatio) or beforeRatio
-
-    if y >= top - height * beforeRatio then
-        return "before"
-    elseif y <= bottom + height * afterRatio then
-        return "after"
-    end
-    return "inside"
-end

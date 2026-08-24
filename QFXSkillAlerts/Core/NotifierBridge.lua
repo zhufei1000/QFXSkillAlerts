@@ -50,11 +50,35 @@ function Bridge:PlayCastSuccessNotification(cfg, triggerSpellID, castGUID)
     return false
 end
 
+function Bridge:PlayEventNotification(cfg)
+    local notifier = GetNotifier()
+    if notifier and type(notifier.PlayEventNotification) == "function" then
+        return notifier:PlayEventNotification(cfg)
+    end
+    return false
+end
+
 function Bridge:HideVisualAlerts(exceptKind)
     local notifier = GetNotifier()
     if notifier and type(notifier.HideVisualAlerts) == "function" then
         notifier:HideVisualAlerts(exceptKind)
         return true
+    end
+    return false
+end
+
+function Bridge:UpdateCooldownCountdown(cfg, remaining, primaryKey)
+    local notifier = GetNotifier()
+    if notifier and type(notifier.UpdateCooldownCountdown) == "function" then
+        return notifier:UpdateCooldownCountdown(cfg, remaining, primaryKey)
+    end
+    return false
+end
+
+function Bridge:HideCooldownCountdown(primaryKey)
+    local notifier = GetNotifier()
+    if notifier and type(notifier.HideCooldownCountdown) == "function" then
+        return notifier:HideCooldownCountdown(primaryKey)
     end
     return false
 end

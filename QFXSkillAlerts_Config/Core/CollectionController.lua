@@ -73,6 +73,10 @@ local function EntryRefToKey(scopeClassID, scopeSpecID, ref)
     return CollectionStore.EntryRefToKey(scopeClassID, scopeSpecID, ref)
 end
 
+local function IsCDMEntryKey(ref)
+    return type(CollectionStore.IsCDMEntryKey) == "function" and CollectionStore.IsCDMEntryKey(ref)
+end
+
 local function EnsureRootDB()
     return CollectionStore.EnsureRootDB()
 end
@@ -105,6 +109,8 @@ local function NormalizeEntryTypeValue(value)
     value = tostring(value or "cooldown")
     if value == "cast" then
         return value
+    elseif value == "event" then
+        return value
     end
     return "cooldown"
 end
@@ -121,12 +127,17 @@ local function SameEntryIdentity(left, right)
     if type(left) ~= "table" or type(right) ~= "table" then
         return false
     end
+    local entryType = NormalizeEntryTypeValue(left.entryType)
+    if entryType ~= NormalizeEntryTypeValue(right.entryType) then
+        return false
+    end
+    if entryType == "event" then
+        local leftKey = tostring(left.eventKey or "")
+        return leftKey ~= "" and leftKey == tostring(right.eventKey or "")
+    end
     local leftID = tonumber(left.spellId or left.itemID) or 0
     local rightID = tonumber(right.spellId or right.itemID) or 0
     if leftID <= 0 or rightID <= 0 or math.floor(leftID) ~= math.floor(rightID) then
-        return false
-    end
-    if NormalizeEntryTypeValue(left.entryType) ~= NormalizeEntryTypeValue(right.entryType) then
         return false
     end
     if NormalizeObjectTypeValue(left.objectType) ~= NormalizeObjectTypeValue(right.objectType) then
@@ -361,9 +372,53 @@ function Controller:DeleteCollection(aceOptions, groupKey, suppressRefresh)
 
     NormalizeCollectionScope(scope, map, classID, specID)
 
+    local cdmKeys = {}
+    local seenCDMKeys = {}
+    local function collectCDMKeys(gid, seenGroups)
+        gid = tostring(gid or "")
+        local group = scope.groups[gid]
+        if gid == "" or type(group) ~= "table" then
+            return
+        end
+        seenGroups = seenGroups or {}
+        if seenGroups[gid] then
+            return
+        end
+        seenGroups[gid] = true
+        for _, ref in ipairs(group.entries or {}) do
+            local _, childGroupID = IsSameScopeGroupRef(classID, specID, ref)
+            if childGroupID and type(scope.groups[childGroupID]) == "table" then
+                collectCDMKeys(childGroupID, seenGroups)
+            elseif IsCDMEntryKey(ref) then
+                local key = TrimText(ref)
+                if key ~= "" and not seenCDMKeys[key] then
+                    seenCDMKeys[key] = true
+                    cdmKeys[#cdmKeys + 1] = key
+                end
+            end
+        end
+        seenGroups[gid] = nil
+    end
+    collectCDMKeys(groupID, {})
+
+    local deletedCDMCount = 0
+    if #cdmKeys > 0 then
+        if type(api.DeleteCDMVoicePresetsLocalByKeys) ~= "function" then
+            return false
+        end
+        local ok, count = api.DeleteCDMVoicePresetsLocalByKeys(cdmKeys)
+        if ok ~= true then
+            return false
+        end
+        deletedCDMCount = tonumber(count) or #cdmKeys
+        for _, key in ipairs(cdmKeys) do
+            RemoveEntryKeyFromAllCollectionScopes(key)
+        end
+    end
+
     local deleted = {}
     local deletedGroups = {}
-    local deletedCount = 0
+    local deletedCount = deletedCDMCount
 
     local function collectGroup(gid, seen)
         gid = tostring(gid or "")
@@ -432,6 +487,9 @@ function Controller:DeleteCollection(aceOptions, groupKey, suppressRefresh)
         api.RebuildRuntimeConfig()
         if type(api.RebuildCastSuccessConfig) == "function" then
             api.RebuildCastSuccessConfig()
+        end
+        if type(api.RebuildEventVoiceConfig) == "function" then
+            api.RebuildEventVoiceConfig()
         end
         api.RefreshRuntimeCooldowns()
     end

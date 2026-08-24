@@ -192,7 +192,8 @@ function SoundFields:PullFromWidgets(widgets, state, modeTts, modeSound)
         state.soundSource = "custom"
         state.useSharedMediaSound = false
         state.useCustomSound = true
-        state.soundPath = FirstNonEmptyPath(state.customSoundPaths) ~= "" and FirstNonEmptyPath(state.customSoundPaths) or state.customSoundPath
+        local firstPath = FirstNonEmptyPath(state.customSoundPaths)
+        state.soundPath = firstPath ~= "" and firstPath or state.customSoundPath
     elseif selectedSource == "sharedmedia" then
         local sharedPath = NS.AceOptions:FetchSharedMediaSoundPath(state.sharedMediaSound)
         state.notifyMode = modeSound
@@ -226,9 +227,11 @@ function SoundFields:PushToWidgets(widgets, state, soundFields, source, isTts)
     Widgets:SetDropdownValue(widgets.sourceDrop, selectedSource, L("SOURCE_BUILTIN"))
 
     Widgets:SetDropdownItems(widgets.builtinDrop, self:GetBuiltinSoundItems())
+    -- An empty selection (cancelled by the user) shows the placeholder
+    -- instead of falling back to the default built-in sound.
     Widgets:SetDropdownValue(
         widgets.builtinDrop,
-        Trim(state.builtinSoundPath) ~= "" and state.builtinSoundPath or GetDefaultBuiltinSoundPath(),
+        Trim(state.builtinSoundPath),
         L("PLACEHOLDER_SELECT_BUILTIN_SOUND")
     )
 
@@ -330,7 +333,8 @@ function SoundFields:ApplySourceToState(state, source, widgets)
         state.useCustomSound = true
         state.useSharedMediaSound = false
         EnsureCustomSoundPaths(state)
-        state.soundPath = FirstNonEmptyPath(state.customSoundPaths) ~= "" and FirstNonEmptyPath(state.customSoundPaths) or NormalizeSoundPath(state.customSoundPath or (widgets and widgets.soundPath and widgets.soundPath:GetText()) or "")
+        local firstPath = FirstNonEmptyPath(state.customSoundPaths)
+        state.soundPath = firstPath ~= "" and firstPath or NormalizeSoundPath(state.customSoundPath or (widgets and widgets.soundPath and widgets.soundPath:GetText()) or "")
     elseif source == "tts" then
         state.soundPath = ""
         state.useCustomSound = false
@@ -346,14 +350,17 @@ function SoundFields:SelectBuiltinSound(state, value)
     state.notifyMode = modeSound
     state.soundSource = "builtin"
     state.builtinSoundPath = NormalizeSoundPath(value or "")
-    if state.builtinSoundPath == "" then
-        state.builtinSoundPath = GetDefaultBuiltinSoundPath()
-    end
-    state.soundPath = state.builtinSoundPath
     state.useCustomSound = false
     state.customSoundPath = ""
     state.useSharedMediaSound = false
     state.sharedMediaSound = ""
+    if state.builtinSoundPath == "" then
+        -- A cancelled selection stays empty (no default fallback) so the
+        -- user can clear a voice instead of only replacing it.
+        state.soundPath = ""
+        return
+    end
+    state.soundPath = state.builtinSoundPath
 
     if state.soundPath ~= "" then
         NS.API.PlayReadyNotification({

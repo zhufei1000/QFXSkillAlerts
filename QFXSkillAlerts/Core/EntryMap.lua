@@ -10,6 +10,16 @@ local ENTRY_MIN = CONST.ENTRY_MIN or 1
 local ALL_CLASSES_ID = CONST.ALL_CLASSES_ID or 0
 local ALL_SPECS_ID = CONST.ALL_SPECS_ID or 0
 
+local function IsUsableEntry(entry)
+    if type(entry) ~= "table" then
+        return false
+    end
+    if tostring(entry.entryType or "cooldown") == "event" then
+        return tostring(entry.eventKey or "") ~= ""
+    end
+    return (tonumber(entry.spellId) or 0) > 0
+end
+
 local function ClearTable(tbl)
     if type(wipe) == "function" then
         wipe(tbl)
@@ -63,9 +73,7 @@ function EntryMap:GetEntry(map, index)
     if type(entry) ~= "table" then
         return nil
     end
-    local spellId = tonumber(entry.spellId) or 0
-    local entryType = tostring(entry.entryType or "cooldown")
-    if spellId <= 0 then
+    if not IsUsableEntry(entry) then
         return nil
     end
     return entry
@@ -80,9 +88,7 @@ function EntryMap:GetOrderedEntryIndices(map)
     for index, entry in pairs(map) do
         index = tonumber(index) or 0
         if index >= ENTRY_MIN and type(entry) == "table" then
-            local spellId = tonumber(entry.spellId) or 0
-            local entryType = tostring(entry.entryType or "cooldown")
-            if spellId > 0 then
+            if IsUsableEntry(entry) then
                 indices[#indices + 1] = index
             end
         end

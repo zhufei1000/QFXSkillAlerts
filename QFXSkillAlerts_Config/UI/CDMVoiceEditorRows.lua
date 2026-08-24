@@ -40,6 +40,9 @@ local function CreateRow(frame)
     -- composition/candidate layer.
     row.voiceDropdown.qfxsaPopupStrata = "FULLSCREEN_DIALOG"
     row.voiceDropdown.qfxsaPopupFrameLevel = 260
+    -- Clicking the already-selected voice again cancels the selection so a
+    -- voice can be cleared instead of only replaced.
+    row.voiceDropdown.qfxsaToggleClear = true
     Widgets:SetDropdownSearchable(row.voiceDropdown, true, L("CDM_SEARCH_VOICE"))
 
     row.testButton = Widgets:CreateButton(row, L("CDM_TEST"), 62, 30)
@@ -74,13 +77,13 @@ local function CreateRow(frame)
     end)
     row.saveButton:SetScript("OnEnter", function(self)
         GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
-        GameTooltip:SetText(L("CDM_SAVE_TOOLTIP"), 1, 1, 1, true)
+        GameTooltip:SetText(L("CDM_SAVE_TOOLTIP"), 1, 1, 1, 1, true)
         GameTooltip:Show()
     end)
     row.saveButton:SetScript("OnLeave", GameTooltip_Hide)
     row.applyButton:SetScript("OnEnter", function(self)
         GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
-        GameTooltip:SetText(L("CDM_APPLY_TOOLTIP"), 1, 1, 1, true)
+        GameTooltip:SetText(L("CDM_APPLY_TOOLTIP"), 1, 1, 1, 1, true)
         GameTooltip:Show()
     end)
     row.applyButton:SetScript("OnLeave", GameTooltip_Hide)

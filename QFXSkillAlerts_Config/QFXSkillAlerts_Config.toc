@@ -1,8 +1,8 @@
-## Interface: 120005, 120007
+## Interface: 120005, 120007, 120100
 ## Title: QFX Skill Alerts Config
 ## Notes: Load-on-demand configuration UI for QFX Skill Alerts.
 ## Author: zhufei1000
-## Version: 1.0.206
+## Version: 1.0.222
 ## Dependencies: QFXSkillAlerts
 ## LoadOnDemand: 1
 ## IconTexture: Interface\AddOns\QFXSkillAlerts\AppIcon.png

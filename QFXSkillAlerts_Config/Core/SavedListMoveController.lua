@@ -12,6 +12,7 @@ local L = NS.L or function(key, ...)
 end
 local MoveContext = NS.SavedListMoveContext or {}
 local DropKey = NS.SavedListDropKey or {}
+local CollectionStore = NS.CollectionStore or {}
 
 local function TrimText(value)
     return MoveContext:TrimText(value)
@@ -110,69 +111,13 @@ local function RecordSavedListDisplayMove(sourceKey, targetKey, targetSection, i
 end
 
 local function FindEntryKeyLocation(scope, entryKey, scopeClassID, scopeSpecID)
-    local key, classID, specID, index = EntryRefToKey(scopeClassID, scopeSpecID, entryKey)
-    if type(scope) ~= "table" or not key or index <= 0 then
-        return nil
-    end
-
-    if classID == tonumber(scopeClassID) and specID == tonumber(scopeSpecID) then
-        for i, item in ipairs(scope.root or {}) do
-            if type(item) == "table" and item.type == "entry" and tonumber(item.index) == index then
-                return { container = "root", position = i }
-            end
-        end
-    end
-
-    for groupID, group in pairs(scope.groups or {}) do
-        if type(group) == "table" and type(group.entries) == "table" then
-            for i, value in ipairs(group.entries) do
-                local groupEntryKey = EntryRefToKey(scopeClassID, scopeSpecID, value)
-                if groupEntryKey == key then
-                    return { container = "group", groupID = tostring(groupID), position = i }
-                end
-            end
-        end
-    end
-    return nil
+    return MoveContext:FindEntryKeyLocation(scope, entryKey, scopeClassID, scopeSpecID)
 end
 
 local function InsertEntryKeyAtCollectionLocation(scope, sourceEntryKey, sourceIndex, loc, insertAfter, sameScope)
-    if type(scope) ~= "table" or not loc then
-        return false
-    end
-    local pos = math.max(1, (tonumber(loc.position) or 1) + (insertAfter and 1 or 0))
-
-    if loc.container == "group" and loc.groupID and type(scope.groups) == "table" then
-        local group = scope.groups[tostring(loc.groupID or "")]
-        if type(group) ~= "table" then
-            return false
-        end
-        if type(group.entries) ~= "table" then
-            group.entries = {}
-        end
-        table.insert(group.entries, math.min(pos, #group.entries + 1), tostring(sourceEntryKey or ""))
-        return true
-    end
-
-    if loc.container == "root" then
-        -- Root entries are stored as local indexes, so only same-scope entries can
-        -- be inserted into a scope root. Cross-scope display-only ordering is handled
-        -- by SavedListOrder instead.
-        if not sameScope then
-            return false
-        end
-        if type(scope.root) ~= "table" then
-            scope.root = {}
-        end
-        sourceIndex = tonumber(sourceIndex) or 0
-        if sourceIndex <= 0 then
-            return false
-        end
-        table.insert(scope.root, math.min(pos, #scope.root + 1), { type = "entry", index = sourceIndex })
-        return true
-    end
-
-    return false
+    return MoveContext:InsertEntryKeyAtCollectionLocation(
+        scope, sourceEntryKey, sourceIndex, loc, insertAfter, sameScope
+    )
 end
 
 function MoveController:MoveSavedListItem(aceOptions, sourceKey, targetKey, targetSection, suppressRefresh)
@@ -217,6 +162,7 @@ function MoveController:MoveSavedListItem(aceOptions, sourceKey, targetKey, targ
     NormalizeCollectionScope(currentScope, api.GetStoredEntryMap(currentClassID, currentSpecID), currentClassID, currentSpecID)
 
     local sourceIsGroup = sourceKey:match("^group:") ~= nil
+    local sourceIsCDM = CollectionStore.IsCDMEntryKey and CollectionStore.IsCDMEntryKey(sourceKey) or false
     local targetIsGroup = targetKey:match("^group:") ~= nil
     local targetIsRoot = targetKey:match("^root:") ~= nil
 
@@ -458,6 +404,97 @@ function MoveController:MoveSavedListItem(aceOptions, sourceKey, targetKey, targ
         local state = aceOptions:GetState()
         state.selectedKey = sourceKey
         state.selectedCollectionKey = sourceKey
+    elseif sourceIsCDM then
+        local parsed = type(api.ParseCDMVoiceSavedKey) == "function" and api.ParseCDMVoiceSavedKey(sourceKey) or nil
+        if type(parsed) ~= "table" or parsed.keyType ~= "preset"
+            or type(api.GetCDMVoicePresetRecord) ~= "function"
+            or type(api.GetCDMVoicePresetRecord(parsed.classID, parsed.specID, parsed.recordKey)) ~= "table" then
+            return false
+        end
+
+        local function findCDMLocationAcrossScopes(entryKey)
+            local db = EnsureRootDB()
+            for classIDKey, classMap in pairs(db.collectionData or {}) do
+                local scopeClassID = tonumber(classIDKey)
+                if scopeClassID and type(classMap) == "table" then
+                    for specIDKey, scope in pairs(classMap) do
+                        local scopeSpecID = tonumber(specIDKey)
+                        if scopeSpecID and type(scope) == "table" then
+                            local loc = FindEntryKeyLocation(scope, entryKey, scopeClassID, scopeSpecID)
+                            if loc then
+                                return scope, scopeClassID, scopeSpecID, loc
+                            end
+                        end
+                    end
+                end
+            end
+            return nil
+        end
+
+        local function insertIntoGroupAt(scope, groupID, position)
+            local group = scope and scope.groups and scope.groups[tostring(groupID or "")]
+            if type(group) ~= "table" then
+                return false
+            end
+            group.entries = type(group.entries) == "table" and group.entries or {}
+            table.insert(group.entries, math.max(1, math.min(tonumber(position) or (#group.entries + 1), #group.entries + 1)), sourceKey)
+            return true
+        end
+
+        if targetIsRoot then
+            RemoveEntryKeyFromAllCollectionScopes(sourceKey)
+            RecordSavedListDisplayMove(sourceKey, targetKey, displayTargetSection, true)
+        elseif targetIsGroup then
+            local targetClassID, targetSpecID, targetGroupID = ParseGroupKey(targetKey)
+            local targetScope = EnsureCollectionScope(targetClassID, targetSpecID)
+            if not targetScope then
+                return false
+            end
+            NormalizeCollectionScope(targetScope, api.GetStoredEntryMap(targetClassID, targetSpecID), targetClassID, targetSpecID)
+            if type(targetScope.groups[tostring(targetGroupID or "")]) ~= "table" then
+                return false
+            end
+            if insertInside then
+                RemoveEntryKeyFromAllCollectionScopes(sourceKey)
+                targetScope.groups[targetGroupID].entries[#targetScope.groups[targetGroupID].entries + 1] = sourceKey
+            else
+                local targetLoc = FindGroupKeyLocation(targetScope, targetKey, targetClassID, targetSpecID)
+                if targetLoc and targetLoc.container == "group" then
+                    RemoveEntryKeyFromAllCollectionScopes(sourceKey)
+                    if not insertIntoGroupAt(targetScope, targetLoc.groupID, targetLoc.position + (insertAfter and 1 or 0)) then
+                        return false
+                    end
+                else
+                    RemoveEntryKeyFromAllCollectionScopes(sourceKey)
+                    RecordSavedListDisplayMove(sourceKey, targetKey, displayTargetSection, insertAfter)
+                end
+            end
+            NormalizeCollectionScope(targetScope, api.GetStoredEntryMap(targetClassID, targetSpecID), targetClassID, targetSpecID)
+        else
+            local targetScope, targetClassID, targetSpecID, loc
+            if CollectionStore.IsCDMEntryKey and CollectionStore.IsCDMEntryKey(targetKey) then
+                targetScope, targetClassID, targetSpecID, loc = findCDMLocationAcrossScopes(targetKey)
+            else
+                local targetIndex
+                targetClassID, targetSpecID, targetIndex = ParseEntryKey(targetKey)
+                if targetClassID >= 0 and targetSpecID >= 0 and targetIndex > 0 then
+                    targetScope = EnsureCollectionScope(targetClassID, targetSpecID)
+                    NormalizeCollectionScope(targetScope, api.GetStoredEntryMap(targetClassID, targetSpecID), targetClassID, targetSpecID)
+                    loc = FindEntryKeyLocation(targetScope, targetKey, targetClassID, targetSpecID)
+                end
+            end
+
+            if loc and loc.container == "group" and targetScope then
+                RemoveEntryKeyFromAllCollectionScopes(sourceKey)
+                if not insertIntoGroupAt(targetScope, loc.groupID, loc.position + (insertAfter and 1 or 0)) then
+                    return false
+                end
+                NormalizeCollectionScope(targetScope, api.GetStoredEntryMap(targetClassID, targetSpecID), targetClassID, targetSpecID)
+            else
+                RemoveEntryKeyFromAllCollectionScopes(sourceKey)
+                RecordSavedListDisplayMove(sourceKey, targetKey, displayTargetSection, insertAfter)
+            end
+        end
     else
         local sourceClassID, sourceSpecID, sourceIndex = ParseEntryKey(sourceKey)
         if sourceClassID < 0 or sourceSpecID < 0 or sourceIndex <= 0 then
