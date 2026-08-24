@@ -118,11 +118,6 @@ function Widgets:CreateScrollableContent(parent, opts)
         UpdateScrollRange()
     end)
 
-    function host:SetContentWidth(width)
-        content:SetWidth(math.max(1, tonumber(width) or 1))
-        UpdateScrollRange()
-    end
-
     function host:SetContentHeight(height)
         content:SetHeight(math.max(1, tonumber(height) or 1))
         UpdateScrollRange()

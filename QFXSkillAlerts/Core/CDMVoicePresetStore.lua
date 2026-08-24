@@ -331,18 +331,24 @@ function Store:GetEffectiveRecord(classID, specID, recordKey)
     return nil
 end
 
-function Store:BuildSingleRecordProfiles(classID, specID, recordKey)
-    classID, specID = tonumber(classID), tonumber(specID)
-    local record = self:GetEffectiveRecord(classID, specID, recordKey)
-    if not classID or not specID or not record then
-        return nil
+function Store:HasEffectiveRecord(classID, specID, recordKey)
+    recordKey = Trim(recordKey)
+    if recordKey == "" then
+        return false
     end
-    local result = {}
-    local scope = EnsureScope(result, classID, specID)
-    local exported = CopyRecord(record)
-    exported.pendingApply = nil
-    scope[record.recordKey] = exported
-    return result
+    local userData = self:GetUserRecords(classID, specID)[recordKey]
+    if userData ~= nil then
+        local userRecord = self:SanitizeRecord(userData, userData.source or "user")
+        return userRecord ~= nil and userRecord.enabled == true
+    end
+    local db = EnsureDatabase()
+    local disabled = GetScope(db.cdmVoiceDisabledPresets, classID, specID) or {}
+    if disabled[recordKey] == true then
+        return false
+    end
+    local builtInData = self:GetBuiltInRecords(classID, specID)[recordKey]
+    local builtInRecord = builtInData and self:SanitizeRecord(builtInData, "builtIn") or nil
+    return builtInRecord ~= nil and builtInRecord.enabled == true
 end
 
 function Store:RemoveOrDisableRecord(classID, specID, recordKey, options)
@@ -546,6 +552,43 @@ function Store:ImportProfiles(profiles)
         end
     end
     return imported, invalid
+end
+
+function Store:ReplaceProfiles(profiles)
+    if type(profiles) ~= "table" then
+        return false, 0, 1
+    end
+    local replacement = {}
+    local imported, invalid = 0, 0
+    for classID, classMap in pairs(profiles) do
+        if type(classMap) ~= "table" then
+            invalid = invalid + 1
+        else
+            for specID, specMap in pairs(classMap) do
+                if type(specMap) ~= "table" then
+                    invalid = invalid + 1
+                else
+                    for _, data in pairs(specMap) do
+                        local copy = CopyRecord(data)
+                        copy.classID = tonumber(copy.classID) or tonumber(classID)
+                        copy.specID = tonumber(copy.specID) or tonumber(specID)
+                        local record = self:SanitizeRecord(copy, "import")
+                        if record then
+                            EnsureScope(replacement, record.classID, record.specID)[record.recordKey] = record
+                            imported = imported + 1
+                        else
+                            invalid = invalid + 1
+                        end
+                    end
+                end
+            end
+        end
+    end
+    if invalid > 0 then
+        return false, 0, invalid
+    end
+    EnsureDatabase().cdmVoiceProfiles = replacement
+    return true, imported, 0
 end
 
 function Store:GetSyncState()

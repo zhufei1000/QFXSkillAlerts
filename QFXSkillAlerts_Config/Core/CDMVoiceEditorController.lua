@@ -70,6 +70,41 @@ function Controller:GetRegistryItems()
     return type(items) == "table" and items or {}
 end
 
+function Controller:GetRegistryDropdownItems()
+    local registryItems = self:GetRegistryItems()
+    if self.registryDropdownSource == registryItems and type(self.registryDropdownItems) == "table" then
+        return self.registryDropdownItems
+    end
+    local items = {}
+    for _, item in ipairs(registryItems) do
+        items[#items + 1] = { value = item.payload, text = item.name }
+    end
+    self.registryDropdownSource = registryItems
+    self.registryDropdownItems = items
+    return items
+end
+
+function Controller:BuildSavedVoiceIndex()
+    local api = API()
+    local index = {}
+    local entries = type(api.GetCDMVoiceSavedEntries) == "function"
+        and api.GetCDMVoiceSavedEntries() or {}
+    for _, entry in ipairs(type(entries) == "table" and entries or {}) do
+        local cooldownID = tonumber(entry.cooldownID)
+        local eventType = tonumber(entry.alertEvent)
+        if cooldownID and eventType then
+            index[tostring(cooldownID) .. ":" .. tostring(eventType)] = entry
+        end
+    end
+    self.savedVoiceIndex = index
+    return index
+end
+
+function Controller:GetSavedVoiceEntry(cooldownID, eventType)
+    local index = self.savedVoiceIndex or self:BuildSavedVoiceIndex()
+    return index[tostring(tonumber(cooldownID) or 0) .. ":" .. tostring(tonumber(eventType) or 0)]
+end
+
 function Controller:GetCategories()
     local api = API()
     local categories = type(api.GetCDMVoiceCategories) == "function" and api.GetCDMVoiceCategories() or {}
@@ -207,6 +242,7 @@ function Controller:Refresh(reason)
         return
     end
     local api = API()
+    self:BuildSavedVoiceIndex()
     local changed = self:CheckScopeChanged()
     if type(frame.RefreshLocale) == "function" then
         frame:RefreshLocale()
@@ -270,15 +306,12 @@ function Controller:RefreshRowSelection(row, requestedPayload)
         and api.GetCDMVoiceConfiguredAlert(row.cooldownInfo.cooldownID, eventType) or nil
 
     local payload = tonumber(requestedPayload)
-    if not payload and type(api.GetCDMVoiceSavedEntries) == "function" then
-        for _, entry in ipairs(api.GetCDMVoiceSavedEntries() or {}) do
-            if tonumber(entry.cooldownID) == tonumber(row.cooldownInfo.cooldownID)
-                and tonumber(entry.alertEvent) == eventType then
-                payload = tonumber(entry.voicePayload)
-                row.recordKey = entry.recordKey
-                row.originalRecordKey = row.originalRecordKey or entry.recordKey
-                break
-            end
+    if not payload then
+        local entry = self:GetSavedVoiceEntry(row.cooldownInfo.cooldownID, eventType)
+        if entry then
+            payload = tonumber(entry.voicePayload)
+            row.recordKey = entry.recordKey
+            row.originalRecordKey = row.originalRecordKey or entry.recordKey
         end
     end
     if not payload and configured and configured.isCustom then
@@ -288,18 +321,21 @@ function Controller:RefreshRowSelection(row, requestedPayload)
 
     -- Keep the empty state as display-only placeholder text. It must not be a
     -- selectable menu item because selecting it creates an invalid dirty draft
-    -- that can block Apply All.
-    local voiceItems = {}
+    -- that can block Apply All.  Cancelling a selection is done by clicking
+    -- the already-selected voice again (toggle-clear in the dropdown popup).
+    local voiceItems = self:GetRegistryDropdownItems()
     local hasRequested = false
     local registryItems = self:GetRegistryItems()
     for _, item in ipairs(registryItems) do
-        voiceItems[#voiceItems + 1] = { value = item.payload, text = item.name }
         if tonumber(item.payload) == payload then
             hasRequested = true
         end
     end
     if payload ~= 0 and not hasRequested then
-        voiceItems[#voiceItems + 1] = { value = payload, text = L("CDM_MISSING_VOICE") }
+        local withMissing = {}
+        for index, item in ipairs(voiceItems) do withMissing[index] = item end
+        withMissing[#withMissing + 1] = { value = payload, text = L("CDM_MISSING_VOICE") }
+        voiceItems = withMissing
     end
     NS.UI.Widgets:SetDropdownItems(row.voiceDropdown, voiceItems)
     NS.UI.Widgets:SetDropdownValue(row.voiceDropdown, payload, L("CDM_SELECT_VOICE"))
@@ -313,10 +349,10 @@ function Controller:RefreshRowSelection(row, requestedPayload)
         end
     end
     local probePayload = (payload ~= 0 and selectedPath) and payload or (registryItems[1] and registryItems[1].payload)
-    local supported = false
-    if eventType and probePayload and type(api.CanConfigureCDMVoice) == "function" then
-        supported = api.CanConfigureCDMVoice(row.cooldownInfo.cooldownID, eventType, probePayload) == true
-    end
+    -- GetValidEvents already proves the selected event is supported. Calling
+    -- CanConfigureCDMVoice here would ask Blizzard to construct and validate an
+    -- alert once for every visible row whenever the category changes.
+    local supported = eventType ~= nil and probePayload ~= nil
     row.soundSupported = supported
     row.selectedPath = selectedPath
 
@@ -372,6 +408,11 @@ function Controller:OnVoiceChanged(row, payload)
         end
     end
     row.selectedPath = path
+    if row.selectedPayload == 0 and NS.UI and NS.UI.Widgets then
+        -- A cancelled selection (toggle-clear) restores the placeholder text
+        -- instead of leaving the dropdown label blank.
+        NS.UI.Widgets:SetDropdownValue(row.voiceDropdown, 0, L("CDM_SELECT_VOICE"))
+    end
     if row.soundSupported then
         row.hint:SetText("")
     end
@@ -541,10 +582,6 @@ function Controller:ApplyAllAndReload()
     return true
 end
 
-function Controller:SyncCurrentSpec()
-    return self:ApplyAllAndReload()
-end
-
 function Controller:ExportPresets()
     local api = API()
     local exportText = type(api.ExportCDMVoicePresetString) == "function" and api.ExportCDMVoicePresetString() or ""
@@ -586,9 +623,12 @@ function Controller:OnExternalRefresh(reason)
     if frame and frame:IsShown() then
         self:Refresh(reason)
     end
-    if NS.UI and NS.UI.MainFrame and NS.UI.MainFrame.frame and NS.UI.MainFrame.frame:IsShown()
-        and type(NS.UI.MainFrame.RequestRefresh) == "function" then
-        NS.UI.MainFrame:RequestRefresh("list")
+    local main = NS.UI and NS.UI.MainFrame
+    if main and main.savedList and type(main.savedList.InvalidateLayout) == "function" then
+        main.savedList:InvalidateLayout("cdm")
+    end
+    if main and main.frame and main.frame:IsShown() and type(main.RequestRefresh) == "function" then
+        main:RequestRefresh("list")
     end
 end
 

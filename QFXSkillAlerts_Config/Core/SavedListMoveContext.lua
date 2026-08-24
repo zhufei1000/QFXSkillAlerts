@@ -139,6 +139,23 @@ function Context:RecordSavedListDisplayMove(sourceKey, targetKey, targetSection,
 end
 
 function Context:FindEntryKeyLocation(scope, entryKey, scopeClassID, scopeSpecID)
+    local cdmKey = self:TrimText(entryKey)
+    if CollectionStore.IsCDMEntryKey and CollectionStore.IsCDMEntryKey(cdmKey) then
+        if type(scope) ~= "table" then
+            return nil
+        end
+        for groupID, group in pairs(scope.groups or {}) do
+            if type(group) == "table" and type(group.entries) == "table" then
+                for i, value in ipairs(group.entries) do
+                    if self:TrimText(value) == cdmKey then
+                        return { container = "group", groupID = tostring(groupID), position = i }
+                    end
+                end
+            end
+        end
+        return nil
+    end
+
     local key, classID, specID, index = self:EntryRefToKey(scopeClassID, scopeSpecID, entryKey)
     if type(scope) ~= "table" or not key or index <= 0 then
         return nil

@@ -25,6 +25,13 @@ local runtimeConfig = {
     notifyMode = CONST.MODE_SOUND or "sound",
 }
 local lastExpiration = 0
+-- nil = not rebuilt yet (allow events, keeps the uninitialized path identical
+-- to the old behavior); false = saved config has no enabled alert channel
+-- (skip UNIT_AURA work entirely); true = Bloodlust alert is active.
+-- UNIT_AURA is the most frequent combat event; when no Bloodlust alert is
+-- configured the handler returns immediately instead of scanning every aura
+-- update for exhaustion effects.
+local bloodlustActive
 
 local function SafeNormalize(normalizeSoundPath, path)
     if type(normalizeSoundPath) == "function" then
@@ -95,9 +102,12 @@ function Bloodlust:Rebuild(db, normalizeSoundPath)
 
     local cfg = type(db) == "table" and type(db.bloodlustConfig) == "table" and db.bloodlustConfig or nil
     if type(cfg) ~= "table" then
+        bloodlustActive = false
         CopyConfigFromDB({}, normalizeSoundPath)
         return false
     end
+
+    bloodlustActive = cfg.voiceEnabled ~= false or cfg.imageEnabled == true or cfg.textEnabled == true
 
     local source = type(cfg.customSoundPaths) == "table" and cfg.customSoundPaths or {}
     for i = 1, 5 do
@@ -182,7 +192,7 @@ function Bloodlust:UpdateMayContainExhaustion(updateInfo)
 end
 
 function Bloodlust:HandleUnitAura(unit, notifier, updateInfo)
-    if unit ~= "player" then
+    if unit ~= "player" or bloodlustActive == false then
         return false
     end
     local filterOK, mayContainExhaustion = pcall(self.UpdateMayContainExhaustion, self, updateInfo)

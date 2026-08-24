@@ -230,14 +230,6 @@ function VisualGroups:SetDirectionForEntry(entryKey, direction)
     return true
 end
 
-function VisualGroups:SetGapForEntry(entryKey, gap)
-    local group = self:GetGroupForEntry(entryKey)
-    if not group then return false end
-    group.gap = math.max(0, Round(gap, group.gap or 4))
-    self:RefreshRuntime()
-    return true
-end
-
 function VisualGroups:RemoveMember(entryKey, keepEmptyGroup)
     entryKey = self:ResolveIdentity(entryKey)
     entryKey = tostring(entryKey or "")

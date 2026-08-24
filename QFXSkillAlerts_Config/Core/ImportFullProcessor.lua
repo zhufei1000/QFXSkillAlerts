@@ -137,6 +137,24 @@ function Processor:Import(payload)
     local importedCount = 0
     local newSpecConfigs = {}
 
+    -- A full backup is a replacement, not a merge. Validate and replace the
+    -- CDM user-profile tree before mutating the remaining configuration so an
+    -- invalid CDM payload cannot be reported as a successful full restore.
+    if type(payload.cdmVoiceProfiles) == "table" then
+        if type(api.ImportCDMVoicePresetPayload) ~= "function" then
+            return false, 0
+        end
+        local cdmOK = api.ImportCDMVoicePresetPayload({
+            type = "cdmVoicePreset",
+            version = 1,
+            profiles = payload.cdmVoiceProfiles,
+            replace = true,
+        })
+        if cdmOK ~= true then
+            return false, 0
+        end
+    end
+
     for classIDKey, classMap in pairs(importedRoot) do
         local classID = tonumber(classIDKey)
         if classID and classID >= 0 and type(classMap) == "table" then
@@ -233,12 +251,5 @@ function Processor:Import(payload)
     end
 
     db.collectionSerial = math.max(tonumber(payload.collectionSerial) or 0, 0)
-    if type(payload.cdmVoiceProfiles) == "table" and type(api.ImportCDMVoicePresetPayload) == "function" then
-        api.ImportCDMVoicePresetPayload({
-            type = "cdmVoicePreset",
-            version = 1,
-            profiles = payload.cdmVoiceProfiles,
-        })
-    end
     return true, importedCount
 end

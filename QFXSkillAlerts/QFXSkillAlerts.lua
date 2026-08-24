@@ -150,6 +150,7 @@ local bagItemNameCache = {}
 local bagItemNameByIDCache = {}
 local bagCacheValid = false
 local bagCacheDirty = true
+local bagLoadStateSignature
 
 local function TrimItemLoadName(value)
     value = tostring(value or "")
@@ -300,6 +301,67 @@ local function IsActiveScopeLoaded(entryClassID, entrySpecID, currentClassID, cu
     end
 
     return entryClassID == currentClassID and (entrySpecID == currentSpecID or entrySpecID == ALL_SPECS_ID)
+end
+
+local function BuildActiveBagLoadStateSignature()
+    if IsCombatLocked() or not EnsureBagItemCache() then
+        return nil
+    end
+
+    local currentClassID, currentSpecID = GetCurrentClassSpec()
+    local states, seen = {}, {}
+    local function ScanRoot(root)
+        for classID, classMap in pairs(type(root) == "table" and root or {}) do
+            if type(classMap) == "table" then
+                for specID, entryMap in pairs(classMap) do
+                    if type(entryMap) == "table"
+                        and IsActiveScopeLoaded(classID, specID, currentClassID, currentSpecID) then
+                        for _, entry in pairs(entryMap) do
+                            if type(entry) == "table"
+                                and tostring(entry.objectType or ""):lower() == OBJECT_TYPE_ITEM
+                                and NormalizeItemLoadMode(entry.itemLoadMode) == ITEM_LOAD_BAGS then
+                                local itemID = math.floor(tonumber(entry.itemID or entry.spellId) or 0)
+                                if itemID > 0 then
+                                    local sameName = entry.itemLoadSameName == true
+                                    local key = tostring(itemID) .. (sameName and ":name" or ":id")
+                                    if not seen[key] then
+                                        seen[key] = true
+                                        states[#states + 1] = key .. "="
+                                            .. (IsItemInBagsForLoad(itemID, sameName) and "1" or "0")
+                                    end
+                                end
+                            end
+                        end
+                    end
+                end
+            end
+        end
+    end
+
+    local db = type(QFXSkillAlertsDB) == "table" and QFXSkillAlertsDB or {}
+    ScanRoot(db.specConfigs)
+    ScanRoot(db.castSuccessConfigs)
+    table.sort(states)
+    return table.concat(states, "|")
+end
+
+local function CaptureActiveBagLoadState()
+    local signature = BuildActiveBagLoadStateSignature()
+    if signature ~= nil then
+        bagLoadStateSignature = signature
+    end
+    return signature
+end
+
+local function HasActiveBagLoadStateChanged()
+    MarkBagItemCacheDirty()
+    local previous = bagLoadStateSignature
+    local current = BuildActiveBagLoadStateSignature()
+    if current == nil then
+        return false
+    end
+    bagLoadStateSignature = current
+    return previous ~= nil and current ~= previous
 end
 
 local function EnsureDB()
@@ -684,6 +746,22 @@ local function HideVisualAlerts(primaryKeyOrMode)
     return false
 end
 
+local function UpdateCooldownCountdown(cfg, remaining, primaryKey)
+    local bridge = GetNotifierBridge()
+    if bridge and type(bridge.UpdateCooldownCountdown) == "function" then
+        return bridge:UpdateCooldownCountdown(cfg, remaining, primaryKey)
+    end
+    return false
+end
+
+local function HideCooldownCountdown(primaryKey)
+    local bridge = GetNotifierBridge()
+    if bridge and type(bridge.HideCooldownCountdown) == "function" then
+        return bridge:HideCooldownCountdown(primaryKey)
+    end
+    return false
+end
+
 local function PlayBloodlustNotification(cfg)
     local bloodlust = GetBloodlust()
     if bloodlust and type(bloodlust.PlayNotification) == "function" then
@@ -700,6 +778,8 @@ local function ConfigureRuntime()
             playReady = PlayReadyNotification,
             playCastSuccess = PlayCastSuccessNotification,
             hideVisual = HideVisualAlerts,
+            updateCountdown = UpdateCooldownCountdown,
+            hideCountdown = HideCooldownCountdown,
             resolveObjectName = ResolveObjectName,
         })
     end
@@ -729,6 +809,7 @@ local function ConfigureCastSuccess()
             resolveObjectType = ResolveObjectType,
             resolveItemTriggerForEntry = ResolveItemTriggerForEntry,
             isItemLoadRequirementMet = IsItemLoadRequirementMet,
+            isTalentSelected = IsTalentSelected,
             getObjectTriggerSpellID = GetObjectTriggerSpellID,
             resolveEntrySoundPath = ResolveEntrySoundPath,
             resolveImageTexture = ResolveRuntimeImageTexture,
@@ -849,8 +930,43 @@ end
 
 local itemLoadRefreshPending = false
 local itemLoadRefreshCombatPending = false
+local BAG_ITEM_REFRESH_EVENTS = {
+    MAIL_CLOSED = true,
+    TRADE_CLOSED = true,
+    ALCHEMY_TRADE_SKILL_CLOSED = true,
+    PLAYER_LOGIN_DELAYED = true,
+}
+
+local function NeedsItemInventoryRefresh(event)
+    local runtimeEquipped, runtimeBags = false, false
+    local builder = GetRuntimeConfigBuilder()
+    if builder and type(builder.GetItemLoadEventNeeds) == "function" then
+        runtimeEquipped, runtimeBags = builder:GetItemLoadEventNeeds()
+    end
+
+    local castEquipped, castBags = false, false
+    local castSuccess = GetCastSuccess()
+    if castSuccess and type(castSuccess.GetItemLoadEventNeeds) == "function" then
+        castEquipped, castBags = castSuccess:GetItemLoadEventNeeds()
+    end
+
+    if BAG_ITEM_REFRESH_EVENTS[event] then
+        return runtimeBags == true or castBags == true
+    elseif event == "PLAYER_EQUIPMENT_CHANGED" then
+        return runtimeEquipped == true or castEquipped == true
+    end
+    return event == "PLAYER_REGEN_ENABLED"
+end
+
 local function RefreshItemLoadState(event)
-    if event == "BAG_UPDATE_DELAYED" then
+    if event == "PLAYER_REGEN_ENABLED_COVERED" then
+        itemLoadRefreshCombatPending = false
+        return true
+    end
+    if not NeedsItemInventoryRefresh(event) then
+        return false
+    end
+    if event == "PLAYER_LOGIN_DELAYED" then
         MarkBagItemCacheDirty()
     end
     if event == "PLAYER_REGEN_ENABLED" and not itemLoadRefreshCombatPending then
@@ -1001,15 +1117,17 @@ local function OnProfileChanged(resetCooldowns)
     end
     local controller = GetProfileController()
     if controller and type(controller.OnProfileChanged) == "function" then
-        return controller:OnProfileChanged(resetCooldowns)
+        local result = controller:OnProfileChanged(resetCooldowns)
+        CaptureActiveBagLoadState()
+        return result
     end
     if resetCooldowns then
         WipeRuntimeCooldowns()
         ClearDelayedCastSuccessTimers()
     end
-    MarkBagItemCacheDirty()
     RebuildRuntimeConfig()
     RebuildCastSuccessConfig()
+    CaptureActiveBagLoadState()
     RebuildCustomConfig()
     RebuildBloodlustConfig()
     RefreshRuntimeCooldowns()
@@ -1042,10 +1160,10 @@ local function ResolveAllStoredItemTriggers(quiet)
     return false
 end
 
-local function ResolvePendingItems()
+local function ResolvePendingItems(suppressRefresh)
     local queue = GetItemResolveQueue()
     if queue and type(queue.ResolvePending) == "function" then
-        return queue:ResolvePending()
+        return queue:ResolvePending(suppressRefresh == true)
     end
     return false
 end
@@ -1086,6 +1204,7 @@ local InstalledAPI = PublicAPI:Install({
         ResolveItemUseSpellID = ResolveItemUseSpellID,
         ResolveItemTriggerForEntry = ResolveItemTriggerForEntry,
         IsItemLoadRequirementMet = IsItemLoadRequirementMet,
+        IsTalentSelected = IsTalentSelected,
         ResolveAllStoredItemTriggers = ResolveAllStoredItemTriggers,
         ResolvePendingItems = ResolvePendingItems,
         MarkEntryDeleted = MarkEntryDeleted,
@@ -1151,7 +1270,10 @@ local InstalledAPI = PublicAPI:Install({
             return NS.Core.CDMVoiceService:DeleteSoundAlertByKey(key)
         end,
         GetCDMVoiceSavedEntries = function()
-            return NS.Core.CDMVoiceService:GetCurrentSpecSavedEntries()
+            return NS.Core.CDMVoiceService:GetSavedEntries()
+        end,
+        GetCDMVoiceRefreshSerial = function()
+            return tonumber(NS.Core.CDMVoiceService.refreshSerial) or 0
         end,
         GetCurrentSpecCDMVoiceEntries = function()
             return NS.Core.CDMVoiceService:GetCurrentSpecSavedEntries()
@@ -1162,11 +1284,17 @@ local InstalledAPI = PublicAPI:Install({
         DeleteCDMVoiceEntryLocalOnly = function(key)
             return NS.Core.CDMVoiceService:DeleteSoundAlertByKeyLocalOnly(key)
         end,
+        DeleteCDMVoicePresetsLocalByKeys = function(keys)
+            return NS.Core.CDMVoiceService:DeletePresetEntriesLocalBatch(keys)
+        end,
         ParseCDMVoiceSavedKey = function(key)
             return NS.Core.CDMVoiceService:ParseSavedEntryKey(key)
         end,
         GetCDMVoicePresetRecord = function(classID, specID, recordKey)
             return NS.Core.CDMVoicePresetStore:GetEffectiveRecord(classID, specID, recordKey)
+        end,
+        HasCDMVoicePresetRecord = function(classID, specID, recordKey)
+            return NS.Core.CDMVoicePresetStore:HasEffectiveRecord(classID, specID, recordKey)
         end,
         RefreshCDMVoiceRegistry = function()
             return NS.Core.CDMVoiceRegistry:Refresh(false)
@@ -1229,7 +1357,22 @@ local InstalledAPI = PublicAPI:Install({
                     end
                 end
             end
-            local imported, invalid = store:ImportProfiles(payload.profiles)
+            local replaceProfiles = payload.replace == true
+            local replaceOK, imported, invalid
+            if replaceProfiles and type(store.ReplaceProfiles) == "function" then
+                replaceOK, imported, invalid = store:ReplaceProfiles(payload.profiles)
+                if not replaceOK then
+                    return false, 0, {
+                        total = 0,
+                        currentSpec = expectedCurrent,
+                        otherScopes = expectedOther,
+                        invalid = math.max(tonumber(invalid) or 0, expectedInvalid),
+                        pending = 0,
+                    }, "invalid_profiles"
+                end
+            else
+                imported, invalid = store:ImportProfiles(payload.profiles)
+            end
             local state = store:GetSyncState()
             state.importedVersion = math.max(tonumber(state.importedVersion) or 0, 1)
             local sync = NS.Core.CDMVoicePresetSync
@@ -1253,7 +1396,7 @@ local InstalledAPI = PublicAPI:Install({
             if not evaluated and type(NS.Core.CDMVoiceService.RefreshRuntimeData) == "function" then
                 NS.Core.CDMVoiceService:RefreshRuntimeData("preset_import_local")
             end
-            return imported > 0, imported, details, evaluated and "pending" or (reason or "deferred")
+            return replaceProfiles or imported > 0, imported, details, evaluated and "pending" or (reason or "deferred")
         end,
         SyncCurrentSpecCDMVoices = function(reason, options)
             return NS.Core.CDMVoicePresetSync:EvaluateCurrentSpec(
@@ -1342,12 +1485,31 @@ local function ConfigureStartup()
                 print("[QFX-SA] " .. L("MSG_LOADED"))
             end,
             onProfileChanged = OnProfileChanged,
-            resolvePendingItems = ResolvePendingItems,
+            resolvePendingItems = function()
+                return ResolvePendingItems(false)
+            end,
             clearDelayedCastSuccessTimers = ClearDelayedCastSuccessTimers,
             startCooldown = StartCooldown,
             handleCastSuccessSpellcast = HandleCastSuccessSpellcast,
             handleBloodlustAura = HandleBloodlustAura,
             handleItemInventoryChanged = RefreshItemLoadState,
+            hasRelevantBagLoadStateChanged = HasActiveBagLoadStateChanged,
+            isAlchemyTradeSkill = function()
+                if not (C_TradeSkillUI and type(C_TradeSkillUI.GetBaseProfessionInfo) == "function") then
+                    return false
+                end
+                local ok, info = pcall(C_TradeSkillUI.GetBaseProfessionInfo)
+                if not ok or type(info) ~= "table" then
+                    return false
+                end
+                local alchemy = Enum and Enum.Profession and Enum.Profession.Alchemy
+                if alchemy ~= nil and info.profession == alchemy then
+                    return true
+                end
+                -- 171 is the parent skill-line ID for Alchemy. Keep this as a
+                -- fallback for clients that omit the Enum.Profession value.
+                return tonumber(info.professionID) == 171 or tonumber(info.parentProfessionID) == 171
+            end,
             handleCustomEvent = HandleCustomEvent,
             invalidateTalentCache = function()
                 local bridge = NS.Core and NS.Core.ResolverBridge
@@ -1358,8 +1520,10 @@ local function ConfigureStartup()
             end,
             prepareProfileRefresh = function()
                 PurgeDeletedEntries()
-                ResolveAllStoredItemTriggers(true)
-                MarkBagItemCacheDirty()
+                -- Only retry item records that actually requested item data.
+                -- The following profile rebuild applies any resolved changes,
+                -- so suppress the queue's own duplicate rebuild here.
+                ResolvePendingItems(true)
             end,
         })
     end

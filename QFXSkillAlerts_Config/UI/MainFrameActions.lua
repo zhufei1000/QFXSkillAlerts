@@ -223,6 +223,8 @@ deleteBtn:SetScript("OnClick", function()
     local entryType = tostring(NS.AceOptions:GetState().entryType or "")
     if entryType == "cdmVoice" then
         self:DeleteCDMVoiceByKey(selectedKey)
+    elseif entryType == "bloodlust" then
+        return
     elseif NS.AceOptions and type(NS.AceOptions.IsGroupKey) == "function" and NS.AceOptions:IsGroupKey(selectedKey) then
         if NS.AceOptions:DeleteCollection(selectedKey, true) then
             self:RequestRefresh("list")

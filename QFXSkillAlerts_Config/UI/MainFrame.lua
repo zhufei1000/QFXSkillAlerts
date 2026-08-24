@@ -56,9 +56,9 @@ function MainFrame:RequestRefresh(reason)
     return self:Refresh()
 end
 
-function MainFrame:Refresh()
+function MainFrame:Refresh(allowCached)
     if MainFrameRefresh and type(MainFrameRefresh.Refresh) == "function" then
-        return MainFrameRefresh:Refresh(self)
+        return MainFrameRefresh:Refresh(self, allowCached)
     end
 end
 
@@ -66,12 +66,9 @@ function MainFrame:Open()
     local frame = self:EnsureFrame()
     NS.AceOptions:SyncScopeToCurrentSpec()
     NS.AceOptions:EnsureValidScope()
-    self:Refresh()
+    self:Refresh(true)
     frame:Show()
     frame:Raise()
-    if collectgarbage then
-        collectgarbage("step", 96)
-    end
     return true
 end
 

@@ -23,6 +23,7 @@ local OBJECT_TYPE_ITEM = CONST.OBJECT_TYPE_ITEM or "item"
 local ITEM_LOAD_NONE = CONST.ITEM_LOAD_NONE or "none"
 local ITEM_LOAD_EQUIPPED = CONST.ITEM_LOAD_EQUIPPED or "equipped"
 local ITEM_LOAD_BAGS = CONST.ITEM_LOAD_BAGS or "bags"
+local BLOODLUST_ENTRY_KEY = "bloodlust"
 
 local function GetOptions(owner)
     return owner or NS.AceOptions or {}
@@ -418,6 +419,24 @@ local function IsEntryItemLoadRequirementMet(api, entry, objectType)
     return true
 end
 
+local function IsEntryTalentLoadRequirementMet(api, entry)
+    local hasIndependentLoadTalent = entry.loadTalentEnabled ~= nil
+        or entry.loadTalentId ~= nil or entry.loadTalentName ~= nil
+    local talentId = tonumber(entry.loadTalentId) or 0
+    local enabled = entry.loadTalentEnabled == true and talentId > 0
+    if not hasIndependentLoadTalent and entry.talentLoadFilter == true then
+        talentId = tonumber(entry.talentId) or 0
+        enabled = entry.checkTalent == true and talentId > 0
+    end
+    if not enabled then
+        return true
+    end
+    if api and type(api.IsTalentSelected) == "function" then
+        return api.IsTalentSelected(talentId) == true
+    end
+    return true
+end
+
 local function SameEntryIdentity(left, right)
     if type(left) ~= "table" or type(right) ~= "table" then
         return false
@@ -607,6 +626,7 @@ function EntryStore:GetCurrentScopeEntryList(owner)
                 talentId = tonumber(entry.talentId) or 0,
                 talentName = TrimText(entry.talentName or ""),
                 talentCD = tonumber(entry.talentCD) or 0,
+                talentLoadFilter = entry.talentLoadFilter == true,
                 alertRaceIDs = NormalizeCustomRaceMap(entry.alertRaceIDs),
                 icon = icon,
             }
@@ -614,6 +634,41 @@ function EntryStore:GetCurrentScopeEntryList(owner)
     end
 
     return entries
+end
+
+function EntryStore:GetBloodlustSavedEntry(owner)
+    local api = GetApi()
+    local options = GetOptions(owner)
+    local db = type(QFXSkillAlertsDB) == "table" and QFXSkillAlertsDB or nil
+    local cfg = db and type(db.bloodlustConfig) == "table" and db.bloodlustConfig or nil
+    if not api or not cfg then
+        return nil
+    end
+
+    local modeTts, modeSound = api.GetModes()
+    local icon = type(api.ResolveSpellIcon) == "function" and api.ResolveSpellIcon(2825) or nil
+    local soundDetail = ""
+    if cfg.voiceEnabled ~= false then
+        soundDetail = BuildSoundDetailForEntry(options, cfg, modeTts, modeSound)
+    end
+
+    return {
+        key = BLOODLUST_ENTRY_KEY,
+        itemType = "entry",
+        entryType = "bloodlust",
+        isSpecial = true,
+        canDrag = false,
+        canDrop = false,
+        isLoaded = true,
+        spellId = 0,
+        spellName = L("SECTION_BLOODLUST_BUILTIN"),
+        modeText = BuildAlertActionDetailForEntry(cfg, modeTts, modeSound),
+        soundDetail = soundDetail,
+        notifyMode = tostring(cfg.notifyMode or modeSound),
+        soundPath = tostring(cfg.soundPath or ""),
+        ttsText = tostring(cfg.ttsText or ""),
+        icon = icon or 136012,
+    }
 end
 
 function EntryStore:GetAllSavedEntryList(owner)
@@ -658,7 +713,7 @@ function EntryStore:GetAllSavedEntryList(owner)
                                 icon = type(api.ResolveObjectIcon) == "function" and api.ResolveObjectIcon(spellId, objectType) or (type(api.ResolveSpellIcon) == "function" and api.ResolveSpellIcon(spellId) or nil)
                             end
 
-                            local entryLoaded = scopeLoaded and EntryAlertScopeMatchesCurrent(entry, classID, specID, currentClassID, currentSpecID) and IsEntryItemLoadRequirementMet(api, entry, objectType)
+                            local entryLoaded = scopeLoaded and EntryAlertScopeMatchesCurrent(entry, classID, specID, currentClassID, currentSpecID) and IsEntryItemLoadRequirementMet(api, entry, objectType) and IsEntryTalentLoadRequirementMet(api, entry)
                             local loadedTag = entryLoaded and L("LOADED_TAG") or L("UNLOADED_TAG")
 
                             entries[#entries + 1] = {
@@ -685,6 +740,7 @@ function EntryStore:GetAllSavedEntryList(owner)
                                 talentId = tonumber(entry.talentId) or 0,
                                 talentName = TrimText(entry.talentName or ""),
                                 talentCD = tonumber(entry.talentCD) or 0,
+                                talentLoadFilter = entry.talentLoadFilter == true,
                                 icon = icon,
                                 scopeText = string.format("%s / %s%s", className, specName, loadedTag),
                                 isLoaded = entryLoaded,
@@ -717,6 +773,15 @@ function EntryStore:LoadSelectedEntry(owner)
         return
     end
 
+    if tostring(state.selectedKey or "") == BLOODLUST_ENTRY_KEY then
+        if type(options.LoadBloodlustConfig) == "function" then
+            options:LoadBloodlustConfig()
+            state.selectedKey = BLOODLUST_ENTRY_KEY
+            state.selectedCollectionKey = nil
+        end
+        return
+    end
+
     local classID, specID, selectedIndex = ParseEntryKey(state.selectedKey)
     if classID < 0 or specID < 0 or selectedIndex <= 0 then
         return
@@ -746,6 +811,25 @@ function EntryStore:LoadSelectedEntry(owner)
     state.talentId = tonumber(entry.talentId) or 0
     state.talentName = TrimText(entry.talentName or "")
     state.talentCD = tonumber(entry.talentCD) or 0
+    state.talentLoadFilter = entry.talentLoadFilter == true
+    local hasIndependentLoadTalent = entry.loadTalentEnabled ~= nil
+        or entry.loadTalentId ~= nil or entry.loadTalentName ~= nil
+    state.loadTalentEnabled = entry.loadTalentEnabled == true
+    state.loadTalentId = tonumber(entry.loadTalentId) or 0
+    state.loadTalentName = TrimText(entry.loadTalentName or "")
+    -- Legacy saves used the CD-change talent identity for the load filter too.
+    -- Translate that shape only while the new independent fields are absent.
+    if not hasIndependentLoadTalent and entry.talentLoadFilter == true
+        and entry.checkTalent == true and (tonumber(entry.talentId) or 0) > 0 then
+        state.loadTalentEnabled = true
+        state.loadTalentId = tonumber(entry.talentId) or 0
+        state.loadTalentName = TrimText(entry.talentName or "")
+        if (tonumber(entry.talentCD) or 0) <= 0 then
+            state.checkTalent = false
+            state.talentId = 0
+            state.talentName = ""
+        end
+    end
     state.delayEnabled = entry.delayEnabled == true
     state.delaySeconds = math.max(0, tonumber(entry.delaySeconds) or 0)
     state.castDelayMode = NormalizeCastDelayMode(entry.castDelayMode)
@@ -782,6 +866,7 @@ function EntryStore:LoadSelectedEntry(owner)
     state.imageX = tonumber(entry.imageX) or 0
     state.imageY = tonumber(entry.imageY) or 120
     state.textEnabled = entry.textEnabled == true
+    state.textCooldownCountdown = entry.textCooldownCountdown == true
     state.textConditionOp = NormalizeConditionOp(entry.textConditionOp)
     state.textConditionTime = NormalizeConditionTime(entry.textConditionTime, legacyAlertTime)
     state.textAlert = tostring(entry.textAlert or "")
@@ -908,6 +993,9 @@ function EntryStore:SaveEntry(owner)
     local talentId = tonumber(state.talentId) or 0
     local talentName = TrimText(state.talentName or "")
     local talentCD = tonumber(state.talentCD) or 0
+    local loadTalentEnabled = state.loadTalentEnabled == true
+    local loadTalentId = tonumber(state.loadTalentId) or 0
+    local loadTalentName = TrimText(state.loadTalentName or "")
     local notifyMode = tostring(state.notifyMode or select(2, api.GetModes()))
     local ttsText = tostring(state.ttsText or "")
     local delayEnabled = state.delayEnabled == true
@@ -933,6 +1021,7 @@ function EntryStore:SaveEntry(owner)
     local imageX = math.floor((tonumber(state.imageX) or 0) + 0.5)
     local imageY = math.floor((tonumber(state.imageY) or 120) + 0.5)
     local textEnabled = state.textEnabled == true
+    local textCooldownCountdown = state.textCooldownCountdown == true
     local textConditionOp = NormalizeConditionOp(state.textConditionOp)
     local textConditionTime = NormalizeConditionTime(state.textConditionTime, cooldownAlertTime)
     if cooldownAlertTime <= 0 then
@@ -953,6 +1042,10 @@ function EntryStore:SaveEntry(owner)
     if textHAlign ~= "left" and textHAlign ~= "right" then textHAlign = "center" end
     local textOffsetX = math.floor((tonumber(state.textOffsetX) or 0) + 0.5)
     local textOffsetY = math.floor((tonumber(state.textOffsetY) or 0) + 0.5)
+    local visualUID = tostring(state._qfxPendingVisualUID or state.visualUID or "")
+    if visualUID == "" then
+        visualUID = nil
+    end
     if imageEnabled and textEnabled and (imageDurationEnabled or textDurationEnabled) then
         imageDurationEnabled = true
         textDurationEnabled = true
@@ -1026,7 +1119,16 @@ function EntryStore:SaveEntry(owner)
         print("[QFX-SA] " .. L("MSG_INVALID_FIXED_CD"))
         return
     end
-    if (not isCooldownEntry) then
+    if not isCooldownEntry and not isCastEntry then
+        baseCD = 0
+        checkTalent = false
+        talentId = 0
+        talentName = ""
+        talentCD = 0
+        loadTalentEnabled = false
+        loadTalentId = 0
+        loadTalentName = ""
+    elseif isCastEntry then
         baseCD = 0
         checkTalent = false
         talentId = 0
@@ -1045,13 +1147,19 @@ function EntryStore:SaveEntry(owner)
         print("[QFX-SA] " .. L("MSG_NEED_TALENT_ID"))
         return
     end
-    if checkTalent and talentCD <= 0 then
-        print("[QFX-SA] " .. L("MSG_NEED_TALENT_CD"))
+    if loadTalentEnabled and loadTalentId <= 0 then
+        print("[QFX-SA] " .. L("MSG_NEED_LOAD_TALENT_ID"))
         return
     end
+    -- "CD Changes To" is optional: leave it empty to keep the fixed CD and
+    -- only use the talent as a load condition.
     if checkTalent and talentName == "" and type(api.ResolveTalentName) == "function" then
         talentName = api.ResolveTalentName(talentId)
         state.talentName = talentName
+    end
+    if loadTalentEnabled and loadTalentName == "" and type(api.ResolveTalentName) == "function" then
+        loadTalentName = api.ResolveTalentName(loadTalentId)
+        state.loadTalentName = loadTalentName
     end
     if not voiceEnabled and not imageEnabled and not textEnabled then
         print("[QFX-SA] " .. L("MSG_NEED_ALERT_ACTIONS"))
@@ -1109,10 +1217,16 @@ function EntryStore:SaveEntry(owner)
         itemLoadSameName = (objectType == OBJECT_TYPE_ITEM and itemLoadMode == ITEM_LOAD_BAGS and state.itemLoadSameName == true) or nil,
         baseCD = isCooldownEntry and tonumber(string.format("%.2f", baseCD)) or 0,
         fixedCD = true,
-        checkTalent = isCooldownEntry and checkTalent and talentId > 0,
-        talentId = (isCooldownEntry and checkTalent) and math.floor(talentId) or 0,
-        talentName = (isCooldownEntry and checkTalent) and talentName or "",
+        checkTalent = objectType ~= OBJECT_TYPE_ITEM and checkTalent and talentId > 0,
+        talentId = (objectType ~= OBJECT_TYPE_ITEM and checkTalent) and math.floor(talentId) or 0,
+        talentName = (objectType ~= OBJECT_TYPE_ITEM and checkTalent) and talentName or "",
         talentCD = (isCooldownEntry and checkTalent) and tonumber(string.format("%.2f", talentCD)) or 0,
+        -- Keep the legacy flag explicitly false so older runtimes do not apply
+        -- the independent load filter to the CD-change talent by mistake.
+        talentLoadFilter = false,
+        loadTalentEnabled = objectType ~= OBJECT_TYPE_ITEM and loadTalentEnabled and loadTalentId > 0,
+        loadTalentId = (objectType ~= OBJECT_TYPE_ITEM and loadTalentEnabled) and math.floor(loadTalentId) or 0,
+        loadTalentName = (objectType ~= OBJECT_TYPE_ITEM and loadTalentEnabled) and loadTalentName or "",
         chargeInput = 1,
         notifyMode = notifyMode,
         ttsText = ttsText,
@@ -1142,6 +1256,7 @@ function EntryStore:SaveEntry(owner)
         imageX = imageX,
         imageY = imageY,
         textEnabled = textEnabled,
+        textCooldownCountdown = isCooldownEntry and textEnabled and textCooldownCountdown,
         textConditionOp = isCooldownEntry and textConditionOp or "<=",
         textConditionTime = isCooldownEntry and tonumber(string.format("%.2f", textConditionTime)) or 0,
         textAlert = textAlert,
@@ -1155,6 +1270,7 @@ function EntryStore:SaveEntry(owner)
         textHAlign = textHAlign,
         textOffsetX = textOffsetX,
         textOffsetY = textOffsetY,
+        visualUID = visualUID,
         alertRaceIDs = alertRaceIDs,
         alertClassIDs = alertClassIDs,
         alertSpecIDs = alertSpecIDs,

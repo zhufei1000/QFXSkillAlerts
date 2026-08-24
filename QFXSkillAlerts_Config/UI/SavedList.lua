@@ -160,6 +160,7 @@ function SavedList:Create(parent)
 end
 
 function SavedList:RequestRefresh(delay)
+    self:InvalidateLayout("request")
     if SavedListRefresh and type(SavedListRefresh.RequestRefresh) == "function" then
         return SavedListRefresh:RequestRefresh(self, delay)
     end
@@ -173,6 +174,17 @@ function SavedList:RequestRefresh(delay)
             self:Refresh()
         end
     end, delay or 0)
+end
+
+function SavedList:InvalidateLayout(reason)
+    self._layoutDirty = true
+    self._layoutDirtyReason = tostring(reason or "data")
+end
+
+function SavedList:HasCachedLayout()
+    return self._layoutDirty ~= true
+        and type(self._cachedLoadedEntries) == "table"
+        and type(self._cachedUnloadedEntries) == "table"
 end
 
 function SavedList:SetOnSelectionChanged(callback)
@@ -295,9 +307,12 @@ function SavedList:ToggleGroupCollapsed(groupKey)
     return true
 end
 
-function SavedList:Refresh()
+function SavedList:Refresh(allowCached)
     if SavedListRefresh and type(SavedListRefresh.Refresh) == "function" then
-        return SavedListRefresh:Refresh(self)
+        return SavedListRefresh:Refresh(self, allowCached)
+    end
+    if allowCached == true and self:HasCachedLayout() then
+        return self:RenderCached()
     end
     local state = self.state or NS.AceOptions:GetState()
     self.state = state
@@ -317,6 +332,9 @@ function SavedList:Refresh()
     self._cachedUnloadedEntries = unloadedEntries
     self._cachedLoadedDisplayCount = loadedDisplayCount
     self._cachedUnloadedDisplayCount = unloadedDisplayCount
+
+    self._layoutDirty = false
+    self._layoutDirtyReason = nil
 
     RenderEntryRows(self, state, selectedKey, loadedEntries, unloadedEntries, loadedDisplayCount, unloadedDisplayCount)
 end

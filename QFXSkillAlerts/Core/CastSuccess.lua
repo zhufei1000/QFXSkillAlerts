@@ -13,10 +13,13 @@ local ALL_SPECS_ID = CONST.ALL_SPECS_ID or 0
 local ALL_RACES_ID = CONST.ALL_RACES_ID or 0
 local OBJECT_TYPE_ITEM = CONST.OBJECT_TYPE_ITEM or "item"
 local OBJECT_TYPE_SPELL = CONST.OBJECT_TYPE_SPELL or "spell"
+local ITEM_LOAD_EQUIPPED = CONST.ITEM_LOAD_EQUIPPED or "equipped"
+local ITEM_LOAD_BAGS = CONST.ITEM_LOAD_BAGS or "bags"
 local MODE_SOUND = CONST.MODE_SOUND or "sound"
 
 local castSuccessCfg = {}
 local callbacks = {}
+local itemLoadEventNeeds = { equipped = false, bags = false }
 
 local function SafeCall(name, ...)
     local fn = callbacks[name]
@@ -24,6 +27,10 @@ local function SafeCall(name, ...)
         return fn(...)
     end
     return nil
+end
+
+local function IsTalentSelected(talentId)
+    return SafeCall("isTalentSelected", talentId) == true
 end
 
 local function GetOrderedEntryIndices(map)
@@ -196,6 +203,7 @@ function CastSuccess:Configure(opts)
     callbacks.resolveObjectType = opts.resolveObjectType
     callbacks.resolveItemTriggerForEntry = opts.resolveItemTriggerForEntry
     callbacks.isItemLoadRequirementMet = opts.isItemLoadRequirementMet
+    callbacks.isTalentSelected = opts.isTalentSelected
     callbacks.getObjectTriggerSpellID = opts.getObjectTriggerSpellID
     callbacks.resolveEntrySoundPath = opts.resolveEntrySoundPath
     callbacks.resolveImageTexture = opts.resolveImageTexture
@@ -215,6 +223,10 @@ function CastSuccess:GetConfig(triggerSpellID)
     return castSuccessCfg[triggerSpellID]
 end
 
+function CastSuccess:GetItemLoadEventNeeds()
+    return itemLoadEventNeeds.equipped == true, itemLoadEventNeeds.bags == true
+end
+
 function CastSuccess:Clear()
     wipe(castSuccessCfg)
     return true
@@ -222,6 +234,8 @@ end
 
 function CastSuccess:Rebuild()
     wipe(castSuccessCfg)
+    itemLoadEventNeeds.equipped = false
+    itemLoadEventNeeds.bags = false
 
     local classID, specID = GetCurrentClassSpec()
     local raceID = GetCurrentRaceID()
@@ -233,9 +247,26 @@ function CastSuccess:Rebuild()
         if not IsScopeMatched(entry, scopeClassID, scopeSpecID, classID, specID, raceID) then
             return
         end
+        local hasIndependentLoadTalent = entry.loadTalentEnabled ~= nil
+            or entry.loadTalentId ~= nil or entry.loadTalentName ~= nil
+        local talentId = tonumber(entry.loadTalentId) or 0
+        local loadTalentEnabled = entry.loadTalentEnabled == true and talentId > 0
+        if not hasIndependentLoadTalent then
+            talentId = tonumber(entry.talentId) or 0
+            loadTalentEnabled = entry.checkTalent == true and talentId > 0
+        end
+        if loadTalentEnabled and not IsTalentSelected(talentId) then
+            return
+        end
         local objectID = tonumber(entry.spellId) or 0
         local objectType = ResolveObjectType(objectID, entry.objectType)
         if objectType == OBJECT_TYPE_ITEM then
+            local loadMode = tostring(entry.itemLoadMode or ""):lower()
+            if loadMode == ITEM_LOAD_EQUIPPED then
+                itemLoadEventNeeds.equipped = true
+            elseif loadMode == ITEM_LOAD_BAGS then
+                itemLoadEventNeeds.bags = true
+            end
             if not IsItemLoadRequirementMet(entry) then
                 return
             end

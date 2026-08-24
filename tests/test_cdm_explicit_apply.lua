@@ -232,6 +232,9 @@ Equal(#calls, 0, "local save must not call LayoutManager or reload")
 
 -- A multi-record pending evaluation enumerates the CDM provider once per
 -- category for the whole plan, not once per record.
+Service:InvalidateCooldownCache("test")
+Sync.cooldownCatalogCacheKey = nil
+Sync.cooldownCatalogCache = nil
 providerCategoryCalls = 0
 local catalogRecord = Store:GetEffectiveRecord(8, 62, recordKey)
 Assert(catalogRecord, "catalog test requires the saved record")
@@ -240,6 +243,12 @@ Equal(
     providerCategoryCalls,
     #Service:GetCategories(),
     "pending plan should reuse one cooldown catalog across records"
+)
+Sync:BuildPendingPlan({ catalogRecord, catalogRecord }, {})
+Equal(
+    providerCategoryCalls,
+    #Service:GetCategories(),
+    "later pending plans should reuse the cached cooldown catalog"
 )
 
 -- Row Apply validates, saves the current draft, applies, saves once, never unlocks,
@@ -631,5 +640,101 @@ Equal(scheduledEvaluations[2].prompt, true, "leaving combat should retry the pop
 Sync.EvaluateCurrentSpec = originalEvaluateCurrentSpec
 C_Timer = nil
 InCombatLockdown = function() return false end
+
+-- Saved-list projection keeps live evaluation scoped to the active spec while
+-- still exposing user presets from other specs as unloaded rows.
+local otherRecordKey = Store:SaveAppliedRecord({
+    classID = 1,
+    specID = 73,
+    category = "essential",
+    spellID = 1001,
+    eventKey = "AVAILABLE",
+    eventTypeHint = EVENT_AVAILABLE,
+    voiceIdentity = "voice:a",
+    voiceName = "Voice A",
+    voicePath = "A.ogg",
+    source = "user",
+    enabled = true,
+})
+Assert(otherRecordKey, "other-spec preset should save")
+
+local currentEntries = Service:GetCurrentSpecSavedEntries()
+for _, entry in ipairs(currentEntries) do
+    Assert(not (entry.classID == 1 and entry.specID == 73),
+        "current-spec projection must not include another spec")
+end
+
+local allSavedEntries = Service:GetSavedEntries()
+local otherEntry
+for _, entry in ipairs(allSavedEntries) do
+    if entry.classID == 1 and entry.specID == 73 and entry.recordKey == otherRecordKey then
+        otherEntry = entry
+        break
+    end
+end
+Assert(otherEntry, "saved-list projection should include another spec")
+Equal(otherEntry.displaySection, "unloaded", "other-spec preset should be shown as unloaded")
+Equal(otherEntry.isLoaded, false, "other-spec preset should not be marked loaded")
+Equal(otherEntry.loadState, "red", "other-spec preset should use the unloaded indicator")
+Equal(otherEntry.runtimeStatus, "scopeUnloaded", "other-spec preset should expose its scope status")
+Equal(otherEntry.cooldownID, nil, "other-spec preset must not reuse a current-spec cooldown ID")
+Assert(type(otherEntry.scopeText) == "string" and otherEntry.scopeText ~= "",
+    "other-spec preset should include scope information")
+
+-- Full-backup replacement is transactional at the CDM profile-tree level:
+-- valid input removes records absent from the backup, while invalid input
+-- leaves the last valid tree untouched.
+local replacementRecord = {
+    classID = 2,
+    specID = 70,
+    category = "utility",
+    spellID = 1002,
+    eventKey = "AVAILABLE",
+    eventTypeHint = EVENT_AVAILABLE,
+    voiceIdentity = "voice:b",
+    voiceName = "Voice B",
+    voicePath = "B.ogg",
+}
+local replaced, replacementCount, replacementInvalid = Store:ReplaceProfiles({
+    [2] = { [70] = { replacementRecord } },
+})
+Assert(replaced, "valid full CDM replacement should succeed")
+Equal(replacementCount, 1, "full CDM replacement should count the restored record")
+Equal(replacementInvalid, 0, "valid full CDM replacement should have no invalid rows")
+Assert(Store:GetEffectiveRecord(2, 70, "utility:1002:AVAILABLE"),
+    "full CDM replacement should restore the backup record")
+Assert(Store:HasEffectiveRecord(2, 70, "utility:1002:AVAILABLE"),
+    "O(1) effective-record lookup should find a saved preset")
+Assert(not Store:GetEffectiveRecord(1, 73, otherRecordKey),
+    "full CDM replacement should remove records absent from the backup")
+local invalidReplace, invalidReplaceCount, invalidReplaceRows = Store:ReplaceProfiles({
+    [2] = { [70] = { { classID = 2, specID = 70 } } },
+})
+Assert(not invalidReplace, "invalid full CDM replacement should fail")
+Equal(invalidReplaceCount, 0, "failed full CDM replacement should restore no rows")
+Assert(invalidReplaceRows > 0, "failed full CDM replacement should report invalid rows")
+Assert(Store:GetEffectiveRecord(2, 70, "utility:1002:AVAILABLE"),
+    "failed full CDM replacement must preserve the previous profile tree")
+
+-- Collection deletion uses the scope-independent batch path: it removes local
+-- presets from inactive specs and leaves tombstones for native CDM cleanup.
+local originalScheduleEvaluation = Sync.ScheduleEvaluation
+local batchScheduled = false
+Sync.ScheduleEvaluation = function(_, reason)
+    batchScheduled = reason == "preset_collection_deleted_local"
+end
+local batchOK, batchCount = Service:DeletePresetEntriesLocalBatch({
+    "cdmpreset:2:70:utility:1002:AVAILABLE",
+})
+Assert(batchOK, "collection batch deletion should accept an inactive-spec preset")
+Equal(batchCount, 1, "collection batch deletion should count removed presets")
+Assert(not Store:GetEffectiveRecord(2, 70, "utility:1002:AVAILABLE"),
+    "collection batch deletion should remove the effective preset")
+Assert(not Store:HasEffectiveRecord(2, 70, "utility:1002:AVAILABLE"),
+    "O(1) effective-record lookup should reject a removed preset")
+Assert(Store:GetPendingRemoval(2, 70, "utility:1002:AVAILABLE"),
+    "collection batch deletion should retain a native-alert cleanup tombstone")
+Assert(batchScheduled, "collection batch deletion should schedule one CDM evaluation")
+Sync.ScheduleEvaluation = originalScheduleEvaluation
 
 print("CDM explicit apply regression tests passed")

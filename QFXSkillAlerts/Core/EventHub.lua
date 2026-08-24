@@ -17,6 +17,12 @@ local EVENTS = {
     "PLAYER_REGEN_ENABLED",
     "PLAYER_EQUIPMENT_CHANGED",
     "BAG_UPDATE_DELAYED",
+    "MAIL_SHOW",
+    "MAIL_CLOSED",
+    "TRADE_SHOW",
+    "TRADE_CLOSED",
+    "TRADE_SKILL_SHOW",
+    "TRADE_SKILL_CLOSE",
 }
 
 local function Call(handlers, name, ...)
@@ -75,7 +81,21 @@ function EventHub:Dispatch(event, ...)
     elseif event == "UNIT_AURA" then
         local unit, updateInfo = ...
         return Call(handlers, "OnUnitAura", unit, updateInfo)
-    elseif event == "PLAYER_EQUIPMENT_CHANGED" or event == "BAG_UPDATE_DELAYED" then
+    elseif event == "PLAYER_EQUIPMENT_CHANGED" then
         return Call(handlers, "OnItemInventoryChanged", event)
+    elseif event == "BAG_UPDATE_DELAYED" then
+        return Call(handlers, "OnBagUpdateDelayed")
+    elseif event == "MAIL_SHOW" then
+        return Call(handlers, "OnInventoryInteractionOpened", "MAIL")
+    elseif event == "MAIL_CLOSED" then
+        return Call(handlers, "OnInventoryInteractionClosed", "MAIL", event)
+    elseif event == "TRADE_SHOW" then
+        return Call(handlers, "OnInventoryInteractionOpened", "TRADE")
+    elseif event == "TRADE_CLOSED" then
+        return Call(handlers, "OnInventoryInteractionClosed", "TRADE", event)
+    elseif event == "TRADE_SKILL_SHOW" then
+        return Call(handlers, "OnTradeSkillShow")
+    elseif event == "TRADE_SKILL_CLOSE" then
+        return Call(handlers, "OnTradeSkillClose")
     end
 end

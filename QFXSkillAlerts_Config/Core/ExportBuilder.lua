@@ -129,6 +129,18 @@ local function BuildEntryExportRecord(classID, specID, index)
 end
 
 function Builder:ExportEntryString(entryKey)
+    if tostring(entryKey or "") == "bloodlust" then
+        local db = EnsureRootDB()
+        if type(db.bloodlustConfig) ~= "table" then
+            print("[QFX-SA] " .. L("MSG_EXPORT_ENTRY_NOT_FOUND"))
+            return ""
+        end
+        return EncodeExportPayload({
+            type = "bloodlust",
+            version = 1,
+            bloodlustConfig = DeepCopyTable(db.bloodlustConfig),
+        })
+    end
     local classID, specID, index = ParseEntryKey(entryKey)
     local record = BuildEntryExportRecord(classID, specID, index)
     if not record then
@@ -155,6 +167,7 @@ function Builder:ExportCollectionString(groupKey)
     local entries = {}
     local exportedEntryKeys = {}
     local groups = {}
+    local cdmVoiceProfiles = {}
 
     local function collectGroup(gid, seen)
         gid = tostring(gid or "")
@@ -180,6 +193,17 @@ function Builder:ExportCollectionString(groupKey)
             local _, childGroupID = IsSameScopeGroupRef(classID, specID, ref)
             if childGroupID and type(scope.groups[childGroupID]) == "table" then
                 collectGroup(childGroupID, seen)
+            elseif CollectionStore.IsCDMEntryKey and CollectionStore.IsCDMEntryKey(ref) then
+                local parsed = type(api.ParseCDMVoiceSavedKey) == "function" and api.ParseCDMVoiceSavedKey(ref) or nil
+                local record = parsed and type(api.GetCDMVoicePresetRecord) == "function"
+                    and api.GetCDMVoicePresetRecord(parsed.classID, parsed.specID, parsed.recordKey) or nil
+                if type(record) == "table" then
+                    cdmVoiceProfiles[parsed.classID] = cdmVoiceProfiles[parsed.classID] or {}
+                    cdmVoiceProfiles[parsed.classID][parsed.specID] = cdmVoiceProfiles[parsed.classID][parsed.specID] or {}
+                    local exportedRecord = DeepCopyTable(record)
+                    exportedRecord.pendingApply = nil
+                    cdmVoiceProfiles[parsed.classID][parsed.specID][parsed.recordKey] = exportedRecord
+                end
             else
                 local key, rowClassID, rowSpecID, rowIndex = EntryRefToKey(classID, specID, ref)
                 if key and not exportedEntryKeys[key] then
@@ -209,6 +233,7 @@ function Builder:ExportCollectionString(groupKey)
         group = rootGroup,
         groups = groups,
         entries = entries,
+        cdmVoiceProfiles = next(cdmVoiceProfiles) and cdmVoiceProfiles or nil,
     })
 end
 

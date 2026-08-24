@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.0.219 - 2026-08-24
+
+- Added Cooldown Manager presets to the saved-entry list with ordering and collection membership support; deleting a collection now deletes its contained CDM presets, and stale collection references are cleaned automatically.
+- Kept saved-list work out of combat-sensitive runtime paths and reduced configuration-screen cost with cached snapshots, layout reuse, and deferred export serialization.
+- Added an optional fixed-cooldown text countdown using the shared runtime update loop, including compact minute-and-second formatting such as `1m5s`.
+- Split the fixed-cooldown load-talent filter from the talent-based cooldown override, with separate talent ID/name controls and migration of existing settings.
+- Fixed Bloodlust built-in, shared, and custom voice selection/playback; exposed the global Bloodlust configuration as a single saved entry with single-entry import/export support.
+- Extended full and single-entry import/export paths for the new countdown, talent, collection, CDM, and Bloodlust fields while preserving replacement semantics and stale-reference cleanup.
+- Removed redundant configuration code, strengthened the dead-code scan, and added regression coverage for the new saved-entry, import/export, countdown, talent, Bloodlust, and performance-sensitive behavior.
+
 ## 1.0.207 - 2026-08-03
 
 - Added early channel-gating in the cooldown tick loop so disabled voice or visual channels skip their entire evaluation branch per tick, reducing per-frame work for cooldowns that only use one alert type.

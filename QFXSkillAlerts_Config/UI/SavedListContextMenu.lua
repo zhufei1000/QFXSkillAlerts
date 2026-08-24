@@ -207,6 +207,31 @@ function ContextMenu:OpenEntryMenu(list, key, entryType)
         return
     end
 
+    if tostring(entryType or "") == "bloodlust" then
+        self:Open(list, {
+            {
+                text = L("EDIT_ENTRY"),
+                func = function()
+                    if list and type(list.SelectKey) == "function" then
+                        list:SelectKey(key, entryType)
+                    end
+                    if NS.UI and NS.UI.EditorFrame then
+                        NS.UI.EditorFrame:OpenForEdit()
+                    end
+                end,
+            },
+            {
+                text = L("EXPORT_ENTRY"),
+                func = function()
+                    if NS.UI and NS.UI.MainFrame and NS.AceOptions and type(NS.AceOptions.ExportEntryString) == "function" then
+                        NS.UI.MainFrame:OpenExportDialog(L("EXPORT_ENTRY"), NS.AceOptions:ExportEntryString(key))
+                    end
+                end,
+            },
+        })
+        return
+    end
+
     self:Open(list, {
         {
             text = L("EDIT_ENTRY"),

@@ -149,11 +149,6 @@ function Registry:RepairStoredMappings()
     end
 end
 
-function Registry:GetPayloadForSound(name, path)
-    local identity = self:BuildIdentity(name, path)
-    return identity and self:GetOrCreatePayload(identity) or nil
-end
-
 function Registry:GetIdentityForPayload(payload)
     if not IsValidPayload(payload) then
         return nil

@@ -349,11 +349,21 @@ function Layout.InstallSpellIdAutofill(editor, editBox)
     end)
 end
 
-function Layout.InstallTalentIdAutofill(editor, editBox)
+function Layout.InstallTalentIdAutofill(editor, editBox, idField, nameField)
+    idField = tostring(idField or "talentId")
+    nameField = tostring(nameField or "talentName")
     local function autofillFromInput()
         editor:PullFromWidgets()
-        if NS.AceOptions and type(NS.AceOptions.AutofillFromTalentId) == "function" then
+        if idField == "talentId" and NS.AceOptions and type(NS.AceOptions.AutofillFromTalentId) == "function" then
             NS.AceOptions:AutofillFromTalentId()
+        else
+            local state = NS.AceOptions and NS.AceOptions.GetState and NS.AceOptions:GetState() or {}
+            local talentId = tonumber(state[idField]) or 0
+            if talentId <= 0 then
+                state[nameField] = ""
+            elseif NS.API and type(NS.API.ResolveTalentName) == "function" then
+                state[nameField] = tostring(NS.API.ResolveTalentName(talentId) or "")
+            end
         end
         editor:PushToWidgets()
     end

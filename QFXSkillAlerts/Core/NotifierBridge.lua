@@ -59,6 +59,22 @@ function Bridge:HideVisualAlerts(exceptKind)
     return false
 end
 
+function Bridge:UpdateCooldownCountdown(cfg, remaining, primaryKey)
+    local notifier = GetNotifier()
+    if notifier and type(notifier.UpdateCooldownCountdown) == "function" then
+        return notifier:UpdateCooldownCountdown(cfg, remaining, primaryKey)
+    end
+    return false
+end
+
+function Bridge:HideCooldownCountdown(primaryKey)
+    local notifier = GetNotifier()
+    if notifier and type(notifier.HideCooldownCountdown) == "function" then
+        return notifier:HideCooldownCountdown(primaryKey)
+    end
+    return false
+end
+
 function Bridge:RefreshActiveVisualForKey(primaryKey, cfg, fallbackText)
     local notifier = GetNotifier()
     if notifier and type(notifier.RefreshActiveVisualForKey) == "function" then

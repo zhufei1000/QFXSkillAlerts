@@ -107,7 +107,7 @@ function ItemResolveQueue:ResolveAllStored(quiet)
     return changed
 end
 
-function ItemResolveQueue:ResolvePending()
+function ItemResolveQueue:ResolvePending(suppressRefresh)
     if IsCombatLocked() then
         return false
     end
@@ -144,7 +144,7 @@ function ItemResolveQueue:ResolvePending()
         end
     end
 
-    if changed then
+    if changed and suppressRefresh ~= true then
         if type(callbacks.rebuildRuntimeConfig) == "function" then
             callbacks.rebuildRuntimeConfig()
         end
@@ -163,16 +163,6 @@ function ItemResolveQueue:ResolvePending()
     end
 
     return changed
-end
-
-function ItemResolveQueue:GetPendingCount()
-    local count = 0
-    for _, entries in pairs(pending) do
-        if type(entries) == "table" then
-            count = count + #entries
-        end
-    end
-    return count
 end
 
 local function RunQueueStep(callback)

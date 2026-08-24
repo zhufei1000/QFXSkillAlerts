@@ -157,6 +157,36 @@ local function IsChannelWorkDone(enabled, durationEnabled, notified)
     return notified == true
 end
 
+-- Keep a record in the hot update loop only while it can still change an
+-- alert.  Disabled channels and finite channels that already fired have no
+-- remaining work; untimed visuals stay live because their condition may still
+-- cross back to false and need to hide the active frame.
+local function HasPendingAlertWork(cd)
+    if type(cd) ~= "table" then
+        return false
+    end
+    if cd.voiceEnabled ~= false and cd.voiceNotified ~= true then
+        return true
+    end
+    if cd.imageEnabled == true
+        and (cd.imageDurationEnabled ~= true or cd.imageNotified ~= true) then
+        return true
+    end
+    if cd.textEnabled == true and cd.textCooldownCountdown == true then
+        return true
+    end
+    if cd.textEnabled == true
+        and (cd.textDurationEnabled ~= true or cd.textNotified ~= true) then
+        return true
+    end
+    return cd.visualActive == true
+end
+
+local function ConfigHasAlertWork(cfg)
+    return type(cfg) == "table"
+        and (cfg.voiceEnabled ~= false or cfg.imageEnabled == true or cfg.textEnabled == true)
+end
+
 local function ClearDisabledActiveVisual(cd)
     if cd.visualActive ~= true then
         return false
@@ -186,14 +216,15 @@ local function CheckAndUpdateVisualChannels(cd, remaining)
     -- cooldown resets, so skip the (relatively costly) condition evaluation
     -- entirely instead of recomputing the same "already notified" result on
     -- every OnUpdate tick for the rest of the cooldown.
+    local conditionTextEnabled = cd.textEnabled == true and cd.textCooldownCountdown ~= true
     if IsChannelWorkDone(cd.imageEnabled, cd.imageDurationEnabled, cd.imageNotified)
-        and IsChannelWorkDone(cd.textEnabled, cd.textDurationEnabled, cd.textNotified) then
+        and IsChannelWorkDone(conditionTextEnabled, cd.textDurationEnabled, cd.textNotified) then
         return false
     end
 
     local imageReady = cd.imageEnabled == true and
     EvaluateCooldownCondition(cd.imageConditionOp, cd.imageConditionTime, remaining, cd.previousRemaining)
-    local textReady = cd.textEnabled == true and
+    local textReady = conditionTextEnabled and
     EvaluateCooldownCondition(cd.textConditionOp, cd.textConditionTime, remaining, cd.previousRemaining)
     local channel = nil
     if imageReady and textReady then
@@ -251,16 +282,16 @@ function Runtime:Configure(opts)
     callbacks.playReady = opts.playReady
     callbacks.playCastSuccess = opts.playCastSuccess
     callbacks.hideVisual = opts.hideVisual
+    callbacks.updateCountdown = opts.updateCountdown
+    callbacks.hideCountdown = opts.hideCountdown
     callbacks.resolveObjectName = opts.resolveObjectName
     return true
 end
 
+-- Used by the regression tests (tests/test_runtime_hotpaths.lua) to inspect
+-- the active cooldown state; not part of the production call path.
 function Runtime:GetCooldownTable()
     return cooldowns
-end
-
-function Runtime:GetDelayedCastSuccessTable()
-    return delayedCastSuccess
 end
 
 local function StopUpdate()
@@ -305,9 +336,16 @@ function Runtime:SyncCooldownState(spellId, now)
     end
 
     now = tonumber(now) or GetTime()
-    local maxCharge = math.max(1, math.floor(tonumber(cd.charge) or 1))
+    -- maxCharge is cached on the record when the cooldown starts; the hot
+    -- loop reads it instead of re-converting cd.charge on every tick.
+    local maxCharge = cd.maxCharge
+    if not maxCharge or maxCharge < 1 then
+        maxCharge = math.max(1, math.floor(tonumber(cd.charge) or 1))
+        cd.maxCharge = maxCharge
+    end
     local singleCD = tonumber(cd.singleCD) or 0
     if singleCD <= 0 then
+        SafeCall("hideCountdown", spellId)
         cooldowns[spellId] = nil
         return nil
     end
@@ -341,7 +379,10 @@ function Runtime:EstimateCharges(cd)
     if not cd then
         return 0
     end
-    local maxCharge = math.max(1, math.floor(tonumber(cd.charge) or 1))
+    local maxCharge = cd.maxCharge
+    if not maxCharge or maxCharge < 1 then
+        maxCharge = math.max(1, math.floor(tonumber(cd.charge) or 1))
+    end
     local currentCharge = math.floor(tonumber(cd.currentCharge) or 0)
     if currentCharge < 0 then
         currentCharge = 0
@@ -362,7 +403,10 @@ function Runtime:ProcessCooldownRecord(primaryKey, cd, now, processVoice)
         return false
     end
 
-    local maxCharge = math.max(1, math.floor(tonumber(cd.charge) or 1))
+    local maxCharge = cd.maxCharge
+    if not maxCharge or maxCharge < 1 then
+        maxCharge = math.max(1, math.floor(tonumber(cd.charge) or 1))
+    end
     local isFull = self:EstimateCharges(cd) >= maxCharge
     local remaining = 0
     if not isFull then
@@ -376,9 +420,23 @@ function Runtime:ProcessCooldownRecord(primaryKey, cd, now, processVoice)
     if cd.imageEnabled == true or cd.textEnabled == true or cd.visualActive == true then
         CheckAndUpdateVisualChannels(cd, remaining)
     end
+    if cd.textEnabled == true and cd.textCooldownCountdown == true and not isFull then
+        local countdownSecond = math.max(0, math.ceil(remaining - 0.001))
+        if cd.countdownSecond ~= countdownSecond or cd.countdownVisible ~= true then
+            cd.countdownVisible = SafeCall("updateCountdown", cd, remaining, primaryKey) == true
+            cd.countdownSecond = countdownSecond
+        end
+    elseif cd.countdownVisible == true or cd.countdownSecond ~= nil then
+        SafeCall("hideCountdown", primaryKey)
+        cd.countdownVisible = false
+        cd.countdownSecond = nil
+    end
     cd.previousRemaining = remaining
 
-    if isFull then
+    -- Multi-charge records must retain their charge state between casts even
+    -- after the current alert has fired. Single-charge records have no such
+    -- bookkeeping requirement and can leave the hot loop immediately.
+    if isFull or (maxCharge == 1 and not HasPendingAlertWork(cd)) then
         cooldowns[primaryKey] = nil
         return false
     end
@@ -416,7 +474,10 @@ function Runtime:ApplyEditorVisualState(primaryKey, cfg)
         return false
     end
 
-    local maxCharge = math.max(1, math.floor(tonumber(cd.charge) or 1))
+    local maxCharge = cd.maxCharge
+    if not maxCharge or maxCharge < 1 then
+        maxCharge = math.max(1, math.floor(tonumber(cd.charge) or 1))
+    end
     local isFull = self:EstimateCharges(cd) >= maxCharge
     local remaining = 0
     if not isFull then
@@ -444,6 +505,9 @@ function Runtime:RefreshRuntimeCooldowns(mappedRuntimeCfg)
         elseif cfgMap then
             if cd and cd.visualActive == true then
                 SafeCall("hideVisual", primaryKey)
+            end
+            if cd and (cd.countdownVisible == true or cd.countdownSecond ~= nil) then
+                SafeCall("hideCountdown", primaryKey)
             end
             cooldowns[primaryKey] = nil
             cd = nil
@@ -556,6 +620,7 @@ ApplyAlertFields = function(target, cfg)
     target.imageX = tonumber(cfg.imageX) or 0
     target.imageY = tonumber(cfg.imageY) or 120
     target.textEnabled = cfg.textEnabled == true
+    target.textCooldownCountdown = cfg.textCooldownCountdown == true
     target.textConditionOp = NormalizeConditionOp(cfg.textConditionOp)
     target.textConditionTime = NormalizeConditionTime(cfg.textConditionTime, target.cooldownAlertTime)
     target.textAlert = tostring(cfg.textAlert or "")
@@ -591,8 +656,18 @@ function Runtime:StartCooldown(spellId, mappedSpellToPrimary, mappedRuntimeCfg)
         return
     end
 
+    -- A saved cooldown with every output channel disabled has nothing to
+    -- announce.  Do not create an active timer that would otherwise wake the
+    -- shared OnUpdate loop for the whole cooldown duration.
+    if not ConfigHasAlertWork(cfg) then
+        return
+    end
+
     if cfg.imageEnabled == true or cfg.textEnabled == true then
         SafeCall("hideVisual", primaryKey)
+    end
+    if cfg.textEnabled == true and cfg.textCooldownCountdown == true then
+        SafeCall("hideCountdown", primaryKey)
     end
 
     -- 12.0.5：急速API在受污染插件逻辑中可能返回 Secret Number。
@@ -615,6 +690,7 @@ function Runtime:StartCooldown(spellId, mappedSpellToPrimary, mappedRuntimeCfg)
         cd.primaryKey = primaryKey
         cd.singleCD = singleCD
         cd.charge = maxCharge
+        cd.maxCharge = maxCharge
         cd.spellName = displayName
         cd.objectType = cfg.objectType
         cd.objectID = cfg.objectID or cfg.spellId
@@ -629,6 +705,8 @@ function Runtime:StartCooldown(spellId, mappedSpellToPrimary, mappedRuntimeCfg)
             cd.voiceNotified = false
             cd.imageNotified = false
             cd.textNotified = false
+            cd.countdownSecond = nil
+            cd.countdownVisible = false
             cd.visualActive = false
             cd.visualChannel = nil
             cd.previousRemaining = nil
@@ -646,6 +724,7 @@ function Runtime:StartCooldown(spellId, mappedSpellToPrimary, mappedRuntimeCfg)
                 primaryKey = primaryKey,
                 singleCD = singleCD,
                 charge = maxCharge,
+                maxCharge = maxCharge,
                 currentCharge = currentCharge,
                 nextChargeAt = now + singleCD,
                 spellName = displayName,
@@ -654,6 +733,8 @@ function Runtime:StartCooldown(spellId, mappedSpellToPrimary, mappedRuntimeCfg)
                 voiceNotified = (currentCharge > 0),
                 imageNotified = (currentCharge > 0),
                 textNotified = (currentCharge > 0),
+                countdownSecond = nil,
+                countdownVisible = false,
                 visualActive = false,
                 visualChannel = nil,
                 previousRemaining = nil,

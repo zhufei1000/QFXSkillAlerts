@@ -387,6 +387,13 @@ local function GetScrollableDropdownPopup()
             RenderRows()
             return
         end
+        if owner.qfxsaToggleClear and owner.qfxsaValue ~= nil and item.value == owner.qfxsaValue then
+            -- Clicking the already-selected item again cancels the selection
+            -- instead of just re-selecting it.
+            SelectDropdownValue(owner, "", "")
+            popup:Hide()
+            return
+        end
         SelectDropdownValue(owner, item.value, item.text)
         popup:Hide()
     end
@@ -558,7 +565,10 @@ local function GetScrollableDropdownPopup()
         end
         popup.filteredItems = filtered
         popup.noResults = #filtered == 0
-        ConfigureListLayout(true)
+        -- An empty search shows the full list again; keep the current scroll
+        -- so opening the popup (or clearing the filter) never yanks the list
+        -- back to the top, away from the selected item.
+        ConfigureListLayout(normalized ~= "")
     end
 
     scrollBar:SetScript("OnValueChanged", function(_, value)
@@ -680,6 +690,13 @@ function Popup:Show(dropdown)
             popup.filteredItems[#popup.filteredItems + 1] = item
         end
     end
+    -- Start search mode before positioning the popup.  The initial SetText in
+    -- qfxsaBeginSearch fires OnTextChanged on the first open (the box never had
+    -- text before); UpdateSearch now preserves the scroll for an empty search,
+    -- and the jump to the selected item below is the last step either way.
+    if dropdown.qfxsaSearchable and type(dropdown.qfxsaBeginSearch) == "function" then
+        dropdown:qfxsaBeginSearch()
+    end
     popup.ConfigureListLayout(true)
 
     popup:ClearAllPoints()
@@ -702,10 +719,10 @@ function Popup:Show(dropdown)
     if popup.hasScroll and selectedIndex and selectedIndex > 1 then
         initialOffset = selectedIndex - math.ceil((popup.visibleRows or 1) / 2)
     end
-    popup.SetPopupScroll(Clamp(initialOffset, 0, popup.maxOffset or 0))
+    local finalOffset = Clamp(initialOffset, 0, popup.maxOffset or 0)
     popup:Show()
     popup.RenderRows()
-    if dropdown.qfxsaSearchable and type(dropdown.qfxsaBeginSearch) == "function" then
-        dropdown:qfxsaBeginSearch()
-    end
+    -- Jump to the selected item last so no re-layout triggered by showing the
+    -- popup or starting search mode can override it.
+    popup.SetPopupScroll(finalOffset)
 end

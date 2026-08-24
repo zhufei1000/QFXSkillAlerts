@@ -354,6 +354,18 @@ function Util:SanitizeEntryForImport(entry)
         objectType = OBJECT_TYPE_SPELL
     end
 
+    local hasIndependentLoadTalent = entry.loadTalentEnabled ~= nil
+        or entry.loadTalentId ~= nil or entry.loadTalentName ~= nil
+    local loadTalentEnabled = entry.loadTalentEnabled == true
+    local loadTalentId = tonumber(entry.loadTalentId) or 0
+    local loadTalentName = TrimText(entry.loadTalentName or "")
+    if not hasIndependentLoadTalent and entry.talentLoadFilter == true
+        and entry.checkTalent == true and (tonumber(entry.talentId) or 0) > 0 then
+        loadTalentEnabled = true
+        loadTalentId = tonumber(entry.talentId) or 0
+        loadTalentName = TrimText(entry.talentName or "")
+    end
+
     local sanitized = {
         entryType = entryType,
         objectType = objectType,
@@ -366,10 +378,16 @@ function Util:SanitizeEntryForImport(entry)
         triggerSpellName = TrimText(entry.triggerSpellName or ""),
         baseCD = entryType == "cooldown" and (tonumber(string.format("%.2f", tonumber(entry.baseCD) or 0)) or 0) or 0,
         fixedCD = true,
-        checkTalent = entryType == "cooldown" and entry.checkTalent == true and (tonumber(entry.talentId) or 0) > 0,
-        talentId = entryType == "cooldown" and math.floor(tonumber(entry.talentId) or 0) or 0,
-        talentName = entryType == "cooldown" and TrimText(entry.talentName or "") or "",
-        talentCD = entryType == "cooldown" and (tonumber(string.format("%.2f", tonumber(entry.talentCD) or 0)) or 0) or 0,
+        checkTalent = objectType ~= OBJECT_TYPE_ITEM and entryType == "cooldown"
+            and entry.checkTalent == true and (tonumber(entry.talentId) or 0) > 0,
+        talentId = objectType ~= OBJECT_TYPE_ITEM and math.floor(tonumber(entry.talentId) or 0) or 0,
+        talentName = objectType ~= OBJECT_TYPE_ITEM and TrimText(entry.talentName or "") or "",
+        talentCD = objectType ~= OBJECT_TYPE_ITEM and entryType == "cooldown"
+            and (tonumber(string.format("%.2f", tonumber(entry.talentCD) or 0)) or 0) or 0,
+        talentLoadFilter = false,
+        loadTalentEnabled = objectType ~= OBJECT_TYPE_ITEM and loadTalentEnabled and loadTalentId > 0,
+        loadTalentId = objectType ~= OBJECT_TYPE_ITEM and loadTalentEnabled and math.floor(loadTalentId) or 0,
+        loadTalentName = objectType ~= OBJECT_TYPE_ITEM and loadTalentEnabled and loadTalentName or "",
         chargeInput = 1,
         notifyMode = notifyMode,
         ttsText = tostring(entry.ttsText or ""),
@@ -399,6 +417,8 @@ function Util:SanitizeEntryForImport(entry)
         imageX = tonumber(entry.imageX) or 0,
         imageY = tonumber(entry.imageY) or 120,
         textEnabled = entry.textEnabled == true,
+        textCooldownCountdown = entryType == "cooldown" and entry.textEnabled == true
+            and entry.textCooldownCountdown == true,
         textConditionOp = entryType == "cooldown" and NormalizeConditionOp(entry.textConditionOp) or "<=",
         textConditionTime = entryType == "cooldown" and NormalizeConditionTime(entry.textConditionTime, entry.cooldownAlertTime or entry.alertLeadTime) or 0,
         textAlert = tostring(entry.textAlert or ""),
@@ -449,8 +469,4 @@ function Util:SanitizeEntryForImport(entry)
     end
 
     return sanitized
-end
-
-function Util:GetGlobalScopeIDs()
-    return ALL_CLASSES_ID, ALL_SPECS_ID
 end

@@ -10,17 +10,12 @@ local L = NS.L or function(key, ...)
     return tostring(key)
 end
 local CONST = NS.Constants or {}
-local OPTION_NAME = L("OPTION_NAME")
 local ALL_CLASSES_ID = CONST.ALL_CLASSES_ID or 0
 local ALL_SPECS_ID = CONST.ALL_SPECS_ID or 0
 
 -- This file keeps legacy NS.AceOptions method names available while the real
 -- implementation lives in smaller modules. UI code can continue using the old
 -- calls, but AceOptions.lua no longer has to carry every bridge wrapper.
-
-function NS.AceOptions:GetOptionName()
-    return NS.ADDON_DISPLAY_NAME or OPTION_NAME
-end
 
 function NS.AceOptions:GetState()
     if NS.OptionsState and type(NS.OptionsState.GetState) == "function" then
@@ -95,6 +90,12 @@ function NS.AceOptions:GetAllSavedEntryList()
         return NS.EntryStore:GetAllSavedEntryList(self)
     end
     return {}
+end
+
+function NS.AceOptions:GetBloodlustSavedEntry()
+    if NS.EntryStore and type(NS.EntryStore.GetBloodlustSavedEntry) == "function" then
+        return NS.EntryStore:GetBloodlustSavedEntry(self)
+    end
 end
 
 function NS.AceOptions:GetSavedListLayoutForScope(classID, specID, includeScopeText)

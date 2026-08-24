@@ -5,7 +5,6 @@ NS.UI = NS.UI or {}
 NS.UI.EditorActions = NS.UI.EditorActions or {}
 
 local Actions = NS.UI.EditorActions
-local EditorDrafts = NS.UI.EditorDrafts or {}
 local Widgets = NS.UI.Widgets
 local VisualPreview = NS.UI.VisualPositionPreview or {}
 local Layout = NS.UI.EditorLayout or {}
@@ -21,12 +20,6 @@ local function GetState()
         return NS.AceOptions:GetState()
     end
     return {}
-end
-
-local function SaveEditorDraft(state, entryType)
-    if EditorDrafts and type(EditorDrafts.Save) == "function" then
-        return EditorDrafts:Save(state, entryType)
-    end
 end
 
 local function Pull(owner)
@@ -88,6 +81,7 @@ function Actions:Install(owner, frame)
     local actionSave = widgets.actionSave
     local actionTest = widgets.actionTest
     local checkTalent = widgets.checkTalent
+    local loadTalentEnabled = widgets.loadTalentEnabled
     local delayEnabled = widgets.delayEnabled
     local voiceEnabled = widgets.voiceEnabled
     local imageEnabled = widgets.imageEnabled
@@ -110,6 +104,7 @@ function Actions:Install(owner, frame)
     local itemLoadSameName = widgets.itemLoadSameName
     local imageDurationEnabled = widgets.imageDurationEnabled
     local textDurationEnabled = widgets.textDurationEnabled
+    local textCooldownCountdown = widgets.textCooldownCountdown
     local textAttachDrop = widgets.textAttachDrop
     local textVAlignDrop = widgets.textVAlignDrop
     local textHAlignDrop = widgets.textHAlignDrop
@@ -568,6 +563,7 @@ function Actions:Install(owner, frame)
             state.objectType = (self and self.GetChecked and self:GetChecked() == true) and "item" or "spell"
             if state.objectType == "item" then
                 state.checkTalent = false
+                state.loadTalentEnabled = false
                 state.itemLoadMode = state.itemLoadMode or ITEM_LOAD_NONE
             else
                 state.itemLoadMode = ITEM_LOAD_NONE
@@ -862,6 +858,29 @@ function Actions:Install(owner, frame)
                 state.talentName = ""
                 state.talentCD = 0
             end
+            Refresh(owner)
+        end)
+    end
+
+    if loadTalentEnabled then
+        loadTalentEnabled:SetScript("OnClick", function(button)
+            Pull(owner)
+            local state = GetState()
+            state.loadTalentEnabled = button:GetChecked() == true
+            state.talentLoadFilter = state.loadTalentEnabled
+            if not state.loadTalentEnabled then
+                state.loadTalentId = 0
+                state.loadTalentName = ""
+            end
+            Refresh(owner)
+        end)
+    end
+
+    if textCooldownCountdown then
+        textCooldownCountdown:SetScript("OnClick", function(button)
+            Pull(owner)
+            local state = GetState()
+            state.textCooldownCountdown = button:GetChecked() == true
             Refresh(owner)
         end)
     end

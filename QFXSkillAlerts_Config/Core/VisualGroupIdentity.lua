@@ -45,7 +45,6 @@ if type(Store.SaveEntry) == "function" and not Store.qfxsaVisualUIDSave then
         if result == true then
             local entry = Groups:GetSavedEntry(state.selectedKey)
             state.visualUID = Groups:EnsureVisualUID(entry, pending)
-            RefreshRuntime()
         end
         state._qfxPendingVisualUID = nil
         return result

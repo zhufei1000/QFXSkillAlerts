@@ -147,9 +147,15 @@ function Refresh:ToggleGroupCollapsed(list, groupKey)
     return true
 end
 
-function Refresh:Refresh(list)
+function Refresh:Refresh(list, allowCached)
     if not list then
         return false
+    end
+    if allowCached == true
+        and list._layoutDirty ~= true
+        and type(list._cachedLoadedEntries) == "table"
+        and type(list._cachedUnloadedEntries) == "table" then
+        return self:RenderCached(list)
     end
     if list._refreshBuilding then
         list._refreshQueuedAfterBuild = true
@@ -175,6 +181,8 @@ function Refresh:Refresh(list)
     list._cachedUnloadedEntries = unloadedEntries
     list._cachedLoadedDisplayCount = loadedDisplayCount
     list._cachedUnloadedDisplayCount = unloadedDisplayCount
+    list._layoutDirty = false
+    list._layoutDirtyReason = nil
 
     RenderEntryRows(list, state, selectedKey, loadedEntries, unloadedEntries, loadedDisplayCount, unloadedDisplayCount)
 

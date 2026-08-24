@@ -13,9 +13,12 @@ local ALL_SPECS_ID = CONST.ALL_SPECS_ID or 0
 local ALL_RACES_ID = CONST.ALL_RACES_ID or 0
 local OBJECT_TYPE_ITEM = CONST.OBJECT_TYPE_ITEM or "item"
 local OBJECT_TYPE_SPELL = CONST.OBJECT_TYPE_SPELL or "spell"
+local ITEM_LOAD_EQUIPPED = CONST.ITEM_LOAD_EQUIPPED or "equipped"
+local ITEM_LOAD_BAGS = CONST.ITEM_LOAD_BAGS or "bags"
 local MODE_SOUND = CONST.MODE_SOUND or "sound"
 
 local callbacks = {}
+local itemLoadEventNeeds = { equipped = false, bags = false }
 
 local function SafeCall(name, ...)
     local fn = callbacks[name]
@@ -203,6 +206,10 @@ function Builder:Configure(opts)
     return true
 end
 
+function Builder:GetItemLoadEventNeeds()
+    return itemLoadEventNeeds.equipped == true, itemLoadEventNeeds.bags == true
+end
+
 function Builder:Rebuild(spellToPrimary, runtimeCfg)
     if type(spellToPrimary) ~= "table" or type(runtimeCfg) ~= "table" then
         return false
@@ -210,6 +217,8 @@ function Builder:Rebuild(spellToPrimary, runtimeCfg)
 
     ClearTable(spellToPrimary)
     ClearTable(runtimeCfg)
+    itemLoadEventNeeds.equipped = false
+    itemLoadEventNeeds.bags = false
 
     local classID, specID = GetCurrentClassSpec()
     local raceID = GetCurrentRaceID()
@@ -221,6 +230,12 @@ function Builder:Rebuild(spellToPrimary, runtimeCfg)
                 local objectID = tonumber(entry.spellId) or 0
                 local objectType = ResolveObjectType(objectID, entry.objectType)
                 if objectType == OBJECT_TYPE_ITEM then
+                    local loadMode = tostring(entry.itemLoadMode or ""):lower()
+                    if loadMode == ITEM_LOAD_EQUIPPED then
+                        itemLoadEventNeeds.equipped = true
+                    elseif loadMode == ITEM_LOAD_BAGS then
+                        itemLoadEventNeeds.bags = true
+                    end
                     if not IsItemLoadRequirementMet(entry) then
                         objectID = 0
                     else
@@ -234,6 +249,17 @@ function Builder:Rebuild(spellToPrimary, runtimeCfg)
                 local fixedCD = tonumber(entry.baseCD) or 0
                 local talentCD = tonumber(entry.talentCD) or 0
                 local effectiveCD = (talentOK and talentCD > 0) and talentCD or fixedCD
+                local hasIndependentLoadTalent = entry.loadTalentEnabled ~= nil
+                    or entry.loadTalentId ~= nil or entry.loadTalentName ~= nil
+                local loadTalentId = tonumber(entry.loadTalentId) or 0
+                local loadTalentEnabled = entry.loadTalentEnabled == true and loadTalentId > 0
+                if not hasIndependentLoadTalent and entry.talentLoadFilter == true then
+                    loadTalentId = talentId
+                    loadTalentEnabled = checkTalent
+                end
+                if loadTalentEnabled and not IsTalentSelected(loadTalentId) then
+                    effectiveCD = 0
+                end
                 if objectID > 0 and triggerSpellID > 0 and effectiveCD > 0 then
                     local objectKey = MakeObjectKey(objectType, objectID)
                     -- 触发事件里拿到的是技能ID；物品会映射到该物品“使用时触发的技能ID”。
@@ -269,6 +295,7 @@ function Builder:Rebuild(spellToPrimary, runtimeCfg)
                         imageX = tonumber(entry.imageX) or 0,
                         imageY = tonumber(entry.imageY) or 120,
                         textEnabled = entry.textEnabled == true,
+                        textCooldownCountdown = entry.textCooldownCountdown == true,
                         textAlert = tostring(entry.textAlert or ""),
                         textSize = math.max(8, tonumber(entry.textSize) or 24),
                         textDurationEnabled = entry.textDurationEnabled == true,
