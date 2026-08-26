@@ -1,0 +1,310 @@
+local NS = rawget(_G, "QFXSkillAlertsNS") or {}
+_G.QFXSkillAlertsNS = NS
+
+NS.UI = NS.UI or {}
+NS.UI.MainFrame = NS.UI.MainFrame or {}
+NS.UI.MainFrameActions = NS.UI.MainFrameActions or {}
+
+local MainFrame = NS.UI.MainFrame
+local Widgets = NS.UI and NS.UI.Widgets or nil
+local Skin = NS.UI and NS.UI.Skin or nil
+local L = NS.L or function(key, ...) if select("#", ...) > 0 then return string.format(tostring(key), ...) end return tostring(key) end
+
+local function CreateButton(parent, text, width, height)
+    if Widgets and type(Widgets.CreateButton) == "function" then
+        return Widgets:CreateButton(parent, text, width, height)
+    end
+    local btn = CreateFrame("Button", nil, parent, "UIPanelButtonTemplate")
+    btn:SetSize(width or 160, height or 32)
+    btn:SetText(text or "")
+    return btn
+end
+
+local function CreateLabel(parent, text, template)
+    if Widgets and type(Widgets.CreateLabel) == "function" then
+        return Widgets:CreateLabel(parent, text, template or "GameFontHighlight")
+    end
+    local fs = parent:CreateFontString(nil, "ARTWORK", template or "GameFontHighlight")
+    fs:SetText(text or "")
+    return fs
+end
+
+local function EnsureAddTypeSelector(owner)
+    if owner.addTypeSelector then
+        return owner.addTypeSelector
+    end
+
+    local frame = CreateFrame("Frame", "QFXSkillAlertsAddTypeSelectorFrame", UIParent, "BackdropTemplate")
+    frame:SetSize(460, 480)
+    frame:SetPoint("CENTER", UIParent, "CENTER", 100, 0)
+    frame:SetFrameStrata("FULLSCREEN_DIALOG")
+    frame:SetFrameLevel(120)
+    frame:SetToplevel(true)
+    frame:EnableMouse(true)
+    frame:SetMovable(true)
+    frame:RegisterForDrag("LeftButton")
+    frame:SetScript("OnDragStart", frame.StartMoving)
+    frame:SetScript("OnDragStop", frame.StopMovingOrSizing)
+    frame:SetClampedToScreen(true)
+    frame:Hide()
+    if Widgets and type(Widgets.ApplyPanelChrome) == "function" then
+        Widgets:ApplyPanelChrome(frame, { footerHeight = 0 })
+    end
+    if frame.GetName and frame:GetName() then
+        tinsert(UISpecialFrames, frame:GetName())
+    end
+
+    local title = CreateLabel(frame, L("TITLE_SELECT_ALERT_TYPE"), "GameFontNormalLarge")
+    title:SetPoint("TOP", frame, "TOP", 0, -18)
+    title:SetWidth(380)
+    title:SetJustifyH("CENTER")
+    if Skin and Skin.StyleFont then Skin:StyleFont(title, "title") end
+
+    local desc = CreateLabel(frame, L("SELECT_ALERT_TYPE_DESC"), "GameFontHighlightSmall")
+    desc:SetPoint("TOP", title, "BOTTOM", 0, -8)
+    desc:SetWidth(390)
+    desc:SetJustifyH("CENTER")
+    if desc.SetWordWrap then desc:SetWordWrap(true) end
+    if Skin and Skin.StyleFont then Skin:StyleFont(desc, "muted") end
+
+    local close = CreateFrame("Button", nil, frame, "UIPanelCloseButton")
+    close:SetSize(28, 28)
+    close:SetPoint("TOPRIGHT", frame, "TOPRIGHT", -10, -10)
+    if Skin and Skin.SkinCloseButton then Skin:SkinCloseButton(close) end
+    close:SetScript("OnClick", function() frame:Hide() end)
+
+    local function AddChoice(entryType, label, hint, y, callback)
+        local btn = CreateButton(frame, label, 360, 44)
+        btn:SetPoint("TOP", frame, "TOP", 0, y)
+        btn:SetScript("OnClick", function()
+            frame:Hide()
+            if type(callback) == "function" then
+                callback()
+            elseif NS.UI and NS.UI.EditorFrame and type(NS.UI.EditorFrame.OpenForNew) == "function" then
+                -- Carry the destination explicitly through the intermediate
+                -- selector. Saved-list selection may change while this popup is
+                -- open and must not decide where the new entry is stored.
+                NS.UI.EditorFrame:OpenForNew(entryType, frame.collectionKey)
+            end
+        end)
+        local hintText = CreateLabel(frame, hint, "GameFontDisableSmall")
+        hintText:SetPoint("TOP", btn, "BOTTOM", 0, -3)
+        hintText:SetWidth(360)
+        hintText:SetJustifyH("CENTER")
+        if Skin and Skin.StyleFont then Skin:StyleFont(hintText, "muted") end
+        return btn, hintText
+    end
+
+    frame.cooldownBtn, frame.cooldownHint = AddChoice("cooldown", L("TAB_COOLDOWN"), L("SELECT_ALERT_TYPE_COOLDOWN_DESC"), -82)
+    frame.castBtn, frame.castHint = AddChoice("cast", L("TAB_CAST"), L("SELECT_ALERT_TYPE_CAST_DESC"), -156)
+    frame.eventBtn, frame.eventHint = AddChoice("event", L("TAB_EVENT_VOICE"), L("SELECT_ALERT_TYPE_EVENT_DESC"), -230)
+    frame.bloodlustBtn, frame.bloodlustHint = AddChoice("bloodlust", L("TAB_BLOODLUST"), L("SELECT_ALERT_TYPE_BLOODLUST_DESC"), -304)
+    frame.cdmVoiceBtn, frame.cdmVoiceHint = AddChoice("cdmVoice", L("CDM_VOICE"), L("CDM_VOICE_DESC"), -378, function()
+        if NS.UI and NS.UI.CDMVoiceEditor and type(NS.UI.CDMVoiceEditor.Open) == "function" then
+            NS.UI.CDMVoiceEditor:Open()
+        end
+    end)
+    frame.RefreshLocale = function(selfFrame)
+        title:SetText(L("TITLE_SELECT_ALERT_TYPE"))
+        desc:SetText(L(selfFrame.collectionMode and "SELECT_COLLECTION_ALERT_TYPE_DESC" or "SELECT_ALERT_TYPE_DESC"))
+        selfFrame.cooldownBtn:SetText(L("TAB_COOLDOWN"))
+        selfFrame.castBtn:SetText(L("TAB_CAST"))
+        selfFrame.eventBtn:SetText(L("TAB_EVENT_VOICE"))
+        selfFrame.bloodlustBtn:SetText(L("TAB_BLOODLUST"))
+        selfFrame.cdmVoiceBtn:SetText(L("CDM_VOICE"))
+        selfFrame.cooldownHint:SetText(L("SELECT_ALERT_TYPE_COOLDOWN_DESC"))
+        selfFrame.castHint:SetText(L("SELECT_ALERT_TYPE_CAST_DESC"))
+        selfFrame.eventHint:SetText(L("SELECT_ALERT_TYPE_EVENT_DESC"))
+        selfFrame.bloodlustHint:SetText(L("SELECT_ALERT_TYPE_BLOODLUST_DESC"))
+        selfFrame.cdmVoiceHint:SetText(L("CDM_VOICE_DESC"))
+    end
+
+    frame.SetCollectionMode = function(selfFrame, enabled)
+        enabled = enabled == true
+        selfFrame.collectionMode = enabled
+        selfFrame:SetHeight(enabled and 330 or 480)
+        desc:SetText(L(enabled and "SELECT_COLLECTION_ALERT_TYPE_DESC" or "SELECT_ALERT_TYPE_DESC"))
+        if enabled then
+            -- Bloodlust is one global setting and Cooldown Manager presets use
+            -- their own batch editor, so neither can be created as a member of
+            -- a collection.  The three ordinary saved-entry types can.
+            selfFrame.bloodlustBtn:Hide()
+            selfFrame.bloodlustHint:Hide()
+            selfFrame.cdmVoiceBtn:Hide()
+            selfFrame.cdmVoiceHint:Hide()
+        else
+            selfFrame.bloodlustBtn:Show()
+            selfFrame.bloodlustHint:Show()
+            selfFrame.cdmVoiceBtn:Show()
+            selfFrame.cdmVoiceHint:Show()
+        end
+    end
+
+    owner.addTypeSelector = frame
+    return frame
+end
+
+function MainFrame:OpenAddTypeSelector(collectionKey)
+    local frame = EnsureAddTypeSelector(self)
+    frame.collectionKey = tostring(collectionKey or "")
+    if frame.RefreshLocale then
+        frame:RefreshLocale()
+    end
+    if frame.SetCollectionMode then
+        frame:SetCollectionMode(frame.collectionKey ~= "")
+    end
+    frame:Show()
+    frame:Raise()
+end
+
+local function FindCDMSavedEntry(key)
+    local api = NS.API or {}
+    local entries = type(api.GetCDMVoiceSavedEntries) == "function" and api.GetCDMVoiceSavedEntries() or {}
+    for _, entry in ipairs(type(entries) == "table" and entries or {}) do
+        if tostring(entry.key or "") == tostring(key or "") then
+            return entry
+        end
+    end
+end
+
+local function EnsureCDMDeletePopup()
+    if not StaticPopupDialogs or StaticPopupDialogs.QFXSKILLALERTS_DELETE_CDM_VOICE then
+        return
+    end
+    StaticPopupDialogs.QFXSKILLALERTS_DELETE_CDM_VOICE = {
+        text = "%s",
+        button1 = YES,
+        button2 = NO,
+        timeout = 0,
+        whileDead = true,
+        hideOnEscape = true,
+        preferredIndex = 3,
+        OnAccept = function(_, data)
+            local api = NS.API or {}
+            if type(data) ~= "table" or type(api.DeleteCDMVoiceAlertByKey) ~= "function" then
+                return
+            end
+            local ok, reason = api.DeleteCDMVoiceAlertByKey(data.key)
+            if ok then
+                local state = NS.AceOptions and NS.AceOptions:GetState()
+                if state and tostring(state.selectedKey or "") == tostring(data.key or "") then
+                    state.selectedKey = nil
+                    state.entryType = "cooldown"
+                end
+                print("[QFX-SA] " .. L(reason == "reload_requested"
+                    and "CDM_DELETE_APPLYING" or "CDM_DELETED"))
+            else
+                local message = reason == "combat" and L("CDM_COMBAT_BLOCKED") or L("CDM_DELETE_FAILED")
+                print("[QFX-SA] " .. message)
+            end
+        end,
+    }
+end
+
+function MainFrame:DeleteCDMVoiceByKey(key)
+    if type(InCombatLockdown) == "function" and InCombatLockdown() then
+        print("[QFX-SA] " .. L("CDM_COMBAT_BLOCKED"))
+        return false
+    end
+    local entry = FindCDMSavedEntry(key)
+    if not entry then
+        print("[QFX-SA] " .. L("CDM_DELETE_FAILED"))
+        return false
+    end
+    EnsureCDMDeletePopup()
+    if type(StaticPopup_Show) ~= "function" then
+        return false
+    end
+    local text = L("CDM_DELETE_CONFIRM", entry.spellName or "", entry.eventText or "", entry.voiceName or "")
+    StaticPopup_Show("QFXSKILLALERTS_DELETE_CDM_VOICE", text, nil, { key = key })
+    return true
+end
+
+
+function MainFrame:BindActions(controls)
+    controls = controls or {}
+    local addBtn = controls.addBtn
+    local addGroupBtn = controls.addGroupBtn
+    local editBtn = controls.editBtn
+    local deleteBtn = controls.deleteBtn
+    local refreshBtn = controls.refreshBtn
+    local importBtn = controls.importBtn
+    local exportAllBtn = controls.exportAllBtn
+    local savedList = controls.savedList
+
+addBtn:SetScript("OnClick", function()
+    self:OpenAddTypeSelector()
+end)
+addGroupBtn:SetScript("OnClick", function()
+    self:OpenCollectionNameDialog()
+end)
+editBtn:SetScript("OnClick", function()
+    local selectedKey = tostring(NS.AceOptions:GetState().selectedKey or "")
+    local entryType = tostring(NS.AceOptions:GetState().entryType or "")
+    if entryType == "cdmVoice" then
+        NS.UI.CDMVoiceEditor:OpenForEdit(selectedKey)
+    elseif NS.AceOptions and type(NS.AceOptions.IsGroupKey) == "function" and NS.AceOptions:IsGroupKey(selectedKey) then
+        self:OpenRenameCollectionDialog(selectedKey)
+    else
+        NS.UI.EditorFrame:OpenForEdit()
+    end
+end)
+deleteBtn:SetScript("OnClick", function()
+    local selectedKey = tostring(NS.AceOptions:GetState().selectedKey or "")
+    local entryType = tostring(NS.AceOptions:GetState().entryType or "")
+    if entryType == "cdmVoice" then
+        self:DeleteCDMVoiceByKey(selectedKey)
+    elseif entryType == "bloodlust" then
+        return
+    elseif NS.AceOptions and type(NS.AceOptions.IsGroupKey) == "function" and NS.AceOptions:IsGroupKey(selectedKey) then
+        if NS.AceOptions:DeleteCollection(selectedKey, true) then
+            self:RequestRefresh("list")
+        end
+    else
+        NS.AceOptions:DeleteSelectedEntry(true)
+        self:RequestRefresh("list")
+    end
+end)
+refreshBtn:SetScript("OnClick", function()
+    local api = NS.API or {}
+    local synchronized = false
+    if type(api.SyncCurrentSpecCDMVoices) == "function" then
+        synchronized = api.SyncCurrentSpecCDMVoices("manual_refresh") == true
+    end
+    if not synchronized then
+        self:Refresh()
+    end
+end)
+importBtn:SetScript("OnClick", function()
+    self:OpenImportDialog()
+end)
+exportAllBtn:SetScript("OnClick", function()
+    if NS.AceOptions and type(NS.AceOptions.ExportFullString) == "function" then
+        self:OpenExportDialog(L("EXPORT_FULL_TITLE"), NS.AceOptions:ExportFullString())
+    end
+end)
+
+savedList:SetOnSelectionChanged(function(key, entryType, oldKey)
+    local state = NS.AceOptions:GetState()
+    key = tostring(key or "")
+    local isGroup = NS.AceOptions and type(NS.AceOptions.IsGroupKey) == "function" and NS.AceOptions:IsGroupKey(key)
+    state.selectedKey = key
+    if isGroup then
+        state.selectedCollectionKey = key
+    elseif entryType == "cdmVoice" then
+        state.selectedCollectionKey = nil
+        state.entryType = "cdmVoice"
+    else
+        state.selectedCollectionKey = nil
+        state.entryType = entryType or state.entryType or "cooldown"
+        NS.AceOptions:LoadSelectedEntry()
+    end
+    if savedList and type(savedList.UpdateSelectionOnly) == "function" then
+        savedList:UpdateSelectionOnly(oldKey, key)
+    end
+    if type(self.RefreshActionButtons) == "function" then
+        self:RefreshActionButtons()
+    end
+end)
+
+end

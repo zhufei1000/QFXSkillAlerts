@@ -1,0 +1,204 @@
+# Changelog
+
+## Unreleased
+
+## 1.0.226 - 2026-08-26
+
+- Fixed globally stored event alerts dropping out of a scoped collection when reordered against another entry in that collection. Entry targets now resolve their real collection location across all scopes, preferring group membership over global root layout metadata.
+- Fixed top-level alert creation inheriting a stale collection destination after a collection-targeted save. Explicit root creation now remains outside collections, and unused duplicate helper chains plus a stale move-controller wrapper were removed.
+- Fixed collection-targeted creation losing membership when globally stored alerts are created from a class/spec collection. The type selector now carries its destination explicitly, and global event entries can be dragged out of, reordered within, or moved back into scoped collections.
+- Fixed stale collection ID counters overwriting an existing group when a new group was created. Group IDs are now synchronized against every saved scope before creation, import, or cross-scope movement, preserving existing groups and their movable entries.
+- Fixed top-level group creation inheriting the selected group as an implicit parent. The Add Group button now always creates a root group; only the explicit context-menu child-group action creates nesting.
+- Added event-voice choices for role-check start, an incoming summon awaiting the player's confirmation, and an incoming resurrection targeting the player.
+- Collection context creation now opens the alert-type chooser for cooldown, cast-success, or event alerts, and saved-entry context menus can move alerts directly into any existing collection without drag-and-drop.
+- Event voice saved entries are now distinguished by their load locations. The same event can keep separate world, Delve, dungeon, or raid variants, while overlapping conditions (including broad modes that cover an existing specific selection) are rejected to prevent duplicate playback.
+- Runtime selection, collection deletion, deletion markers, legacy migration, and single/collection imports now retain the exact event load-condition variant. Disjoint variants import independently; exact imports replace only their matching variant; overlapping imports are rejected without modifying existing entries.
+- Added a "Specific current-season instances" mode for event voices. Current-season dungeons and raids are populated dynamically and support selecting multiple instances; old-season instances are excluded from the list and cannot match through stale IDs or saved names.
+- Specific-instance selections preserve stable dynamic IDs and display-name snapshots through editor reloads and all import/export paths, while runtime matching remains event-driven and uses the same cached season catalogs.
+- Added event-voice load locations for world content, Delves, five-player dungeons, and raids. Dungeon and raid locations can target any instance or the current season; seasonal dungeon data comes from the live Challenge Mode catalog, while raids use the live Group Finder current-season filter, with no maintained instance-ID tables.
+- Event location checks run only when an event fires, season catalogs are warmed and cached outside combat, missing catalog data fails open, and the saved list reflects the current location without adding timers, tickers, or `OnUpdate` work.
+- Preserved event load locations and instance modes through editor save/reload and every import/export shape, with regression coverage for legacy defaults, Delves, seasonal dungeons/raids, runtime dispatch, codec round trips, and API-unavailable fallback behavior.
+- Added drag ordering and collection membership for Cooldown Manager saved entries while keeping their runtime preset records separate from list-layout metadata.
+- Deleting a collection now also removes its contained Cooldown Manager presets, including built-in preset disablement and pending native-alert cleanup; stale CDM collection references are discarded automatically.
+- Collection and full exports now preserve CDM membership and the referenced CDM preset records, with regression coverage for grouping, ungrouping, deletion, and stale-reference cleanup.
+- Kept CDM collection validation out of combat hot paths and replaced per-reference full preset scans with O(1) indexed checks; every saved-list refresh now builds one revisioned CDM row snapshot shared by all collection scopes.
+- Fixed ordinary collection imports failing on an empty CDM profile payload, and included imported CDM presets in collection import counts.
+- Added an optional fixed-cooldown text countdown that appears immediately on use, preserves the configured text (or falls back to the spell name), formats long values such as `1m5s`, and refreshes visible text only once per displayed second.
+- Split the talent load requirement from the talent that changes fixed CD: each now has its own checkbox, talent ID, and name. Legacy combined-talent saves/imports are translated automatically.
+- Kept countdown work out of ordinary entries and measured the optional branch at about 0.03 ms per combat second even with 30 simultaneous countdowns; added countdown, split-talent, legacy migration, and import-field regression coverage.
+
+## 1.0.219 - 2026-08-14
+
+- Replaced generic `BAG_UPDATE_DELAYED` refreshes with targeted state checks: only active monitored bag items are compared, and only a meaningful load-state transition (absent to present or present to absent) is correlated with closing mail, completing a player trade, or closing the Alchemy profession UI. Unrelated item changes and quantity-only changes no longer rebuild the runtime. A delayed login refresh remains as the startup fallback.
+- Stopped marking the bag cache dirty during ordinary profile rebuilds and combat exit; equipment-dependent entries still retain their separate equipment-change handling.
+- Added regression coverage for the new inventory event routing, Alchemy-only profession close handling, and delayed login refresh.
+
+## 1.0.217 - 2026-08-12
+
+- Added 12.1.0 (121001) to the supported game versions in both addon TOCs (and the embedded LibSharedMedia-3.0 TOC), keeping 12.0.5/12.0.7 compatibility.
+
+## 1.0.216 - 2026-08-12
+
+- Cast-success alerts now treat "Check Talent" as a hard load filter: when the entered talent is not currently selected, the alert is not loaded at all (mirroring Check Equipped / Check Bags). The "Load only when selected" toggle is locked on for cast alerts, and the "CD Changes To" field stays hidden there.
+- The saved-list "loaded" tag now accounts for the talent condition: alerts whose talent is not selected show as unloaded, matching the runtime behavior.
+- Exposed IsTalentSelected through the public API for the config addon; updated the talent load filter regression tests.
+
+## 1.0.215 - 2026-08-12
+
+- Added a talent load filter for cooldown and cast-success alerts: with "Check Talent" and "Load only when selected" enabled, the alert is only loaded while the entered talent is actually selected (mirroring Check Equipped / Check Bags for items). Without the load filter the alert always loads, keeping the old behavior.
+- The talent row now also appears in the cast-success editor; the "CD Changes To" field stays cooldown-only and is now optional (empty keeps the fixed CD and uses the talent purely as a load condition).
+- Cooldown Manager runtime and cast-success configs apply the filter at build time; exports preserve the new field.
+- Added regression coverage for the talent load filter (tests/test_talent_load_filter.lua).
+
+## 1.0.214 - 2026-08-12
+
+- Gated the Bloodlust `UNIT_AURA` handler behind a config-level flag: when no Bloodlust alert channel is enabled, the most frequent combat event now costs a single boolean check (about 20 ns) instead of scanning every aura update for exhaustion effects.
+- Bounded retained visual-alert frames: at most 12 hidden slots are kept; older inactive frames are released before new ones are allocated, so long sessions cannot grow memory without limit.
+- Added a hot-path micro-benchmark (tests/bench_hotpath.lua): 30 active cooldown records cost about 0.2 microseconds per record per tick.
+
+## 1.0.213 - 2026-08-12
+
+- Removed 30+ dead functions across both addons (leftovers from refactors: legacy Cooldown Manager sync plan builders, old visual alert APIs, compatibility stubs, unreferenced helpers), shrinking the loaded Lua sources.
+- Cached the max-charge value on active cooldown records so the hot tick loop no longer converts `cd.charge` up to three times per record per tick.
+- Removed a duplicate `FirstNonEmptyPath` evaluation in the editor's custom sound path resolution and an unreachable sound-path fallback chain in the notifier.
+- Merged duplicate localization keys whose later overrides silently won before; the effective values are unchanged.
+
+## 1.0.212 - 2026-08-12
+
+- Hardened the searchable voice dropdowns (editor SharedMedia search and Cooldown Manager voice search) so opening them always lands on the currently selected voice. An empty search no longer resets the list to the top, and the jump to the selected item is the final step after the popup is shown — covering the case where the first open's initial search-box `SetText` fires `OnTextChanged` and re-layouts the list.
+- Added regression coverage for the dropdown open scroll-to-selected behavior (first open, repeated opens, empty-search preservation, real-filter reset).
+
+## 1.0.211 - 2026-08-12
+
+- Fixed searchable voice dropdowns (editor SharedMedia search and Cooldown Manager voice search) opening at the top of the list instead of the currently selected voice on the first open. The initial search-box text assignment could fire `OnTextChanged` and re-layout the popup back to the top after it was already scrolled to the selection; search mode now starts before the jump to the selected item, so the jump always runs last.
+
+## 1.0.210 - 2026-08-12
+
+- Extended the voice toggle-clear to the Cooldown Manager's searchable voice dropdown: clicking the already-selected voice again cancels the selection back to the "No custom voice selected" placeholder instead of only replacing it.
+- Cancelled Cooldown Manager rows return to the unconfigured state, stay out of the dirty-draft batch (so Apply All is not blocked), and disable Test/Save/Apply until another voice is chosen.
+
+## 1.0.209 - 2026-08-12
+
+- Placed the editor's searchable SharedMedia voice list on the same popup strata as the Cooldown Manager voice list, keeping it above the editor but below WoW's IME composition/candidate layer so typing in the search box no longer blocks the input method.
+- Added toggle-clear to the editor's built-in and SharedMedia voice dropdowns: clicking the already-selected voice again cancels the selection (showing the placeholder) instead of only replacing it; a cancelled built-in selection no longer falls back to the default built-in sound.
+- Added regression coverage for the dropdown toggle-clear selection logic.
+
+## 1.0.208 - 2026-08-06
+
+- Confirmed cooldown casts use the direct `spellID -> runtime entry` map; added regression coverage preventing unrelated saved cooldown configs from being read or activated.
+- Stopped creating active cooldown timers for entries with every alert channel disabled, and retired timers as soon as all one-shot alert work is complete.
+- Removed a duplicate runtime/cast-success configuration rebuild after saving a visual-group entry by persisting its visual identity before the normal save rebuild.
+- Ignored bag and equipment refresh events unless the active configuration actually contains an item entry whose load rule depends on that inventory source.
+
+## 1.0.207 - 2026-08-03
+
+- Added early channel-gating in the cooldown tick loop so disabled voice or visual channels skip their entire evaluation branch per tick, reducing per-frame work for cooldowns that only use one alert type.
+- Added a fast path for single-charge cooldown charge regeneration that replaces the general-purpose while loop with a single conditional check.
+- Reused pre-normalized cooldown condition operators and thresholds in the tick hot path instead of normalizing them again for every active alert channel.
+- Stopped reevaluating finite-duration visual channels after every enabled channel has already fired for the current cooldown cycle.
+- Fixed live config refreshes leaving an untimed image or text alert visible after its active visual channel was disabled.
+- Added regression coverage for disabled active-visual cleanup, finite-channel early-return cleanup, and single-charge regeneration.
+
+## 1.0.206 - 2026-07-21
+
+- Reduced combat-time `UNIT_AURA` work by using incremental aura updates to skip all exhaustion lookups for unrelated player aura changes, with a safe full-scan fallback when update data is unavailable or unreadable.
+- Reused one Cooldown Manager catalog across every record in a pending-plan or post-reload verification pass, avoiding repeated provider enumeration and spell/icon resolution per saved voice record.
+- Cached the active cooldown runtime update interval for each processing period instead of querying combat/update state on multiple rendered frames near the threshold.
+- Removed a production-only CDM registry self-check whose result was never consumed.
+- Removed 59 Lua files (about 794 KiB) that were not referenced by either addon's TOC: duplicated configuration sources under the runtime addon plus an unused configuration localization copy.
+- Added regression coverage for CDM catalog reuse, incremental exhaustion filtering, and cooldown update-interval caching.
+
+## 1.0.205 - 2026-07-21
+
+- Removed the selectable "No custom voice selected" row from the Cooldown Manager voice dropdown while retaining it as placeholder text for genuinely unconfigured rows.
+- Empty voice rows are no longer collected as dirty drafts, preventing one incomplete row from blocking Apply All and Reload.
+- Added per-dropdown popup strata support and placed searchable CDM voice lists below WoW's IME candidate layer while keeping them above the CDM editor.
+
+## 1.0.204 - 2026-07-21
+
+- Fixed the pending Cooldown Manager voice Apply/Reload prompt being lost when specialization changes were immediately followed by talent, spell, or CDM data refresh events.
+- Coalesced event evaluations now retain prompt intent for the complete event burst and retry after Cooldown Manager data becomes available.
+- Deferred specialization prompts now retry after combat through `PLAYER_REGEN_ENABLED`.
+- Switching away and back resets the target specialization's prompt guard so unresolved entries can prompt again, without repeating the popup on every world/instance transition.
+
+## 1.0.203 - 2026-07-21
+
+- Removed the UI reload from confirmed manual Cooldown Manager voice deletion.
+- Manual deletion now runs a dedicated removal-only transaction: remove all matching same-event Sound alerts from equivalent cooldown IDs, verify zero remain, save the Blizzard layout once, and return without locking notifications or reloading.
+- Clears the temporary removal tombstone immediately after successful synchronous verification and preserves rollback on any removal or save failure.
+- Routes removal-only Apply All batches through the same no-reload transaction, including pending removals created by earlier versions.
+- Kept reload behavior unchanged for Apply/Apply All flows that add or replace sounds.
+
+## 1.0.202 - 2026-07-21
+
+- Changed confirmed manual Cooldown Manager voice deletion to immediately remove the matching same-event Sound alerts, save the Blizzard layout once, and reload the UI once instead of requiring a second Apply All action.
+- Kept the payload-free removal tombstone only as an internal post-reload verification marker; it is no longer a user-facing pending step for manual deletion.
+- Added atomic local-record rollback when immediate deletion cannot build or apply a valid CDM removal plan.
+- Preserved the explicitly named local-only deletion API for import and automation callers that intentionally batch later changes.
+- Updated deletion confirmation text to state that the Cooldown Manager layout is changed immediately and the UI reloads once.
+
+## 1.0.201 - 2026-07-21
+
+- Fixed old Cooldown Manager sounds continuing to play after replacing an already-applied QFX voice.
+- Explicit apply now finds every current-specialization cooldown entry for the same logical spell and removes all same-event Sound alerts from every equivalent cooldown ID.
+- Writes exactly one target Sound on the current primary cooldown ID after the complete removal phase, while preserving other spells, other events, and Visual alerts.
+- Read-only status evaluation and post-reload verification now check every equivalent cooldown ID so leftover sounds remain pending or report apply failure instead of incorrectly showing Applied.
+- Preserved local-only Save/import behavior and the explicit two-phase apply workflow with at most one `SaveLayouts` call and one immediate reload per changed batch.
+- Preserved the secret-value safety policy: no `UnlockNotifications`, `UpdateAlert`, or addon-driven Blizzard Cooldown Viewer refresh calls were introduced.
+
+## 1.0.200 - 2026-07-21
+
+- Split Cooldown Manager voice handling into read-only evaluation and explicit apply transactions: local Save, import, login, specialization changes, CDM data events, and external layout saves no longer write Blizzard CDM data or reload the UI.
+- Restored per-row Apply as an atomic save-current-draft-and-apply action, and made Apply All and Reload validate and save every dirty editor row before applying all valid pending records for the current specialization.
+- Added persistent pending-removal tombstones; applying removals deletes only the saved target payload and preserves other payloads, events, and visual alerts.
+- Reworked explicit application into a fully prevalidated two-phase RemoveAlert/AddAlert transaction with one notification lock, one `SaveLayouts` call per changed batch, no `UnlockNotifications`, and one immediate reload to avoid `hasTotem` secret-value taint.
+- Added post-reload verification and one-time failure reporting without automatic retry or reload loops, including deferred verification while Cooldown Manager data is not yet readable.
+- Updated pending/applied/failed status UI, import and pending prompts, public APIs, and enUS/zhCN/zhTW text while preserving existing test, export/import, and non-CDM features.
+
+## 1.0.199 - 2026-07-21
+
+- Removed every addon-driven Blizzard Cooldown Viewer refresh/notification path and kept the legacy runtime-refresh API as a no-op to prevent secret-value taint such as `hasTotem` failures.
+- Replaced `UpdateAlert` voice replacement with validated per-event `RemoveAlert` + `AddAlert` reconciliation for added, unchanged, replaced, and deduplicated outcomes.
+- Added pre-delete target validation, exact old-sound snapshots, post-mutation verification, and in-memory rollback before saving when removal, addition, or verification fails.
+- Kept each current-specialization batch inside one internal mutation transaction with notification locking, at most one `SaveLayouts` call, one post-save verification pass, and one QFX UI refresh.
+- Added coalesced login/world-entry/CDM-data/specialization synchronization with schedule and scope serials so stale specialization tasks cannot write into the new scope.
+- Kept imported records for every class and specialization in the local preset store and automatically applies the matching scope when that character logs in or changes specialization.
+- Preserved external `SaveLayouts` recovery and permanent saved-list deletion without recursive synchronization, reload prompts, or Viewer frame refreshes.
+- Updated runtime statuses, summaries, public API compatibility, and enUS/zhCN/zhTW text while preserving single-entry, all-preset, and full-configuration exports.
+
+## 1.0.198 - 2026-07-21
+
+- Made the effective local Cooldown Manager voice list the single source of truth for every preset source.
+- Replaced staged Apply/Reload workflows with immediate save-and-sync plus a manual current-specialization sync action.
+- Added exact same-event Sound reconciliation: add missing alerts, update other sounds in place, and remove duplicates without touching visual or other-event alerts.
+- Batched reconciliation into one mutation transaction, one `SaveLayouts` call, one runtime refresh, and one verification pass.
+- Cleared legacy `pendingApply` data and made login, world entry, CDM data, specialization, combat, media registration, import, and external layout saves retry synchronization automatically.
+- Made saved-list deletion remove every exact local target duplicate permanently without reload, while preserving unrelated alerts.
+- Updated the editor and enUS/zhCN/zhTW text, preserved single/full preset export, and removed the obsolete apply dialog from the load list.
+
+## 1.0.197 - 2026-07-21
+
+- Split Cooldown Manager voice editing into local Save and confirmed Apply workflows.
+- Added local `pendingApply` staging that automatic synchronization and layout capture cannot apply or overwrite.
+- Added per-row Save controls, single-entry apply/reload confirmation, and Apply All and Reload for the current specialization.
+- Added explicit same-event sound replacement for user-confirmed staged batches while preserving existing sounds during automatic sync.
+- Made staged batch application save the Cooldown Manager layout once, mark only verified records as applied, and suppress reload on partial failure.
+- Removed reload-required handling from Cooldown Manager voice deletion and removed unsupported-event warning text/tooltips from the editor.
+- Removed local staging state from all Cooldown Manager preset exports.
+
+## 1.0.196 - 2026-07-21
+
+- Rebuilt Cooldown Manager saved-list rows from effective local presets with live loaded, pending, missing, conflicting, unsupported, and ambiguous states.
+- Added stable preset keys, loaded/unloaded section routing, accessible status text, and green/yellow/orange/gray/red indicators.
+- Added external Cooldown Manager layout-save detection so deleted runtime voices are restored while their local presets remain enabled.
+- Made preset deletion transactional, exact-target-only, conflict-safe, and rollback-capable.
+- Added single-preset export and preset-key editing support, including safe handling when an ability is not currently loaded.
+
+## 1.0.195 - 2026-07-21
+
+- Added searchable SharedMedia voice dropdowns for cooldown, cast-success, and Cooldown Manager voice editing.
+- Replaced the dropdown popup scrollbar with a dedicated draggable slider and protected scrollbar interaction from row selection and auto-close behavior.
+- Added cross-character Cooldown Manager voice presets with stable event keys and voice identity/path/name matching.
+- Added event-driven current-spec synchronization that preserves every existing sound alert and batches layout saving and runtime refresh.
+- Added Cooldown Manager preset export/import, full-export integration, manual synchronization, and preset-aware deletion.
+- Added safe runtime refresh attempts with a single reload-required fallback state.
