@@ -1,0 +1,15 @@
+package-as: QFXSkillAlerts
+enable-nolib-creation: no
+
+ignore:
+  - tests
+  - CHANGELOG.md
+  - "*.zip"
+  - "*.html"
+
+# The repository root holds two sibling addon folders. The first mapping lifts
+# the main addon's files up into its packaged top-level folder, and the second
+# extracts the config addon to the zip root as a second addon folder.
+move-folders:
+  QFXSkillAlerts/QFXSkillAlerts: QFXSkillAlerts
+  QFXSkillAlerts/QFXSkillAlerts_Config: QFXSkillAlerts_Config
