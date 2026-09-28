@@ -17,8 +17,17 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Stage addons for packaging
+        shell: bash
+        run: |
+          rm -rf QFXSkillAlerts/QFXSkillAlerts_Config
+          cp -r QFXSkillAlerts_Config QFXSkillAlerts/QFXSkillAlerts_Config
+          git add QFXSkillAlerts/QFXSkillAlerts_Config
+
       - name: Package and release
         uses: BigWigsMods/packager@v2
+        with:
+          args: -t QFXSkillAlerts
         env:
           CF_API_KEY: ${{ secrets.CF_API_KEY }}
           GITHUB_OAUTH: ${{ secrets.GITHUB_TOKEN }}

@@ -1,0 +1,8 @@
+package-as: QFXSkillAlerts
+enable-nolib-creation: no
+
+# The repository holds two sibling addons. The packager runs with
+# "-t QFXSkillAlerts", and the release workflow copies QFXSkillAlerts_Config
+# into this directory first; this move extracts it back to the zip root.
+move-folders:
+  QFXSkillAlerts/QFXSkillAlerts_Config: QFXSkillAlerts_Config
