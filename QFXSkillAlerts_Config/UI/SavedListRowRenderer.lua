@@ -129,6 +129,7 @@ function RowRenderer:UpdateRow(row, entry, opts)
         row.icon:SetPoint("LEFT", row, "LEFT", 12, 0)
     end
 
+    row.scopeDetail = nil
     if row.isPlaceholder then
         row.bg:SetColorTexture(0, 0, 0, 0)
         row.accent:SetColorTexture(0.24, 0.48, 1.00, 0)
@@ -155,6 +156,7 @@ function RowRenderer:UpdateRow(row, entry, opts)
         row.accent:SetColorTexture(0.24, 0.48, 1.00, selected and 0.95 or (entry.groupID and 0.10 or 0.18))
         row.icon:SetTexture(entry.icon or 134400)
         row.main:SetText(BuildEntryRowText(entry, includeScopeText))
+        row.scopeDetail = entry.scopeDetail
         if selected then
             row.main:SetTextColor(1, 1, 1, 1)
         else

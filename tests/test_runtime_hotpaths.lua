@@ -410,4 +410,38 @@ needsEquipped, needsBags = ConfigBuilder:GetItemLoadEventNeeds()
 Equal(needsEquipped, false, "static cooldown config must not request equipment refreshes")
 Equal(needsBags, false, "static cooldown config must not request bag refreshes")
 
+-- Entries unloaded by the talent filter must stay completely idle: they must
+-- not register bag refresh needs and must not enter the runtime config.
+local function ConfigureBuilder(isTalentSelected)
+    ConfigBuilder:Configure({
+        getCurrentClassSpec = function() return 1, 2 end,
+        getStoredEntryMap = function(classID, specID)
+            if classID == 1 and specID == 2 then return scopedEntries end
+            return {}
+        end,
+        getOrderedEntryIndices = Ordered,
+        getEntry = function(map, index) return map[index] end,
+        resolveObjectType = function(_, objectType) return objectType end,
+        isItemLoadRequirementMet = function() return false end,
+        isTalentSelected = isTalentSelected,
+    })
+end
+
+scopedEntries[1].itemLoadMode = "bags"
+scopedEntries[1].loadTalentEnabled = true
+scopedEntries[1].loadTalentId = 999
+
+ConfigureBuilder(function() return false end)
+local blockedSpellToPrimary, blockedRuntimeCfg = {}, {}
+ConfigBuilder:Rebuild(blockedSpellToPrimary, blockedRuntimeCfg)
+needsEquipped, needsBags = ConfigBuilder:GetItemLoadEventNeeds()
+Equal(needsBags, false, "talent-blocked bag entry must not request bag refreshes")
+Equal(next(blockedSpellToPrimary), nil, "talent-blocked entry must not map a trigger spell")
+Equal(next(blockedRuntimeCfg), nil, "talent-blocked entry must not enter the runtime config")
+
+ConfigureBuilder(function() return true end)
+ConfigBuilder:Rebuild({}, {})
+needsEquipped, needsBags = ConfigBuilder:GetItemLoadEventNeeds()
+Equal(needsBags, true, "selected talent re-registers bag refreshes")
+
 print("Runtime hot-path regression tests passed")

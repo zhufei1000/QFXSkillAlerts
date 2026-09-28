@@ -473,12 +473,6 @@ function AceOptions:TestCurrent()
     end
 end
 
-function AceOptions:SyncStateFromWidgets()
-    if NS.OptionsState and type(NS.OptionsState.SyncStateFromWidgets) == "function" then
-        return NS.OptionsState:SyncStateFromWidgets(self)
-    end
-end
-
 function AceOptions:ApplyStateToWidgets()
     return Controller:ApplyStateToWidgets(self)
 end

@@ -1,4 +1,4 @@
-local NS = rawget(_G, "QFXSkillAlertsNS") or {}
+﻿local NS = rawget(_G, "QFXSkillAlertsNS") or {}
 _G.QFXSkillAlertsNS = NS
 
 NS.OptionsState = NS.OptionsState or {}
@@ -153,6 +153,12 @@ function NS.OptionsState:GetState(owner)
     owner.state.notifyMode = owner.state.notifyMode or modeSound
     owner.state.fixedCD = true
     owner.state.checkTalent = owner.state.checkTalent == true
+    local cdMode = tostring(owner.state.cdMode or "")
+    if cdMode ~= "ready" and cdMode ~= "fixed" and cdMode ~= "cooldown" then
+        cdMode = owner.state.gameStateCD == true and "ready" or "fixed"
+    end
+    owner.state.cdMode = cdMode
+    owner.state.gameStateCD = cdMode ~= "fixed"
     owner.state.itemLoadMode = NormalizeItemLoadMode(owner.state.itemLoadMode)
     if tostring(owner.state.objectType or ""):lower() ~= OBJECT_TYPE_ITEM then
         owner.state.itemLoadMode = ITEM_LOAD_NONE
@@ -417,6 +423,11 @@ function NS.OptionsState:ClearEditorFields(owner)
     state.baseCD = 0
     state.fixedCD = true
     state.checkTalent = false
+    -- New cooldown entries default to the game readiness edge ("Ready"):
+    -- no manual cooldown number is needed. Existing saved entries keep the
+    -- mode they were stored with; item/cast entries still force "fixed".
+    state.cdMode = "ready"
+    state.gameStateCD = true
     state.talentId = 0
     state.talentName = ""
     state.talentCD = 0
@@ -446,8 +457,10 @@ function NS.OptionsState:ClearEditorFields(owner)
     state.customSoundPath = ""
     state.customSoundPaths = { "", "", "", "", "" }
     state.useCustomSound = false
-    state.soundSource = "builtin"
-    state.soundPath = state.builtinSoundPath
+    -- New alerts default to the SharedMedia library instead of the built-in
+    -- sound list; the concrete sound is picked in the sound section.
+    state.soundSource = "sharedmedia"
+    state.soundPath = ""
     state.voiceEnabled = false
     state.voiceConditionOp = "<="
     state.voiceConditionTime = 0
@@ -480,232 +493,3 @@ function NS.OptionsState:ClearEditorFields(owner)
     state.textOffsetY = 0
 end
 
-function NS.OptionsState:SyncStateFromWidgets(owner)
-    owner = owner or NS.AceOptions or self
-    local widgets = owner.editorWidgets or owner.widgets
-    local state = self:GetState(owner)
-    local api = GetApi()
-    if not widgets or not api then
-        return
-    end
-
-    if widgets.classDrop then
-        state.classID = tonumber(widgets.classDrop:GetValue()) or state.classID or 0
-    end
-    if widgets.specDrop then
-        if (tonumber(state.classID) or 0) == ALL_CLASSES_ID then
-            state.specID = ALL_SPECS_ID
-        else
-            state.specID = tonumber(widgets.specDrop:GetValue()) or state.specID or 0
-        end
-    end
-    if widgets.objectTypeItem then
-        local isItem = type(widgets.objectTypeItem.GetValue) == "function" and widgets.objectTypeItem:GetValue() == true or (type(widgets.objectTypeItem.GetChecked) == "function" and widgets.objectTypeItem:GetChecked() == true)
-        state.objectType = isItem and OBJECT_TYPE_ITEM or OBJECT_TYPE_SPELL
-    end
-    if state.objectType == OBJECT_TYPE_ITEM then
-        local equippedChecked = widgets.itemLoadEquipped and type(widgets.itemLoadEquipped.GetChecked) == "function" and widgets.itemLoadEquipped:GetChecked() == true
-        local bagsChecked = widgets.itemLoadBags and type(widgets.itemLoadBags.GetChecked) == "function" and widgets.itemLoadBags:GetChecked() == true
-        if equippedChecked then
-            state.itemLoadMode = ITEM_LOAD_EQUIPPED
-            state.itemLoadSameName = false
-        elseif bagsChecked then
-            state.itemLoadMode = ITEM_LOAD_BAGS
-            state.itemLoadSameName = widgets.itemLoadSameName and type(widgets.itemLoadSameName.GetChecked) == "function" and widgets.itemLoadSameName:GetChecked() == true or false
-        else
-            state.itemLoadMode = ITEM_LOAD_NONE
-            state.itemLoadSameName = false
-        end
-    else
-        state.itemLoadMode = ITEM_LOAD_NONE
-        state.itemLoadSameName = false
-    end
-    if widgets.spellId then
-        state.spellId = tonumber(widgets.spellId:GetText() or "") or 0
-    end
-    if widgets.spellName then
-        state.spellName = tostring(widgets.spellName:GetText() or "")
-    end
-    if widgets.baseCD then
-        state.baseCD = tonumber(widgets.baseCD:GetText() or "") or 0
-    end
-    if widgets.eventTypeDrop and widgets.eventTypeDrop.qfxsaValue ~= nil then
-        state.eventKey = tostring(widgets.eventTypeDrop.qfxsaValue or "")
-    end
-    if widgets.eventThrottle then
-        state.eventThrottle = math.max(0, math.min(300, tonumber(widgets.eventThrottle:GetText() or "") or 1))
-    end
-    if widgets.eventLoadWorld or widgets.eventLoadDelve or widgets.eventLoadDungeon or widgets.eventLoadRaid then
-        state.eventLoadContexts = {
-            world = widgets.eventLoadWorld and widgets.eventLoadWorld:GetChecked() == true or false,
-            delve = widgets.eventLoadDelve and widgets.eventLoadDelve:GetChecked() == true or false,
-            dungeon = widgets.eventLoadDungeon and widgets.eventLoadDungeon:GetChecked() == true or false,
-            raid = widgets.eventLoadRaid and widgets.eventLoadRaid:GetChecked() == true or false,
-        }
-    end
-    if widgets.eventDungeonModeDrop and widgets.eventDungeonModeDrop.qfxsaValue ~= nil then
-        state.eventDungeonMode = type(api.NormalizeEventInstanceMode) == "function"
-            and api.NormalizeEventInstanceMode(widgets.eventDungeonModeDrop.qfxsaValue) or tostring(widgets.eventDungeonModeDrop.qfxsaValue or "any")
-    end
-    if widgets.eventRaidModeDrop and widgets.eventRaidModeDrop.qfxsaValue ~= nil then
-        state.eventRaidMode = type(api.NormalizeEventInstanceMode) == "function"
-            and api.NormalizeEventInstanceMode(widgets.eventRaidModeDrop.qfxsaValue) or tostring(widgets.eventRaidModeDrop.qfxsaValue or "any")
-    end
-    local widgetAPI = NS.UI and NS.UI.Widgets
-    if widgets.eventDungeonSpecificDrop and widgetAPI and type(widgetAPI.GetMultiDropdownValues) == "function" then
-        state.eventDungeonSelectionIDs = widgetAPI:GetMultiDropdownValues(widgets.eventDungeonSpecificDrop)
-    end
-    if widgets.eventRaidSpecificDrop and widgetAPI and type(widgetAPI.GetMultiDropdownValues) == "function" then
-        state.eventRaidSelectionIDs = widgetAPI:GetMultiDropdownValues(widgets.eventRaidSpecificDrop)
-    end
-    if widgets.checkTalent then
-        if type(widgets.checkTalent.GetValue) == "function" then
-            state.checkTalent = widgets.checkTalent:GetValue() == true
-        elseif type(widgets.checkTalent.GetChecked) == "function" then
-            state.checkTalent = widgets.checkTalent:GetChecked() == true
-        end
-        if state.objectType == OBJECT_TYPE_ITEM then
-            state.checkTalent = false
-        end
-    end
-    if widgets.talentId then
-        state.talentId = tonumber(widgets.talentId:GetText() or "") or 0
-    end
-    if widgets.talentName then
-        state.talentName = tostring(widgets.talentName:GetText() or "")
-    end
-    if widgets.talentCD then
-        state.talentCD = tonumber(widgets.talentCD:GetText() or "") or 0
-    end
-    if widgets.talentLoadFilter then
-        if type(widgets.talentLoadFilter.GetValue) == "function" then
-            state.talentLoadFilter = widgets.talentLoadFilter:GetValue() == true
-        elseif type(widgets.talentLoadFilter.GetChecked) == "function" then
-            state.talentLoadFilter = widgets.talentLoadFilter:GetChecked() == true
-        else
-            state.talentLoadFilter = false
-        end
-    end
-    if widgets.loadTalentEnabled then
-        state.loadTalentEnabled = widgets.loadTalentEnabled:GetChecked() == true
-    end
-    if widgets.loadTalentId then
-        state.loadTalentId = tonumber(widgets.loadTalentId:GetText() or "") or 0
-    end
-    if widgets.loadTalentName then
-        state.loadTalentName = tostring(widgets.loadTalentName:GetText() or "")
-    end
-    if widgets.delayEnabled then
-        if type(widgets.delayEnabled.GetValue) == "function" then
-            state.delayEnabled = widgets.delayEnabled:GetValue() == true
-        elseif type(widgets.delayEnabled.GetChecked) == "function" then
-            state.delayEnabled = widgets.delayEnabled:GetChecked() == true
-        end
-    end
-    if widgets.castDelayEnabled then
-        if type(widgets.castDelayEnabled.GetValue) == "function" then
-            state.delayEnabled = widgets.castDelayEnabled:GetValue() == true
-        elseif type(widgets.castDelayEnabled.GetChecked) == "function" then
-            state.delayEnabled = widgets.castDelayEnabled:GetChecked() == true
-        end
-    end
-    if widgets.castDelaySeconds then
-        state.delaySeconds = math.max(0, tonumber(widgets.castDelaySeconds:GetText() or "") or 0)
-    elseif widgets.delaySeconds then
-        state.delaySeconds = math.max(0, tonumber(widgets.delaySeconds:GetText() or "") or 0)
-    end
-    if widgets.castDelayModeDrop and widgets.castDelayModeDrop.qfxsaValue ~= nil then
-        state.castDelayMode = "show"
-    end
-    state.fixedCD = true
-    local modeTts, modeSound = api.GetModes()
-    if widgets.notifyMode then
-        local value = tostring(widgets.notifyMode:GetValue() or state.soundSource or "")
-        if IsSoundSourceValue(value) then
-            state.soundSource = value
-            state.notifyMode = (value == "tts") and modeTts or modeSound
-        else
-            state.notifyMode = (value == tostring(modeTts)) and modeTts or modeSound
-            if state.notifyMode == modeTts then
-                state.soundSource = "tts"
-            elseif tostring(state.soundSource or "") == "" then
-                state.soundSource = "builtin"
-            end
-        end
-    end
-    if widgets.ttsText then
-        state.ttsText = tostring(widgets.ttsText:GetText() or "")
-    end
-    if widgets.builtinSound and type(widgets.builtinSound.GetValue) == "function" then
-        local builtinPath = owner:NormalizeSoundPath(widgets.builtinSound:GetValue() or state.builtinSoundPath or "")
-        if builtinPath == "" or not owner:IsBuiltinSoundPath(builtinPath) then
-            builtinPath = owner:GetDefaultBuiltinSoundPath()
-        end
-        state.builtinSoundPath = builtinPath
-    end
-    if widgets.sharedMediaSound and type(widgets.sharedMediaSound.GetValue) == "function" then
-        state.sharedMediaSound = TrimText(widgets.sharedMediaSound:GetValue() or state.sharedMediaSound or "")
-    end
-    if widgets.soundPath then
-        state.customSoundPath = owner:NormalizeSoundPath(widgets.soundPath:GetText() or state.customSoundPath or "")
-    end
-    state.customSoundPaths = type(state.customSoundPaths) == "table" and state.customSoundPaths or { state.customSoundPath or "", "", "", "", "" }
-    state.customSoundPaths[1] = state.customSoundPath
-    local bloodlustPathInputs = widgets.bloodlustCustomPaths
-    if type(bloodlustPathInputs) == "table" then
-        for i = 2, 5 do
-            local input = bloodlustPathInputs[i]
-            state.customSoundPaths[i] = owner:NormalizeSoundPath((input and input.GetText and input:GetText()) or state.customSoundPaths[i] or "")
-        end
-    end
-
-    local source = tostring(state.soundSource or "")
-    local sourceEntry = {
-        notifyMode = (source == "tts") and modeTts or modeSound,
-        soundSource = source,
-        soundPath = state.soundPath,
-        customSoundPath = state.customSoundPath,
-        customSoundPaths = state.customSoundPaths,
-        builtinSoundPath = state.builtinSoundPath,
-        sharedMediaSound = state.sharedMediaSound,
-    }
-
-    if source == "tts" then
-        sourceEntry.soundPath = ""
-        sourceEntry.sharedMediaSound = ""
-    elseif source == "sharedmedia" then
-        sourceEntry.soundPath = owner:ResolveSharedMediaSoundPath(state.sharedMediaSound, "")
-        sourceEntry.customSoundPath = ""
-    elseif source == "custom" then
-        local customPath = state.customSoundPath
-        for i = 1, 5 do
-            local path = TrimText((state.customSoundPaths or {})[i] or "")
-            if path ~= "" then
-                customPath = path
-                break
-            end
-        end
-        sourceEntry.customSoundPath = customPath
-        sourceEntry.soundPath = customPath
-        sourceEntry.sharedMediaSound = ""
-    elseif source == "builtin" then
-        sourceEntry.soundPath = state.builtinSoundPath or owner:GetDefaultBuiltinSoundPath()
-        sourceEntry.sharedMediaSound = ""
-        sourceEntry.customSoundPath = ""
-    else
-        if tostring(state.notifyMode or modeSound) == tostring(modeTts) then
-            sourceEntry.soundSource = "tts"
-        elseif TrimText(state.sharedMediaSound or "") ~= "" then
-            sourceEntry.soundSource = "sharedmedia"
-            sourceEntry.soundPath = owner:ResolveSharedMediaSoundPath(state.sharedMediaSound, "")
-        elseif TrimText(state.customSoundPath or "") ~= "" then
-            sourceEntry.soundSource = "custom"
-            sourceEntry.soundPath = state.customSoundPath
-        else
-            sourceEntry.soundSource = "builtin"
-            sourceEntry.soundPath = state.builtinSoundPath or owner:GetDefaultBuiltinSoundPath()
-        end
-    end
-
-    owner:ApplySoundSourceToState(owner:ResolveSoundSourceFields(sourceEntry, modeTts, modeSound))
-end

@@ -64,3 +64,11 @@ function Bridge:StartCooldown(spellId, mappedSpellToPrimary, mappedRuntimeCfg)
     end
     return nil
 end
+
+function Bridge:QueueGameCooldown(spellId, mappedSpellToPrimary, mappedRuntimeCfg)
+    local runtime = GetRuntime()
+    if runtime and type(runtime.QueueGameCooldown) == "function" then
+        return runtime:QueueGameCooldown(spellId, mappedSpellToPrimary, mappedRuntimeCfg)
+    end
+    return false
+end

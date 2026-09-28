@@ -20,16 +20,6 @@ local function IsUsableEntry(entry)
     return (tonumber(entry.spellId) or 0) > 0
 end
 
-local function ClearTable(tbl)
-    if type(wipe) == "function" then
-        wipe(tbl)
-    elseif type(tbl) == "table" then
-        for key in pairs(tbl) do
-            tbl[key] = nil
-        end
-    end
-end
-
 function EntryMap:EnsureSpecTable(root, classID, specID)
     classID = tonumber(classID) or 0
     specID = tonumber(specID) or 0
@@ -113,8 +103,4 @@ function EntryMap:FindFirstFreeIndex(map)
         end
     end
     return nextIndex
-end
-
-function EntryMap:ClearTable(tbl)
-    ClearTable(tbl)
 end

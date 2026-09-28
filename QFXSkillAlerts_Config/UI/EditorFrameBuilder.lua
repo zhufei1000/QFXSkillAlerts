@@ -11,7 +11,6 @@ local PopupLayout = NS.UI.PopupLayout
 local EditorLayout = NS.UI.EditorLayout or {}
 local EditorSoundFields = NS.UI.EditorSoundFields or {}
 local EditorActions = NS.UI.EditorActions or {}
-local DialogTextArea = NS.UI.DialogTextArea or {}
 local L = NS.L or function(key, ...) if select("#", ...) > 0 then return string.format(tostring(key), ...) end return tostring(key) end
 
 local CreateFieldLabel = EditorLayout.CreateFieldLabel
@@ -418,8 +417,6 @@ function Builder:EnsureFrame(owner)
     local NAME_X, NAME_W = 152, grid.nameW or 220
     local CD_X, CD_W = 392, grid.cdW or 112
     local CHECK_X, CHECK_W = 520, grid.checkW or 126
-    local CLASS_LABEL_X, DROP_CLASS_X, DROP_CLASS_W = INNER, INNER, grid.classDropW or 286
-    local SPEC_LABEL_X, DROP_SPEC_X, DROP_SPEC_W = 342, 342, grid.specDropW or 286
     local SOURCE_X, SOURCE_W = INNER, grid.sourceW or 286
     local BUILTIN_X, BUILTIN_W = INNER, grid.halfW or 286
     local SHAREDMEDIA_X, SHAREDMEDIA_W = 342, grid.halfW or 286
@@ -449,7 +446,6 @@ function Builder:EnsureFrame(owner)
     local CAST_DELAY_MODE_X, CAST_DELAY_MODE_W = 310, 116
     local CAST_ACTION_DROP_X, CAST_ACTION_DROP_W = 72, 300
 
-    local CLASS_LABEL_Y, CLASS_CONTROL_Y = -38, -62
     local SPELL_ROW1_Y = -46
     local SPELL_ROW2_Y = SPELL_ROW1_Y - ROW_GAP
     local SPELL_ROW3_Y = SPELL_ROW2_Y - ROW_GAP
@@ -474,47 +470,31 @@ function Builder:EnsureFrame(owner)
     local actionTest = Widgets:CreateButton(frame, L("BTN_TEST"), 120, 32)
     actionTest:SetPoint("LEFT", actionSave, "RIGHT", 8, 0)
 
-    local classSection = PlaceModule(content, L("SECTION_CLASS_SPEC"), modules.classTop or -8, modules.classHeight or 104)
-    local classLabel = CreateFieldLabel(classSection, L("LABEL_CLASS"), CLASS_LABEL_X, CLASS_LABEL_Y, DROP_CLASS_W)
-    local specLabel = CreateFieldLabel(classSection, L("LABEL_SPEC"), SPEC_LABEL_X, CLASS_LABEL_Y, DROP_SPEC_W)
-    local classDrop = PlaceControl(Widgets:CreateDropdown(classSection, "QFXSkillAlertsEditorClassDropDown", DROP_CLASS_W), classSection, DROP_CLASS_X, CLASS_CONTROL_Y)
-    local specDrop = PlaceControl(Widgets:CreateDropdown(classSection, "QFXSkillAlertsEditorSpecDropDown", DROP_SPEC_W), classSection, DROP_SPEC_X, CLASS_CONTROL_Y)
-    local customClassDrop = nil
-    local customSpecDrop = nil
-    if Widgets.CreateMultiSelectDropdown then
-        customClassDrop = PlaceControl(Widgets:CreateMultiSelectDropdown(classSection, "QFXSkillAlertsEditorCustomClassDropDown", DROP_CLASS_W), classSection, DROP_CLASS_X, CLASS_CONTROL_Y)
-        customSpecDrop = PlaceControl(Widgets:CreateMultiSelectDropdown(classSection, "QFXSkillAlertsEditorCustomSpecDropDown", DROP_SPEC_W), classSection, DROP_SPEC_X, CLASS_CONTROL_Y)
-    else
-        customClassDrop = PlaceControl(Widgets:CreateDropdown(classSection, "QFXSkillAlertsEditorCustomClassDropDown", DROP_CLASS_W), classSection, DROP_CLASS_X, CLASS_CONTROL_Y)
-        customSpecDrop = PlaceControl(Widgets:CreateDropdown(classSection, "QFXSkillAlertsEditorCustomSpecDropDown", DROP_SPEC_W), classSection, DROP_SPEC_X, CLASS_CONTROL_Y)
-    end
-    local scopeLabel = CreateFieldLabel(classSection, L("LABEL_SCOPE"), CLASS_LABEL_X, CLASS_LABEL_Y, 180)
-    local scopeSummary = Widgets:CreateLabel(classSection, "", "GameFontHighlightSmall")
-    scopeSummary:SetPoint("TOPLEFT", classSection, "TOPLEFT", CLASS_LABEL_X, CLASS_CONTROL_Y - 2)
-    scopeSummary:SetSize(430, 30)
-    scopeSummary:SetJustifyH("LEFT")
-    scopeSummary:SetJustifyV("MIDDLE")
-    if scopeSummary.SetWordWrap then scopeSummary:SetWordWrap(false) end
-    if scopeSummary.SetMaxLines then scopeSummary:SetMaxLines(1) end
-    local scopeButton = Widgets:CreateButton(classSection, L("BTN_SCOPE_SELECT"), 146, 28)
-    scopeButton:SetPoint("TOPLEFT", classSection, "TOPLEFT", DROP_SPEC_X + 140, CLASS_CONTROL_Y)
-    classLabel:Hide()
-    specLabel:Hide()
-    classDrop:Hide()
-    specDrop:Hide()
-    customClassDrop:Hide()
-    customSpecDrop:Hide()
+    -- Always-visible scope controls, laid out as two compact inline rows:
+    -- race on top, class + linked spec below. "All ..." entries are exclusive
+    -- and long multi-selections collapse to a localized count summary.
+    local classSection = PlaceModule(content, L("SECTION_CLASS_SPEC"), modules.classTop or -8, modules.classHeight or 122)
+    local scopeUi = {
+        raceLabel = CreateFieldLabel(classSection, L("LABEL_SCOPE_RACE"), INNER, -46, 42),
+        raceDrop = PlaceControl(Widgets:CreateMultiSelectDropdown(classSection, "QFXSkillAlertsEditorScopeRaceDropDown", 590), classSection, 58, -40),
+        classLabel = CreateFieldLabel(classSection, L("LABEL_CLASS"), INNER, -84, 42),
+        classDrop = PlaceControl(Widgets:CreateMultiSelectDropdown(classSection, "QFXSkillAlertsEditorScopeClassDropDown", 286), classSection, 58, -78),
+        specLabel = CreateFieldLabel(classSection, L("LABEL_SPEC"), 356, -84, 42),
+        specDrop = PlaceControl(Widgets:CreateMultiSelectDropdown(classSection, "QFXSkillAlertsEditorScopeSpecDropDown", 250), classSection, 398, -78),
+    }
+    scopeUi.raceDrop.qfxsaExclusiveValue = 0
+    Widgets:SetMultiDropdownSummary(scopeUi.raceDrop, 2, L("SCOPE_RACE_COUNT"))
+    scopeUi.classDrop.qfxsaExclusiveValue = 0
+    Widgets:SetMultiDropdownSummary(scopeUi.classDrop, 2, L("SCOPE_CLASS_COUNT"))
+    scopeUi.specDrop.qfxsaExclusiveValue = 0
+    Widgets:SetMultiDropdownSummary(scopeUi.specDrop, 1, L("SCOPE_SPEC_COUNT"))
 
     -- Custom Lua / custom variable trigger editor was removed.
     -- Keep nil widget slots below for compatibility with shared refresh code.
 
     local spellSection = PlaceModule(content, L("SECTION_SPELL_PARAMS"), modules.spellTop or -124, modules.spellHeight or 240)
-    local OBJECT_CHECK_X, OBJECT_CHECK_W = ID_X, 70
     local PRIMARY_ID_X, PRIMARY_ID_W = ID_X + 76, 84
     local PRIMARY_NAME_X, PRIMARY_NAME_W = NAME_X + 52, NAME_W - 52
-    local objectTypeItem = Widgets:CreateCheckButton(spellSection, L("LABEL_IS_ITEM"), OBJECT_CHECK_W)
-    objectTypeItem:SetPoint("TOPLEFT", spellSection, "TOPLEFT", OBJECT_CHECK_X, SPELL_CONTROL1_Y - 3)
-    SetCheckWidth(objectTypeItem, OBJECT_CHECK_W)
     local spellIdLabel = CreateFieldLabel(spellSection, L("LABEL_OBJECT_SPELL_ID"), PRIMARY_ID_X, SPELL_LABEL1_Y, PRIMARY_ID_W)
     local spellNameLabel = CreateFieldLabel(spellSection, L("LABEL_SPELL_NAME"), PRIMARY_NAME_X, SPELL_LABEL1_Y, PRIMARY_NAME_W)
     local baseCDLabel = CreateFieldLabel(spellSection, L("LABEL_FIXED_CD_SEC"), CD_X, SPELL_LABEL1_Y, CD_W)
@@ -556,9 +536,42 @@ function Builder:EnsureFrame(owner)
     eventLoad.raidSpecificDrop = PlaceControl(Widgets:CreateMultiSelectDropdown(spellSection, "QFXSkillAlertsEditorEventRaidSpecificDropDown", 286), spellSection, 342, SPELL_CONTROL3_Y - 62)
     for _, control in pairs(eventLoad) do control:Hide() end
 
-    local checkTalent = Widgets:CreateCheckButton(spellSection, L("LABEL_CHECK_TALENT"), 146)
+    local checkTalent = Widgets:CreateCheckButton(spellSection, L("LABEL_CHECK_TALENT"), 158)
     checkTalent:SetPoint("TOPLEFT", spellSection, "TOPLEFT", CHECK_X, SPELL_CONTROL1_Y - 3)
-    SetCheckWidth(checkTalent, 146)
+    SetCheckWidth(checkTalent, 158)
+
+    -- Quick skill picker: only fills the spell ID / name; the class/spec
+    -- dropdown in front of it selects which spec's skills are listed
+    -- (single selection, defaults to the current spec). Disabled in combat
+    -- (catalog data is not readable there). These two tables keep this
+    -- function under Lua's 200-local limit.
+    local skillFilter = {
+        label = CreateFieldLabel(spellSection, L("LABEL_SKILL_FILTER"), 124, -44, 196),
+        drop = PlaceControl(Widgets:CreateDropdown(spellSection, "QFXSkillAlertsEditorSkillFilterDropDown", 196), spellSection, 124, -68),
+    }
+    local cdmPicker = {
+        label = CreateFieldLabel(spellSection, L("LABEL_CDM_PICK"), 328, -44, 320),
+    }
+    cdmPicker.drop = PlaceControl(
+        Widgets:CreateDropdown(spellSection, "QFXSkillAlertsEditorCdmSkillDropDown", 320),
+        spellSection, 328, -68
+    )
+
+    -- Spell / item type selector in front of the picker.
+    local objectType = {
+        label = CreateFieldLabel(spellSection, L("LABEL_OBJECT_TYPE"), INNER, -44, 100),
+        drop = PlaceControl(Widgets:CreateDropdown(spellSection, "QFXSkillAlertsEditorObjectTypeDropDown", 100), spellSection, INNER, -68),
+    }
+
+    -- Fixed CD / ready / charge source for cooldown entries; the fixed number
+    -- input follows on the same row. Legacy gameStateCD maps to "ready".
+    local cdMode = {
+        label = CreateFieldLabel(spellSection, L("LABEL_CD_MODE"), CD_X, SPELL_LABEL1_Y, CD_W),
+    }
+    cdMode.drop = PlaceControl(
+        Widgets:CreateDropdown(spellSection, "QFXSkillAlertsEditorCdModeDropDown", CD_W),
+        spellSection, CD_X, SPELL_CONTROL1_Y
+    )
 
     local itemLoadEquipped = Widgets:CreateCheckButton(spellSection, L("LABEL_ITEM_LOAD_EQUIPPED"), 118)
     itemLoadEquipped:SetPoint("TOPLEFT", spellSection, "TOPLEFT", ID_X, SPELL_CONTROL2_Y - 3)
@@ -579,9 +592,9 @@ function Builder:EnsureFrame(owner)
     -- Loading and CD-changing talents are independent.  The load filter owns
     -- its own row/identity so one talent can decide whether an entry is loaded
     -- while another talent changes the fixed cooldown.
-    local loadTalentEnabled = Widgets:CreateCheckButton(spellSection, L("LABEL_TALENT_LOAD_FILTER"), 126)
+    local loadTalentEnabled = Widgets:CreateCheckButton(spellSection, L("LABEL_TALENT_LOAD_FILTER"), 150)
     loadTalentEnabled:SetPoint("TOPLEFT", spellSection, "TOPLEFT", ID_X, SPELL_CONTROL3_Y - 3)
-    SetCheckWidth(loadTalentEnabled, 126)
+    SetCheckWidth(loadTalentEnabled, 150)
     local loadTalentIdLabel = CreateFieldLabel(spellSection, L("LABEL_TALENT_ID"), NAME_X, SPELL_LABEL3_Y, ID_W)
     local loadTalentNameLabel = CreateFieldLabel(spellSection, L("LABEL_TALENT_NAME"), NAME_X + ID_W + 20, SPELL_LABEL3_Y, NAME_W)
     local loadTalentId = PlaceControl(Widgets:CreateEditBox(spellSection, ID_W, 30, true), spellSection, NAME_X, SPELL_CONTROL3_Y)
@@ -727,11 +740,12 @@ function Builder:EnsureFrame(owner)
         imagePositionSection = notifyData.imagePositionSection,
         textPositionSection = notifyData.textPositionSection,
         visualLayoutSection = notifyData.visualLayoutSection,
-        classLabel = classLabel,
-        specLabel = specLabel,
-        scopeLabel = scopeLabel,
-        scopeSummary = scopeSummary,
-        scopeButton = scopeButton,
+        scopeRaceLabel = scopeUi.raceLabel,
+        scopeRaceDrop = scopeUi.raceDrop,
+        scopeClassLabel = scopeUi.classLabel,
+        scopeClassDrop = scopeUi.classDrop,
+        scopeSpecLabel = scopeUi.specLabel,
+        scopeSpecDrop = scopeUi.specDrop,
         customNameLabel = nil,
         customName = nil,
         customEventEnabled = nil,
@@ -765,7 +779,6 @@ function Builder:EnsureFrame(owner)
         eventDungeonSpecificDrop = eventLoad.dungeonSpecificDrop,
         eventRaidSpecificLabel = eventLoad.raidSpecificLabel,
         eventRaidSpecificDrop = eventLoad.raidSpecificDrop,
-        objectTypeItem = objectTypeItem,
         itemLoadEquipped = itemLoadEquipped,
         itemLoadBags = itemLoadBags,
         itemLoadSameName = itemLoadSameName,
@@ -775,13 +788,17 @@ function Builder:EnsureFrame(owner)
         talentCDLabel = talentCDLabel,
         loadTalentIdLabel = loadTalentIdLabel,
         loadTalentNameLabel = loadTalentNameLabel,
-        classDrop = classDrop,
-        specDrop = specDrop,
-        customClassDrop = customClassDrop,
-        customSpecDrop = customSpecDrop,
         spellId = spellId,
         spellName = spellName,
         checkTalent = checkTalent,
+        cdModeLabel = cdMode.label,
+        cdModeDrop = cdMode.drop,
+        cdmPickLabel = cdmPicker.label,
+        cdmSkillDrop = cdmPicker.drop,
+        skillFilterLabel = skillFilter.label,
+        skillFilterDrop = skillFilter.drop,
+        objectTypeLabel = objectType.label,
+        objectTypeDrop = objectType.drop,
         talentId = talentId,
         talentName = talentName,
         talentCDLabel = talentCDLabel,
@@ -931,9 +948,9 @@ function Builder:EnsureFrame(owner)
         editorHint = notifyData.editorHint,
         normalNotifyTop = modules.notifyTop or -8,
         bloodlustNotifyTop = modules.bloodlustTop or -8,
-        normalSettingsContentHeight = 712,
-        castSettingsContentHeight = 712,
-        customSettingsContentHeight = 1040,
+        normalSettingsContentHeight = 748,
+        castSettingsContentHeight = 748,
+        customSettingsContentHeight = 1100,
         normalConditionTop = modules.conditionTop or -382,
         customConditionTop = modules.customConditionTop or -742,
         normalNotifyContentHeight = 780,

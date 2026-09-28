@@ -128,7 +128,18 @@ function Rows:Render(frame, cooldowns, pendingEdit)
         local selectedEvent = dirtyDraft and dirtyDraft.eventType
             or (tonumber(previousCooldownID) == tonumber(info.cooldownID) and row.selectedEvent or nil)
         for _, eventInfo in ipairs(type(events) == "table" and events or {}) do
-            eventItems[#eventItems + 1] = { value = eventInfo.eventType, text = eventInfo.name }
+            local eventType = tonumber(eventInfo.eventType)
+            local eventText = tostring(eventInfo.name or "")
+            -- Mark events that already have a voice (saved preset or an
+            -- existing native/custom alert) so the per-event setup is visible
+            -- without opening each event first.
+            local savedEntry = Controller:GetSavedVoiceEntry(info.cooldownID, eventType)
+            local configured = type(api.GetCDMVoiceConfiguredAlert) == "function"
+                and api.GetCDMVoiceConfiguredAlert(info.cooldownID, eventType) or nil
+            if savedEntry or configured then
+                eventText = eventText .. "  |cff40ff40✓|r"
+            end
+            eventItems[#eventItems + 1] = { value = eventType, text = eventText }
         end
         if pendingEdit and tonumber(pendingEdit.cooldownID) == tonumber(info.cooldownID) then
             selectedEvent = pendingEdit.eventType

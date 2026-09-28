@@ -33,6 +33,14 @@ local lastExpiration = 0
 -- update for exhaustion effects.
 local bloodlustActive
 
+-- In restricted content (raids, Mythic+, etc.) aura values are secret: tainted
+-- code may store and pass them around, but comparing/converting them errors and
+-- can taint shared aura data that Blizzard's CooldownViewer later reads. Skip
+-- any secret aura instead of touching it.
+local function IsSecretValue(value)
+    return type(issecretvalue) == "function" and issecretvalue(value) == true
+end
+
 local function SafeNormalize(normalizeSoundPath, path)
     if type(normalizeSoundPath) == "function" then
         return normalizeSoundPath(path)
@@ -136,10 +144,13 @@ function Bloodlust:CheckExhaustionFresh()
     local now = GetTime()
     for _, spellId in ipairs(EXHAUSTION_IDS) do
         local aura = C_UnitAuras.GetPlayerAuraBySpellID(spellId)
-        if aura and aura.expirationTime then
-            local remaining = (tonumber(aura.expirationTime) or 0) - now
-            if remaining >= (EXHAUSTION_DURATION - FRESH_WINDOW) then
-                return true, tonumber(aura.expirationTime) or 0
+        if not IsSecretValue(aura) and aura ~= nil then
+            local expirationTime = aura.expirationTime
+            if not IsSecretValue(expirationTime) and expirationTime ~= nil then
+                local remaining = (tonumber(expirationTime) or 0) - now
+                if remaining >= (EXHAUSTION_DURATION - FRESH_WINDOW) then
+                    return true, tonumber(expirationTime) or 0
+                end
             end
         end
     end
@@ -148,29 +159,47 @@ function Bloodlust:CheckExhaustionFresh()
 end
 
 local function GetReadableAuraSpellID(aura)
+    if IsSecretValue(aura) then
+        return nil, false
+    end
     if type(aura) ~= "table" then
         return nil, true
     end
+    local primary, fallback = aura.spellId, aura.spellID
+    if IsSecretValue(primary) or IsSecretValue(fallback) then
+        return nil, false
+    end
     local ok, spellID = pcall(function()
-        return tonumber(aura.spellId or aura.spellID)
+        return tonumber(primary or fallback)
     end)
     return ok and spellID or nil, ok
 end
 
 function Bloodlust:UpdateMayContainExhaustion(updateInfo)
-    if type(updateInfo) ~= "table" or updateInfo.isFullUpdate == true then
+    if type(updateInfo) ~= "table" then
+        return true
+    end
+    local isFullUpdate = updateInfo.isFullUpdate
+    if IsSecretValue(isFullUpdate) or isFullUpdate == true then
         return true
     end
 
-    for _, aura in ipairs(type(updateInfo.addedAuras) == "table" and updateInfo.addedAuras or {}) do
+    local addedAuras = updateInfo.addedAuras
+    if IsSecretValue(addedAuras) then
+        return true
+    end
+    for _, aura in ipairs(type(addedAuras) == "table" and addedAuras or {}) do
         local spellID, readable = GetReadableAuraSpellID(aura)
         if not readable or EXHAUSTION_ID_SET[spellID] then
             return true
         end
     end
 
-    local updated = type(updateInfo.updatedAuraInstanceIDs) == "table"
-        and updateInfo.updatedAuraInstanceIDs or {}
+    local updatedAuraInstanceIDs = updateInfo.updatedAuraInstanceIDs
+    if IsSecretValue(updatedAuraInstanceIDs) then
+        return true
+    end
+    local updated = type(updatedAuraInstanceIDs) == "table" and updatedAuraInstanceIDs or {}
     if #updated > 0 then
         if not C_UnitAuras or type(C_UnitAuras.GetAuraDataByAuraInstanceID) ~= "function" then
             return true

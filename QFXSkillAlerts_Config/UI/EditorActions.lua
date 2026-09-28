@@ -14,6 +14,29 @@ local CONST = NS.Constants or {}
 local ITEM_LOAD_NONE = CONST.ITEM_LOAD_NONE or "none"
 local ITEM_LOAD_EQUIPPED = CONST.ITEM_LOAD_EQUIPPED or "equipped"
 local ITEM_LOAD_BAGS = CONST.ITEM_LOAD_BAGS or "bags"
+local ALL_RACES_ID = CONST.ALL_RACES_ID or 0
+local ALL_CLASSES_ID = CONST.ALL_CLASSES_ID or 0
+local ALL_SPECS_ID = CONST.ALL_SPECS_ID or 0
+
+-- Reads a multi-select scope dropdown into a saved map. "Nothing concrete
+-- selected" means the whole scope (all races / classes / specs).
+local function ReadScopeDropdownMap(dropdown, allID)
+    local concrete = {}
+    local hasConcrete = false
+    if dropdown and Widgets and type(Widgets.GetMultiDropdownValues) == "function" then
+        for value, enabled in pairs(Widgets:GetMultiDropdownValues(dropdown) or {}) do
+            value = tonumber(value) or 0
+            if enabled == true and value > 0 then
+                concrete[value] = true
+                hasConcrete = true
+            end
+        end
+    end
+    if not hasConcrete then
+        return { [allID] = true }
+    end
+    return concrete
+end
 
 local function GetState()
     if NS.AceOptions and type(NS.AceOptions.GetState) == "function" then
@@ -73,14 +96,15 @@ function Actions:Install(owner, frame)
     local tabVoice = widgets.tabVoice
     local tabImage = widgets.tabImage
     local tabText = widgets.tabText
-    local classDrop = widgets.classDrop
-    local specDrop = widgets.specDrop
-    local customClassDrop = widgets.customClassDrop
-    local customSpecDrop = widgets.customSpecDrop
-    local scopeButton = widgets.scopeButton
+    local scopeRaceDrop = widgets.scopeRaceDrop
+    local scopeClassDrop = widgets.scopeClassDrop
+    local scopeSpecDrop = widgets.scopeSpecDrop
     local actionSave = widgets.actionSave
     local actionTest = widgets.actionTest
     local checkTalent = widgets.checkTalent
+    local cdModeDrop = widgets.cdModeDrop
+    local cdmSkillDrop = widgets.cdmSkillDrop
+    local skillFilterDrop = widgets.skillFilterDrop
     local loadTalentEnabled = widgets.loadTalentEnabled
     local delayEnabled = widgets.delayEnabled
     local voiceEnabled = widgets.voiceEnabled
@@ -107,7 +131,7 @@ function Actions:Install(owner, frame)
     local eventRaidModeDrop = widgets.eventRaidModeDrop
     local eventDungeonSpecificDrop = widgets.eventDungeonSpecificDrop
     local eventRaidSpecificDrop = widgets.eventRaidSpecificDrop
-    local objectTypeItem = widgets.objectTypeItem
+    local objectTypeDrop = widgets.objectTypeDrop
     local itemLoadEquipped = widgets.itemLoadEquipped
     local itemLoadBags = widgets.itemLoadBags
     local itemLoadSameName = widgets.itemLoadSameName
@@ -468,33 +492,95 @@ function Actions:Install(owner, frame)
         end
     end
 
-    if classDrop then
-        classDrop.qfxsaOnValueChanged = function(value)
-            Pull(owner)
-            local state = GetState()
-            state.classID = tonumber(value) or 0
-            -- Do not set specID to nil.  GetState() treats nil as "sync to the
-            -- player's current spec", which makes switching to another class or
-            -- "all classes" jump back unexpectedly.  When class changes, default
-            -- to "all specs".
-            state.specID = 0
-            if NS.AceOptions and type(NS.AceOptions.EnsureValidScope) == "function" then
-                NS.AceOptions:EnsureValidScope()
+    -- Always-visible scope dropdowns. Handlers update the saved maps directly
+    -- (without a full refresh) so toggling one entry keeps the popup open.
+    local function RefreshSpecScopeDropdown()
+        local state = GetState()
+        local classMap = state.alertClassIDs or { [ALL_CLASSES_ID] = true }
+        local selector = NS.UI and NS.UI.ScopeSelector
+        local items = selector and selector.GetScopeSpecItems and selector:GetScopeSpecItems(classMap) or {}
+        local allowed = {}
+        for _, item in ipairs(items) do
+            local specID = tonumber(item and item.value) or 0
+            if specID > 0 then
+                allowed[specID] = true
             end
-            Refresh(owner)
+        end
+        local specMap = {}
+        for specID, enabled in pairs(state.alertSpecIDs or {}) do
+            specID = tonumber(specID) or 0
+            if enabled == true and (specID == 0 or allowed[specID]) then
+                specMap[specID] = true
+            end
+        end
+        if specMap[ALL_SPECS_ID] == true then
+            specMap = { [ALL_SPECS_ID] = true }
+        end
+        local hasConcrete = false
+        for specID, enabled in pairs(specMap) do
+            if enabled == true and (tonumber(specID) or 0) > 0 then
+                hasConcrete = true
+            end
+        end
+        if not hasConcrete then
+            specMap = { [ALL_SPECS_ID] = true }
+        end
+        state.alertSpecIDs = specMap
+        state.customSpecIDs = specMap
+        if scopeSpecDrop and Widgets and Widgets.SetMultiDropdownValues then
+            Widgets:SetDropdownItems(scopeSpecDrop, items)
+            Widgets:SetMultiDropdownValues(scopeSpecDrop, specMap, L("PLACEHOLDER_SELECT_SPECS"))
         end
     end
 
-    if specDrop then
-        specDrop.qfxsaOnValueChanged = function(value)
+    if scopeRaceDrop then
+        scopeRaceDrop.qfxsaOnValueChanged = function()
             Pull(owner)
             local state = GetState()
-            if (tonumber(state.classID) or 0) == 0 then
-                state.specID = 0
+            local map = ReadScopeDropdownMap(scopeRaceDrop, ALL_RACES_ID)
+            state.alertRaceIDs = map
+            state.customRaceIDs = map
+        end
+    end
+
+    if scopeClassDrop then
+        scopeClassDrop.qfxsaOnValueChanged = function()
+            Pull(owner)
+            local state = GetState()
+            local map = ReadScopeDropdownMap(scopeClassDrop, ALL_CLASSES_ID)
+            state.alertClassIDs = map
+            state.customClassIDs = map
+            RefreshSpecScopeDropdown()
+        end
+    end
+
+    if scopeSpecDrop then
+        scopeSpecDrop.qfxsaOnValueChanged = function()
+            Pull(owner)
+            local state = GetState()
+            local map = ReadScopeDropdownMap(scopeSpecDrop, ALL_SPECS_ID)
+            state.alertSpecIDs = map
+            state.customSpecIDs = map
+        end
+    end
+
+    if objectTypeDrop then
+        objectTypeDrop.qfxsaOnValueChanged = function(value)
+            Pull(owner)
+            local state = GetState()
+            state.objectType = tostring(value or "") == "item" and "item" or "spell"
+            if state.objectType == "item" then
+                state.checkTalent = false
+                state.loadTalentEnabled = false
+                state.itemLoadMode = state.itemLoadMode or ITEM_LOAD_NONE
+                state.cdMode = "fixed"
+                state.gameStateCD = false
             else
-                state.specID = tonumber(value) or 0
+                state.itemLoadMode = ITEM_LOAD_NONE
+                state.itemLoadSameName = false
             end
             Refresh(owner)
+            RefreshImageIconPreview()
         end
     end
 
@@ -616,25 +702,6 @@ function Actions:Install(owner, frame)
         end)
     end
 
-    if objectTypeItem and objectTypeItem.HookScript then
-        objectTypeItem:HookScript("OnClick", function(self)
-            Pull(owner)
-            local state = GetState()
-            state.objectType = (self and self.GetChecked and self:GetChecked() == true) and "item" or "spell"
-            if state.objectType == "item" then
-                state.checkTalent = false
-                state.loadTalentEnabled = false
-                state.itemLoadMode = state.itemLoadMode or ITEM_LOAD_NONE
-            else
-                state.itemLoadMode = ITEM_LOAD_NONE
-                state.itemLoadSameName = false
-            end
-            Refresh(owner)
-            RefreshImageIconPreview()
-        end)
-    end
-
-
     local function SetItemLoadMode(mode)
         Pull(owner)
         local state = GetState()
@@ -712,43 +779,6 @@ function Actions:Install(owner, frame)
         end)
     end
 
-
-    if scopeButton then
-        scopeButton:SetScript("OnClick", function()
-            Pull(owner)
-            local state = GetState()
-            if NS.UI and NS.UI.ScopeSelector and type(NS.UI.ScopeSelector.Open) == "function" then
-                NS.UI.ScopeSelector:Open(state, function()
-                    Refresh(owner)
-                end)
-            end
-        end)
-    end
-
-    if customClassDrop then
-        customClassDrop.qfxsaOnValueChanged = function()
-            Pull(owner)
-            local state = GetState()
-            if Widgets and type(Widgets.GetMultiDropdownValues) == "function" then
-                state.alertClassIDs = Widgets:GetMultiDropdownValues(customClassDrop)
-                state.customClassIDs = state.alertClassIDs
-            end
-            state.alertSpecIDs = { [0] = true }
-            state.customSpecIDs = state.alertSpecIDs
-            Refresh(owner)
-        end
-    end
-
-    if customSpecDrop then
-        customSpecDrop.qfxsaOnValueChanged = function()
-            Pull(owner)
-            local state = GetState()
-            if Widgets and type(Widgets.GetMultiDropdownValues) == "function" then
-                state.alertSpecIDs = Widgets:GetMultiDropdownValues(customSpecDrop)
-                state.customSpecIDs = state.alertSpecIDs
-            end
-        end
-    end
 
     if customEventsDrop then
         customEventsDrop.qfxsaOnValueChanged = function()
@@ -922,6 +952,61 @@ function Actions:Install(owner, frame)
         end)
     end
 
+    if cdModeDrop then
+        cdModeDrop.qfxsaOnValueChanged = function(value)
+            Pull(owner)
+            local state = GetState()
+            local mode = tostring(value or "")
+            if mode ~= "ready" and mode ~= "cooldown" then
+                mode = "fixed"
+            end
+            state.cdMode = mode
+            state.gameStateCD = mode ~= "fixed"
+            Refresh(owner)
+        end
+    end
+
+    if cdmSkillDrop then
+        -- Picking a Cooldown Manager skill just fills the spell ID and name
+        -- (and the base CD through the normal autofill); everything else stays
+        -- editable as before.
+        cdmSkillDrop.qfxsaOnValueChanged = function(value)
+            local spellID = tonumber(value)
+            if not spellID or spellID <= 0 then
+                return
+            end
+            Pull(owner)
+            local state = GetState()
+            state.spellId = spellID
+            local ace = NS.AceOptions
+            if ace and type(ace.AutofillFromSpellId) == "function" then
+                ace:AutofillFromSpellId()
+            end
+            Refresh(owner)
+        end
+    end
+
+    if skillFilterDrop then
+        -- Selects which spec's skills the quick picker lists; only the picker
+        -- is rebuilt so the editor is not fully refreshed on each change.
+        skillFilterDrop.qfxsaOnValueChanged = function(value)
+            local frame = owner.frame
+            if not (frame and cdmSkillDrop) then
+                return
+            end
+            local selectedSpec = tonumber(value) or 0
+            frame.qfxsaSkillFilter = selectedSpec
+            local fields = NS.UI and NS.UI.EditorFields
+            local items = fields and type(fields.FilterSkillItems) == "function"
+                and fields:FilterSkillItems(frame.qfxsaCdmSkillItems or {}, selectedSpec) or {}
+            Widgets:SetDropdownItems(cdmSkillDrop, items)
+            local fallback = #items > 0 and L("PLACEHOLDER_CDM_PICK") or L("PLACEHOLDER_NO_MATCH_SKILL")
+            local state = GetState()
+            Widgets:SetDropdownValue(cdmSkillDrop, tonumber(state.spellId) or 0, fallback)
+            Widgets:SetDropdownEnabled(cdmSkillDrop, #items > 0)
+        end
+    end
+
     if loadTalentEnabled then
         loadTalentEnabled:SetScript("OnClick", function(button)
             Pull(owner)
@@ -1079,4 +1164,18 @@ function Actions:Install(owner, frame)
     if widgets.textNudgeRight then widgets.textNudgeRight:SetScript("OnClick", function() NudgeTextOffset(1, 0) end) end
     if widgets.textNudgeReset then widgets.textNudgeReset:SetScript("OnClick", function() NudgeTextOffset(-(tonumber(widgets.textOffsetX and widgets.textOffsetX:GetText()) or 0), -(tonumber(widgets.textOffsetY and widgets.textOffsetY:GetText()) or 0)) end) end
 
+    -- The CDM skill picker is only usable out of combat (Cooldown Manager data
+    -- is not readable there). Rebuild it when combat ends or CDM data loads
+    -- while the editor is open.
+    if type(CreateFrame) == "function" and not Actions.cdmPickerEventFrame then
+        local pickerEventFrame = CreateFrame("Frame")
+        pickerEventFrame:RegisterEvent("PLAYER_REGEN_ENABLED")
+        pickerEventFrame:RegisterEvent("COOLDOWN_VIEWER_DATA_LOADED")
+        pickerEventFrame:SetScript("OnEvent", function()
+            if frame and frame:IsShown() then
+                Refresh(owner)
+            end
+        end)
+        Actions.cdmPickerEventFrame = pickerEventFrame
+    end
 end

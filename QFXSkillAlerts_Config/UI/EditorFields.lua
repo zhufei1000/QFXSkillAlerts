@@ -24,34 +24,6 @@ local SetEnabled = Layout.SetEnabled
 local SetTabVisual = Layout.SetTabVisual
 local SetManyShown = Layout.SetManyShown
 
-local function BuildDropdownItems(values)
-    local items = {}
-    for value, text in pairs(values or {}) do
-        items[#items + 1] = { value = value, text = text }
-    end
-    table.sort(items, function(a, b)
-        if tonumber(a.value) == 0 and tonumber(b.value) ~= 0 then return true end
-        if tonumber(b.value) == 0 and tonumber(a.value) ~= 0 then return false end
-        return tostring(a.text or "") < tostring(b.text or "")
-    end)
-    return items
-end
-
-local DropdownItemCache = {}
-
-local function ClearDropdownItemCache()
-    for key in pairs(DropdownItemCache) do
-        DropdownItemCache[key] = nil
-    end
-end
-
-local function GetCachedClassItems()
-    if not DropdownItemCache.classItems then
-        DropdownItemCache.classItems = BuildDropdownItems(NS.AceOptions:GetClassValues())
-    end
-    return DropdownItemCache.classItems
-end
-
 local function CopyNumberBoolMap(source)
     local copy = {}
     if type(source) == "table" then
@@ -99,108 +71,6 @@ function NormalizeCustomRaceMap(map)
         return { [ALL_RACES_ID] = true }
     end
     return copy
-end
-
-local function CountConcreteSelections(map)
-    local count = 0
-    for key, enabled in pairs(map or {}) do
-        if enabled == true and (tonumber(key) or 0) > 0 then
-            count = count + 1
-        end
-    end
-    return count
-end
-
-local function BuildScopeSummary(state)
-    if NS.UI and NS.UI.ScopeSelector and type(NS.UI.ScopeSelector.BuildSummary) == "function" then
-        return NS.UI.ScopeSelector:BuildSummary(state)
-    end
-    local raceMap = NormalizeCustomRaceMap(state and state.alertRaceIDs)
-    local classMap = NormalizeCustomClassMap(state and (state.alertClassIDs or state.customClassIDs), state and state.classID)
-    local specMap = NormalizeCustomSpecMap(state and (state.alertSpecIDs or state.customSpecIDs), state and state.specID)
-    local raceText = raceMap[ALL_RACES_ID] and L("SCOPE_ALL_RACES") or L("SCOPE_RACE_COUNT", CountConcreteSelections(raceMap))
-    local classText = classMap[0] and L("SCOPE_ALL_CLASSES") or L("SCOPE_CLASS_COUNT", CountConcreteSelections(classMap))
-    local specText = specMap[0] and L("SCOPE_ALL_SPECS") or L("SCOPE_SPEC_COUNT", CountConcreteSelections(specMap))
-    return string.format("%s / %s / %s", raceText, classText, specText)
-end
-
-local function GetCustomClassItems()
-    local key = "customClass:noAll"
-    if DropdownItemCache[key] then
-        return DropdownItemCache[key]
-    end
-    local items = {}
-    for _, item in ipairs(GetCachedClassItems() or {}) do
-        if tonumber(item.value) ~= 0 then
-            items[#items + 1] = item
-        end
-    end
-    DropdownItemCache[key] = items
-    return items
-end
-
-local function GetCustomSpecItems(classMap)
-    classMap = NormalizeCustomClassMap(classMap, 0)
-    if classMap[0] == true then
-        local key = "customSpec:allNoAll"
-        if DropdownItemCache[key] then
-            return DropdownItemCache[key]
-        end
-        local items = {}
-        local classValues = NS.AceOptions:GetClassValues()
-        local classOptions = NS.AceOptions:GetClassOptionList()
-        for _, classInfo in ipairs(classOptions or {}) do
-            local classID = tonumber(classInfo.classID) or 0
-            if classID > 0 then
-                local specValues = NS.AceOptions:GetSpecValues(classID)
-                for specID, specText in pairs(specValues or {}) do
-                    specID = tonumber(specID) or 0
-                    if specID > 0 then
-                        items[#items + 1] = { value = specID, text = tostring(classValues[classID] or classID) .. " - " .. tostring(specText or specID) }
-                    end
-                end
-            end
-        end
-        table.sort(items, function(a, b)
-            return tostring(a.text or "") < tostring(b.text or "")
-        end)
-        DropdownItemCache[key] = items
-        return items
-    end
-
-    local classKeys = {}
-    for classID, enabled in pairs(classMap or {}) do
-        if enabled == true and tonumber(classID) and tonumber(classID) > 0 then
-            classKeys[#classKeys + 1] = tonumber(classID)
-        end
-    end
-    table.sort(classKeys)
-    local key = "customSpec:"
-    for _, classID in ipairs(classKeys) do key = key .. tostring(classID) .. "," end
-    if DropdownItemCache[key] then
-        return DropdownItemCache[key]
-    end
-
-    local items = {}
-    local classValues = NS.AceOptions:GetClassValues()
-    local multiClass = #classKeys > 1
-    for _, classID in ipairs(classKeys) do
-        local specValues = NS.AceOptions:GetSpecValues(classID)
-        for specID, specText in pairs(specValues or {}) do
-            specID = tonumber(specID) or 0
-            if specID > 0 then
-                items[#items + 1] = {
-                    value = specID,
-                    text = multiClass and (tostring(classValues[classID] or classID) .. " - " .. tostring(specText or specID)) or tostring(specText or specID),
-                }
-            end
-        end
-    end
-    table.sort(items, function(a, b)
-        return tostring(a.text or "") < tostring(b.text or "")
-    end)
-    DropdownItemCache[key] = items
-    return items
 end
 
 local function NormalizeAlertTab(value)
@@ -676,6 +546,458 @@ local function GetEventVoiceItems()
     return {}
 end
 
+-- Cached catalog for the Cooldown Manager skill picker. The picker list is
+-- rebuilt on every editor push, so keep it until the CDM data serial, the
+-- current spec, or the combat state changes.
+local CdmSkillItemCache = {
+    serial = nil,
+    classID = -1,
+    specID = -1,
+    inCombat = false,
+    items = nil,
+    enabled = false,
+    reason = nil,
+}
+
+-- Skill picker fed by the Cooldown Manager catalog. Returns the dropdown
+-- items, whether the picker can be used, and a reason key when it cannot.
+-- CDM data is not readable in combat, so the whole list is withheld there.
+-- Kept as Fields methods: WoW's Lua 5.1 allows at most 60 upvalues per
+-- function, and PushToWidgets is already close to the limit.
+function Fields:GetCdmSkillItems()
+    local api = NS.API or {}
+    if type(api.GetCDMVoiceCategories) ~= "function"
+        or type(api.GetCDMVoiceCooldownsForCategory) ~= "function" then
+        return {}, false, "not_available", 0
+    end
+    local inCombat = type(InCombatLockdown) == "function" and InCombatLockdown() == true
+    local serial = type(api.GetCDMVoiceRefreshSerial) == "function"
+        and (tonumber(api.GetCDMVoiceRefreshSerial()) or 0) or -1
+    local classID, specID = 0, 0
+    if type(api.GetCDMVoiceCurrentClassSpec) == "function" then
+        classID, specID = api.GetCDMVoiceCurrentClassSpec()
+        classID = tonumber(classID) or 0
+        specID = tonumber(specID) or 0
+    end
+    local cache = CdmSkillItemCache
+    if cache.items and cache.serial == serial and cache.inCombat == inCombat
+        and cache.classID == classID and cache.specID == specID then
+        return cache.items, cache.enabled, cache.reason, cache.specID
+    end
+    if inCombat then
+        return {}, false, "combat", specID
+    end
+    local items = {}
+    local catalogItems = {}
+    local liveSeen = {}
+    for _, category in ipairs(api.GetCDMVoiceCategories() or {}) do
+        -- CD alerts only detect real spell cooldowns / readiness edges, so the
+        -- aura-tracking categories (Tracked Buffs / Tracked Bars) are not
+        -- offered here; use the CDM voice editor for aura events instead.
+        local categoryKey = tostring(category.key or "")
+        if categoryKey ~= "trackedBuff" and categoryKey ~= "trackedBar" then
+            local rows = api.GetCDMVoiceCooldownsForCategory(category.key) or {}
+            for _, info in ipairs(rows) do
+                local spellID = tonumber(info.spellID)
+                if spellID and spellID > 0 then
+                    catalogItems[#catalogItems + 1] = {
+                        spellID = spellID,
+                        spellName = tostring(info.spellName or spellID),
+                    }
+                    if not liveSeen[spellID] then
+                        liveSeen[spellID] = true
+                        items[#items + 1] = {
+                            value = spellID,
+                            text = string.format("%s · %s",
+                                tostring(category.name or category.key or ""),
+                                tostring(info.spellName or spellID)),
+                            classID = classID,
+                            specID = specID,
+                        }
+                    end
+                end
+            end
+        end
+    end
+
+    -- Remember the current spec's full catalog. Blizzard only exposes the
+    -- active spec's Cooldown Manager data, so each spec's complete list is
+    -- cached the first time it is read and listed later from any other spec.
+    if classID > 0 and specID > 0 and #catalogItems > 0
+        and type(api.SaveCDMVoiceSkillCatalog) == "function" then
+        api.SaveCDMVoiceSkillCatalog(classID, specID, catalogItems)
+    end
+
+    local classNames, specNames = {}, {}
+    local classOptions = NS.AceOptions and NS.AceOptions.GetClassOptionList and NS.AceOptions:GetClassOptionList() or {}
+    for _, classInfo in ipairs(classOptions or {}) do
+        local cid = tonumber(classInfo.classID) or 0
+        if cid > 0 then
+            classNames[cid] = tostring(classInfo.className or cid)
+        end
+    end
+    local function GetSpecName(cid, sid)
+        local key = tostring(cid) .. ":" .. tostring(sid)
+        local name = specNames[key]
+        if name == nil then
+            name = false
+            local specOptions = NS.AceOptions and NS.AceOptions.GetSpecOptionList and NS.AceOptions:GetSpecOptionList(cid) or {}
+            for _, specInfo in ipairs(specOptions or {}) do
+                if tonumber(specInfo.specID) == sid then
+                    name = tostring(specInfo.specName or sid)
+                    break
+                end
+            end
+            specNames[key] = name
+        end
+        return name
+    end
+    -- Cross-spec entries read "Class·Spec · Skill". Each spec keeps its own
+    -- list: the same spell may legitimately appear under several specs, so
+    -- there is no cross-spec dedup (the spec filter separates them).
+    local function AppendItem(spellID, cid, sid, name, dedupSet)
+        spellID = tonumber(spellID) or 0
+        if spellID <= 0 then
+            return
+        end
+        if dedupSet then
+            if dedupSet[spellID] then
+                return
+            end
+            dedupSet[spellID] = true
+        end
+        cid = tonumber(cid) or 0
+        sid = tonumber(sid) or 0
+        local scopeText = cid > 0 and (classNames[cid] or tostring(cid)) or ""
+        if cid > 0 and sid > 0 then
+            local specName = GetSpecName(cid, sid)
+            if specName and specName ~= "" then
+                scopeText = scopeText .. "·" .. specName
+            end
+        end
+        local spellName = tostring(name or spellID)
+        local text = scopeText ~= "" and (scopeText .. " · " .. spellName) or spellName
+        items[#items + 1] = {
+            value = spellID,
+            text = text,
+            searchText = text,
+            classID = cid > 0 and cid or nil,
+            specID = sid > 0 and sid or nil,
+        }
+    end
+    local function SortItemsFrom(startIndex)
+        if #items <= startIndex then
+            return
+        end
+        local slice = {}
+        for index = startIndex, #items do
+            slice[#slice + 1] = items[index]
+        end
+        table.sort(slice, function(a, b) return tostring(a.text) < tostring(b.text) end)
+        for index, item in ipairs(slice) do
+            items[startIndex + index - 1] = item
+        end
+    end
+
+    -- Cached full catalogs of every other class/spec scope.
+    local catalogSpecs = {}
+    if type(api.GetCDMVoiceSkillCatalog) == "function" then
+        local catalog = api.GetCDMVoiceSkillCatalog() or {}
+        local cachedSpecs = {}
+        for cachedClassID, classMap in pairs(catalog) do
+            cachedClassID = tonumber(cachedClassID) or 0
+            if cachedClassID > 0 and type(classMap) == "table" then
+                for cachedSpecID, record in pairs(classMap) do
+                    cachedSpecID = tonumber(cachedSpecID) or 0
+                    if cachedSpecID > 0 and type(record) == "table" and type(record.items) == "table" then
+                        catalogSpecs[cachedSpecID] = true
+                        cachedSpecs[#cachedSpecs + 1] = {
+                            classID = cachedClassID,
+                            specID = cachedSpecID,
+                            items = record.items,
+                        }
+                    end
+                end
+            end
+        end
+        table.sort(cachedSpecs, function(a, b)
+            if a.classID ~= b.classID then
+                return a.classID < b.classID
+            end
+            return a.specID < b.specID
+        end)
+        for _, record in ipairs(cachedSpecs) do
+            local isCurrent = record.classID == classID and record.specID == specID
+            local startIndex = #items + 1
+            -- The current spec's live layout wins; only fill its missing
+            -- catalog entries. Other specs list their full catalog.
+            local dedupSet = isCurrent and liveSeen or {}
+            for _, entry in ipairs(record.items) do
+                AppendItem(entry.spellID, record.classID, record.specID, entry.spellName, dedupSet)
+            end
+            SortItemsFrom(startIndex)
+        end
+    end
+
+    -- Saved Cooldown Manager presets (configured or imported) only fill specs
+    -- that have no cached catalog yet; for the current spec they fill any gap
+    -- the live layout does not list.
+    if type(api.GetCDMVoiceSavedEntries) == "function" then
+        local savedEntries = api.GetCDMVoiceSavedEntries() or {}
+        local savedDedup = {}
+        local startIndex = #items + 1
+        for _, entry in ipairs(savedEntries) do
+            local entryClassID = tonumber(entry.classID) or 0
+            local entrySpecID = tonumber(entry.specID) or 0
+            local entrySpellID = tonumber(entry.spellId) or 0
+            if entrySpellID > 0 then
+                if entryClassID == classID and entrySpecID == specID then
+                    AppendItem(entrySpellID, entryClassID, entrySpecID, entry.spellName, liveSeen)
+                elseif not catalogSpecs[entrySpecID] then
+                    local key = tostring(entrySpecID) .. ":" .. tostring(entrySpellID)
+                    if not savedDedup[key] then
+                        savedDedup[key] = true
+                        AppendItem(entrySpellID, entryClassID, entrySpecID, entry.spellName)
+                    end
+                end
+            end
+        end
+        SortItemsFrom(startIndex)
+    end
+    if #items == 0 then
+        return {}, false, "data_not_ready", 0
+    end
+    cache.serial = serial
+    cache.classID = classID
+    cache.specID = specID
+    cache.inCombat = inCombat
+    cache.items = items
+    cache.enabled = true
+    cache.reason = nil
+    return items, true, nil, specID
+end
+
+-- Class/spec filter items for the quick skill picker: every class's specs in
+-- client order, colored by class, without an "All" entry (single selection).
+-- Specs that already have a complete cached catalog get a green check.
+function Fields:GetSkillFilterItems()
+    local selector = NS.UI and NS.UI.ScopeSelector
+    local source = selector and type(selector.GetScopeSpecItems) == "function"
+        and selector:GetScopeSpecItems({ [0] = true }) or {}
+    local catalog = {}
+    local api = NS.API or {}
+    if type(api.GetCDMVoiceSkillCatalog) == "function" then
+        for _, classMap in pairs(api.GetCDMVoiceSkillCatalog() or {}) do
+            if type(classMap) == "table" then
+                for specID, record in pairs(classMap) do
+                    if type(record) == "table" and type(record.items) == "table" and #record.items > 0 then
+                        catalog[tonumber(specID) or 0] = true
+                    end
+                end
+            end
+        end
+    end
+    local items = {}
+    for _, item in ipairs(source) do
+        local value = tonumber(item.value) or 0
+        if value > 0 then
+            if catalog[value] then
+                items[#items + 1] = {
+                    value = value,
+                    text = tostring(item.text or "") .. "  |cff40ff40✓|r",
+                    searchText = item.searchText,
+                }
+            else
+                items[#items + 1] = item
+            end
+        end
+    end
+    return items
+end
+
+-- Keeps only picker entries that belong to the selected spec. 0 or no
+-- selection returns the full list; untagged entries stay visible as fallback.
+function Fields:FilterSkillItems(items, specID)
+    if type(items) ~= "table" then
+        return {}
+    end
+    specID = tonumber(specID) or 0
+    if specID <= 0 then
+        return items
+    end
+    local filtered = {}
+    for _, item in ipairs(items) do
+        local itemSpecID = tonumber(item.specID) or 0
+        if itemSpecID == 0 or itemSpecID == specID then
+            filtered[#filtered + 1] = item
+        end
+    end
+    return filtered
+end
+
+-- CD source dropdown: fixed number or game readiness edge. Per-charge
+-- announcements are not offered here; use the Cooldown Manager's ChargeGained
+-- voice preset for that.
+function Fields:GetCdmModeItems()
+    return {
+        { value = "fixed", text = L("CD_MODE_FIXED") },
+        { value = "ready", text = L("CD_MODE_READY") },
+        { value = "cooldown", text = L("CD_MODE_COOLDOWN") },
+    }
+end
+
+function Fields:IsGameStateCdMode(state)
+    if type(state) ~= "table" then
+        return false
+    end
+    local mode = tostring(state.cdMode or "")
+    if mode == "ready" or mode == "charge" or mode == "cooldown" then
+        return true
+    end
+    if mode == "fixed" then
+        return false
+    end
+    return state.gameStateCD == true
+end
+
+-- Spell / item type selector shown in front of the Cooldown Manager picker.
+function Fields:GetObjectTypeItems()
+    return {
+        { value = OBJECT_TYPE_SPELL, text = L("OBJECT_TYPE_SPELL") },
+        { value = OBJECT_TYPE_ITEM, text = L("OBJECT_TYPE_ITEM") },
+    }
+end
+
+function Fields:PushObjectTypeDropdown(widgets, state)
+    if not widgets.objectTypeDrop then
+        return
+    end
+    Widgets:SetDropdownItems(widgets.objectTypeDrop, self:GetObjectTypeItems())
+    Widgets:SetDropdownValue(widgets.objectTypeDrop, state.objectType, L("OBJECT_TYPE_SPELL"))
+end
+
+-- Always-visible race / class / spec multi-select dropdowns. The class
+-- dropdown drives which specs the spec dropdown lists; class and spec item
+-- text carries the class color escape so the controls and lists are colored.
+function Fields:PushScopeToDropdowns(widgets, state)
+    local selector = NS.UI and NS.UI.ScopeSelector
+    if not (selector and widgets.scopeRaceDrop and widgets.scopeClassDrop and widgets.scopeSpecDrop) then
+        return
+    end
+    local raceMap = NormalizeCustomRaceMap(state.alertRaceIDs or state.customRaceIDs)
+    local classMap = NormalizeCustomClassMap(state.alertClassIDs or state.customClassIDs, state.classID)
+    local specMap = NormalizeCustomSpecMap(state.alertSpecIDs or state.customSpecIDs, state.specID)
+    state.alertRaceIDs = raceMap
+    state.customRaceIDs = raceMap
+    state.alertClassIDs = classMap
+    state.customClassIDs = classMap
+    state.alertSpecIDs = specMap
+    state.customSpecIDs = specMap
+
+    Widgets:SetDropdownItems(widgets.scopeRaceDrop, selector:GetScopeRaceItems())
+    Widgets:SetMultiDropdownValues(widgets.scopeRaceDrop, raceMap, L("PLACEHOLDER_SELECT_RACES"))
+    Widgets:SetDropdownItems(widgets.scopeClassDrop, selector:GetScopeClassItems())
+    Widgets:SetMultiDropdownValues(widgets.scopeClassDrop, classMap, L("PLACEHOLDER_SELECT_CLASSES"))
+    Widgets:SetDropdownItems(widgets.scopeSpecDrop, selector:GetScopeSpecItems(classMap))
+    Widgets:SetMultiDropdownValues(widgets.scopeSpecDrop, specMap, L("PLACEHOLDER_SELECT_SPECS"))
+end
+
+function Fields:PullScopeFromDropdowns(widgets, state)
+    local function ReadMap(dropdown, allID)
+        local concrete = {}
+        local hasConcrete = false
+        for value, enabled in pairs(Widgets:GetMultiDropdownValues(dropdown) or {}) do
+            value = tonumber(value) or 0
+            if enabled == true and value > 0 then
+                concrete[value] = true
+                hasConcrete = true
+            end
+        end
+        if not hasConcrete then
+            return { [allID] = true }
+        end
+        return concrete
+    end
+
+    state.alertRaceIDs = ReadMap(widgets.scopeRaceDrop, ALL_RACES_ID)
+    state.alertClassIDs = ReadMap(widgets.scopeClassDrop, 0)
+    state.alertSpecIDs = ReadMap(widgets.scopeSpecDrop, 0)
+    state.customRaceIDs = state.alertRaceIDs
+    state.customClassIDs = state.alertClassIDs
+    state.customSpecIDs = state.alertSpecIDs
+    state.classID = 0
+    state.specID = 0
+end
+
+function Fields:PlaceSectionWidget(parent, control, x, y)
+    if control and control.ClearAllPoints and control.SetPoint then
+        control:ClearAllPoints()
+        control:SetPoint("TOPLEFT", parent, "TOPLEFT", x, y)
+    end
+end
+
+-- Two layouts share the spell section: the redesigned four-row spell layout
+-- (picker on top, CD source + fixed CD on one row, one talent per row) and the
+-- original item layout (ID / name / fixed CD with the item load checkboxes).
+function Fields:ApplySpellSectionLayout(widgets, isItemObject)
+    local section = widgets and widgets.spellSection
+    if not section then
+        return false
+    end
+    -- Event-voice entries hide the type selector; switching back to a
+    -- cooldown/cast entry in the same session must re-show it.
+    SetManyShown({ widgets.objectTypeLabel, widgets.objectTypeDrop }, true)
+    -- Keep the ID / name / CD fields on one shared width grid.
+    if widgets.spellId and widgets.spellId.SetWidth then widgets.spellId:SetWidth(112) end
+    if widgets.spellIdLabel and widgets.spellIdLabel.SetWidth then widgets.spellIdLabel:SetWidth(112) end
+    if widgets.spellName and widgets.spellName.SetWidth then widgets.spellName:SetWidth(220) end
+    if widgets.spellNameLabel and widgets.spellNameLabel.SetWidth then widgets.spellNameLabel:SetWidth(220) end
+    self:PlaceSectionWidget(section, widgets.objectTypeLabel, 16, isItemObject and -46 or -44)
+    self:PlaceSectionWidget(section, widgets.objectTypeDrop, 16, isItemObject and -70 or -68)
+    SetManyShown({ widgets.skillFilterLabel, widgets.skillFilterDrop, widgets.cdmPickLabel, widgets.cdmSkillDrop }, not isItemObject)
+    if isItemObject then
+        Widgets:SetDropdownWidth(widgets.objectTypeDrop, 120)
+        self:PlaceSectionWidget(section, widgets.spellIdLabel, 150, -46)
+        self:PlaceSectionWidget(section, widgets.spellId, 150, -70)
+        self:PlaceSectionWidget(section, widgets.spellNameLabel, 274, -46)
+        self:PlaceSectionWidget(section, widgets.spellName, 274, -70)
+        self:PlaceSectionWidget(section, widgets.baseCDLabel, 510, -46)
+        self:PlaceSectionWidget(section, widgets.baseCD, 510, -70)
+        self:PlaceSectionWidget(section, widgets.itemLoadEquipped, 16, -145)
+        self:PlaceSectionWidget(section, widgets.itemLoadBags, 148, -145)
+        self:PlaceSectionWidget(section, widgets.itemLoadSameName, 280, -145)
+        return true
+    end
+    Widgets:SetDropdownWidth(widgets.objectTypeDrop, 100)
+    self:PlaceSectionWidget(section, widgets.skillFilterLabel, 124, -44)
+    self:PlaceSectionWidget(section, widgets.skillFilterDrop, 124, -68)
+    Widgets:SetDropdownWidth(widgets.skillFilterDrop, 196)
+    self:PlaceSectionWidget(section, widgets.cdmPickLabel, 328, -44)
+    self:PlaceSectionWidget(section, widgets.cdmSkillDrop, 328, -68)
+    Widgets:SetDropdownWidth(widgets.cdmSkillDrop, 320)
+    self:PlaceSectionWidget(section, widgets.spellIdLabel, 16, -106)
+    self:PlaceSectionWidget(section, widgets.spellId, 16, -130)
+    self:PlaceSectionWidget(section, widgets.spellNameLabel, 140, -106)
+    self:PlaceSectionWidget(section, widgets.spellName, 140, -130)
+    self:PlaceSectionWidget(section, widgets.cdModeLabel, 372, -106)
+    self:PlaceSectionWidget(section, widgets.cdModeDrop, 372, -130)
+    self:PlaceSectionWidget(section, widgets.baseCDLabel, 496, -106)
+    self:PlaceSectionWidget(section, widgets.baseCD, 496, -130)
+    self:PlaceSectionWidget(section, widgets.checkTalent, 16, -195)
+    self:PlaceSectionWidget(section, widgets.talentIdLabel, 176, -168)
+    self:PlaceSectionWidget(section, widgets.talentId, 176, -192)
+    self:PlaceSectionWidget(section, widgets.talentNameLabel, 300, -168)
+    self:PlaceSectionWidget(section, widgets.talentName, 300, -192)
+    self:PlaceSectionWidget(section, widgets.talentCDLabel, 532, -168)
+    self:PlaceSectionWidget(section, widgets.talentCD, 532, -192)
+    self:PlaceSectionWidget(section, widgets.loadTalentEnabled, 16, -257)
+    self:PlaceSectionWidget(section, widgets.loadTalentIdLabel, 176, -230)
+    self:PlaceSectionWidget(section, widgets.loadTalentId, 176, -254)
+    self:PlaceSectionWidget(section, widgets.loadTalentNameLabel, 300, -230)
+    self:PlaceSectionWidget(section, widgets.loadTalentName, 300, -254)
+    return true
+end
+
 local function GetEventInstanceModeItems()
     local api = NS.API or {}
     if type(api.GetEventInstanceModeOptions) == "function" then
@@ -912,13 +1234,6 @@ function Fields:UpdateImageIconPreview(editor)
     end
 end
 
-function Fields:ClearDropdownItemCache()
-    ClearDropdownItemCache()
-    if SoundFields and type(SoundFields.ClearDropdownItemCache) == "function" then
-        SoundFields:ClearDropdownItemCache()
-    end
-end
-
 function Fields:PullFromWidgets(editor)
     if not editor.frame or not editor.frame:IsShown() then
         return
@@ -1063,26 +1378,18 @@ function Fields:PullFromWidgets(editor)
     state.textOffsetY = math.floor((tonumber((widgets.textOffsetY and widgets.textOffsetY:GetText()) or "") or 0) + 0.5)
 
     if not isBloodlust then
-        state.alertRaceIDs = NormalizeCustomRaceMap(state.alertRaceIDs or state.customRaceIDs)
-        if widgets.scopeButton then
-            state.alertClassIDs = NormalizeCustomClassMap(state.alertClassIDs or state.customClassIDs, state.classID)
-        elseif widgets.customClassDrop and Widgets.GetMultiDropdownValues then
-            state.alertClassIDs = NormalizeCustomClassMap(Widgets:GetMultiDropdownValues(widgets.customClassDrop), state.classID)
+        if self.PullScopeFromDropdowns and widgets.scopeRaceDrop and Widgets.GetMultiDropdownValues then
+            self:PullScopeFromDropdowns(widgets, state)
         else
+            state.alertRaceIDs = NormalizeCustomRaceMap(state.alertRaceIDs or state.customRaceIDs)
             state.alertClassIDs = NormalizeCustomClassMap(state.alertClassIDs or state.customClassIDs, state.classID)
-        end
-        if widgets.scopeButton then
             state.alertSpecIDs = NormalizeCustomSpecMap(state.alertSpecIDs or state.customSpecIDs, state.specID)
-        elseif widgets.customSpecDrop and Widgets.GetMultiDropdownValues then
-            state.alertSpecIDs = NormalizeCustomSpecMap(Widgets:GetMultiDropdownValues(widgets.customSpecDrop), state.specID)
-        else
-            state.alertSpecIDs = NormalizeCustomSpecMap(state.alertSpecIDs or state.customSpecIDs, state.specID)
+            state.customRaceIDs = state.alertRaceIDs
+            state.customClassIDs = state.alertClassIDs
+            state.customSpecIDs = state.alertSpecIDs
+            state.classID = 0
+            state.specID = 0
         end
-        state.customRaceIDs = state.alertRaceIDs
-        state.customClassIDs = state.alertClassIDs
-        state.customSpecIDs = state.alertSpecIDs
-        state.classID = 0
-        state.specID = 0
 
         if isCustomEntry then
             state.customName = tostring((widgets.customName and widgets.customName:GetText()) or state.customName or "")
@@ -1094,6 +1401,8 @@ function Fields:PullFromWidgets(editor)
             state.baseCD = 0
             state.fixedCD = true
             state.checkTalent = false
+            state.cdMode = "fixed"
+            state.gameStateCD = false
             state.talentId = 0
             state.talentName = ""
             state.talentCD = 0
@@ -1132,6 +1441,8 @@ function Fields:PullFromWidgets(editor)
             state.itemLoadSameName = false
             state.baseCD = 0
             state.checkTalent = false
+            state.cdMode = "fixed"
+            state.gameStateCD = false
             state.talentId = 0
             state.talentName = ""
             state.talentCD = 0
@@ -1145,7 +1456,8 @@ function Fields:PullFromWidgets(editor)
             state.imageEnabled = false
             state.textEnabled = false
         else
-            state.objectType = (widgets.objectTypeItem and widgets.objectTypeItem:GetChecked() == true) and OBJECT_TYPE_ITEM or OBJECT_TYPE_SPELL
+            local dropdownObjectType = widgets.objectTypeDrop and Widgets:GetDropdownValue(widgets.objectTypeDrop)
+            state.objectType = tostring(dropdownObjectType or "") == OBJECT_TYPE_ITEM and OBJECT_TYPE_ITEM or OBJECT_TYPE_SPELL
             if state.objectType == OBJECT_TYPE_ITEM then
                 local itemLoadEquippedChecked = widgets.itemLoadEquipped and widgets.itemLoadEquipped:GetChecked() == true
                 local itemLoadBagsChecked = widgets.itemLoadBags and widgets.itemLoadBags:GetChecked() == true
@@ -1168,6 +1480,15 @@ function Fields:PullFromWidgets(editor)
             state.baseCD = tonumber(widgets.baseCD:GetText() or "") or 0
             state.fixedCD = true
             state.checkTalent = (state.objectType ~= OBJECT_TYPE_ITEM) and widgets.checkTalent and widgets.checkTalent:GetChecked() == true or false
+            local cdMode = tostring(Widgets:GetDropdownValue(widgets.cdModeDrop) or "")
+            if cdMode ~= "ready" and cdMode ~= "cooldown" then
+                cdMode = "fixed"
+            end
+            if state.objectType == OBJECT_TYPE_ITEM then
+                cdMode = "fixed"
+            end
+            state.cdMode = cdMode
+            state.gameStateCD = cdMode ~= "fixed"
             state.talentId = tonumber((widgets.talentId and widgets.talentId:GetText()) or "") or 0
             state.talentName = tostring((widgets.talentName and widgets.talentName:GetText()) or "")
             state.talentCD = tonumber((widgets.talentCD and widgets.talentCD:GetText()) or "") or 0
@@ -1176,6 +1497,8 @@ function Fields:PullFromWidgets(editor)
             state.loadTalentId = tonumber((widgets.loadTalentId and widgets.loadTalentId:GetText()) or "") or 0
             state.loadTalentName = tostring((widgets.loadTalentName and widgets.loadTalentName:GetText()) or "")
             if isCastEntry then
+                state.cdMode = "fixed"
+                state.gameStateCD = false
                 local delayChecked = widgets.castDelayEnabled and widgets.castDelayEnabled:GetChecked() == true or false
                 state.delayEnabled = delayChecked == true
                 state.delaySeconds = math.max(0, tonumber((widgets.castDelaySeconds and widgets.castDelaySeconds:GetText()) or "") or 0)
@@ -1260,6 +1583,9 @@ function Fields:PushToWidgets(editor)
     local isCast = tostring(state.entryType or "") == "cast"
     local isEvent = tostring(state.entryType or "") == "event"
     local isCustom = tostring(state.entryType or "") == "custom"
+    if frame.description then
+        frame.description:SetText(isCooldown and L("EDITOR_DESC_COOLDOWN") or L("EDITOR_DESC"))
+    end
     if isEvent and state.activeAlertTab ~= "settings" and state.activeAlertTab ~= "voice" then
         state.activeAlertTab = "voice"
     end
@@ -1359,37 +1685,9 @@ function Fields:PushToWidgets(editor)
     end
 
     if not isBloodlust then
-        if widgets.classDrop then widgets.classDrop:SetShown(false) end
-        if widgets.specDrop then widgets.specDrop:SetShown(false) end
-        if widgets.classLabel then widgets.classLabel:SetShown(false) end
-        if widgets.specLabel then widgets.specLabel:SetShown(false) end
-        if widgets.customClassDrop then widgets.customClassDrop:SetShown(false) end
-        if widgets.customSpecDrop then widgets.customSpecDrop:SetShown(false) end
-        if widgets.scopeLabel then widgets.scopeLabel:SetShown(true) end
-        if widgets.scopeButton then widgets.scopeButton:SetShown(true) end
-        if widgets.scopeSummary then widgets.scopeSummary:SetShown(true) end
-
-        state.alertRaceIDs = NormalizeCustomRaceMap(state.alertRaceIDs or state.customRaceIDs)
-        state.alertClassIDs = NormalizeCustomClassMap(state.alertClassIDs or state.customClassIDs, state.classID)
-        state.alertSpecIDs = NormalizeCustomSpecMap(state.alertSpecIDs or state.customSpecIDs, state.specID)
-        state.customRaceIDs = state.alertRaceIDs
-        state.customClassIDs = state.alertClassIDs
-        state.customSpecIDs = state.alertSpecIDs
-        if widgets.customClassDrop and Widgets.SetMultiDropdownValues then
-            Widgets:SetDropdownItems(widgets.customClassDrop, GetCustomClassItems())
-            Widgets:SetMultiDropdownValues(widgets.customClassDrop, state.alertClassIDs, L("PLACEHOLDER_SELECT_CLASSES"))
+        if self.PushScopeToDropdowns then
+            self:PushScopeToDropdowns(widgets, state)
         end
-        if widgets.customSpecDrop and Widgets.SetMultiDropdownValues then
-            Widgets:SetDropdownItems(widgets.customSpecDrop, GetCustomSpecItems(state.alertClassIDs))
-            Widgets:SetMultiDropdownValues(widgets.customSpecDrop, state.alertSpecIDs, L("PLACEHOLDER_SELECT_SPECS"))
-        end
-        if widgets.scopeSummary then
-            widgets.scopeSummary:SetText(BuildScopeSummary(state))
-        end
-        if widgets.scopeButton then
-            widgets.scopeButton:SetText(L("BTN_SCOPE_SELECT"))
-        end
-        if widgets.specLabel then SetNativeLabelColor(widgets.specLabel, true) end
 
         if isCustom then
             state.customName = tostring(state.customName or state.spellName or "")
@@ -1468,7 +1766,8 @@ function Fields:PushToWidgets(editor)
                 widgets.eventDungeonModeDrop, widgets.eventRaidModeLabel, widgets.eventRaidModeDrop,
             }, true)
             SetManyShown({
-                widgets.objectTypeItem, widgets.spellIdLabel, widgets.spellNameLabel, widgets.baseCDLabel,
+                widgets.objectTypeLabel, widgets.objectTypeDrop,
+                widgets.spellIdLabel, widgets.spellNameLabel, widgets.baseCDLabel,
                 widgets.spellId, widgets.spellName, widgets.baseCD, widgets.checkTalent,
                 widgets.talentIdLabel, widgets.talentNameLabel, widgets.talentCDLabel,
                 widgets.talentId, widgets.talentName, widgets.talentCD,
@@ -1476,6 +1775,9 @@ function Fields:PushToWidgets(editor)
                 widgets.loadTalentId, widgets.loadTalentName, widgets.itemLoadEquipped,
                 widgets.itemLoadBags, widgets.itemLoadSameName, widgets.delayEnabled,
                 widgets.delaySecondsLabel, widgets.delaySeconds,
+                widgets.cdmPickLabel, widgets.cdmSkillDrop,
+                widgets.skillFilterLabel, widgets.skillFilterDrop,
+                widgets.cdModeLabel, widgets.cdModeDrop,
             }, false)
             Widgets:SetDropdownEnabled(widgets.eventTypeDrop, true)
             SetEnabled(widgets.eventThrottle, true)
@@ -1498,15 +1800,21 @@ function Fields:PushToWidgets(editor)
                 widgets.eventDungeonSpecificLabel, widgets.eventDungeonSpecificDrop,
                 widgets.eventRaidSpecificLabel, widgets.eventRaidSpecificDrop,
             }, false)
-            SetManyShown({ widgets.objectTypeItem, widgets.spellIdLabel, widgets.spellNameLabel, widgets.spellId, widgets.spellName }, true)
+            SetManyShown({ widgets.spellIdLabel, widgets.spellNameLabel, widgets.spellId, widgets.spellName }, true)
             state.objectType = tostring(state.objectType or OBJECT_TYPE_SPELL)
             if state.objectType ~= OBJECT_TYPE_ITEM then state.objectType = OBJECT_TYPE_SPELL end
             local isItemObject = state.objectType == OBJECT_TYPE_ITEM
             if isItemObject then
                 state.checkTalent = false
                 state.loadTalentEnabled = false
+                state.cdMode = "fixed"
+                state.gameStateCD = false
             end
-            if widgets.objectTypeItem then widgets.objectTypeItem:SetChecked(isItemObject) end
+            if self.PushObjectTypeDropdown then
+                self:PushObjectTypeDropdown(widgets, state)
+            end
+            -- A layout problem must never abort the rest of the refresh.
+            self:ApplySpellSectionLayout(widgets, isItemObject)
             if widgets.spellIdLabel then widgets.spellIdLabel:SetText(isItemObject and L("LABEL_ITEM_ID") or L("LABEL_OBJECT_SPELL_ID")) end
             state.itemLoadMode = isItemObject and NormalizeItemLoadMode(state.itemLoadMode) or ITEM_LOAD_NONE
             state.itemLoadSameName = isItemObject and state.itemLoadMode == ITEM_LOAD_BAGS and state.itemLoadSameName == true
@@ -1536,14 +1844,26 @@ function Fields:PushToWidgets(editor)
             state.fixedCD = true
 
             local talentControlsVisible = (isCooldown or isCast) and (not isItemObject)
+            -- The CD-change talent only changes the fixed timer. For the
+            -- readiness-edge CD type there is no number to change, so the
+            -- controls are shown but disabled (the separate load-talent filter
+            -- still applies to every CD type).
+            local cdTalentAvailable = isCooldown and not self:IsGameStateCdMode(state)
             SetManyShown({ widgets.talentIdLabel, widgets.talentNameLabel, widgets.checkTalent, widgets.talentId, widgets.talentName }, talentControlsVisible and isCooldown)
             SetManyShown({ widgets.talentCDLabel, widgets.talentCD }, talentControlsVisible and isCooldown)
             SetManyShown({ widgets.loadTalentEnabled, widgets.loadTalentIdLabel, widgets.loadTalentNameLabel, widgets.loadTalentId, widgets.loadTalentName }, talentControlsVisible)
             SetManyShown({ widgets.baseCDLabel, widgets.baseCD }, isCooldown)
+            SetManyShown({ widgets.cdModeLabel, widgets.cdModeDrop }, isCooldown and not isItemObject)
             SetManyShown({ widgets.delayEnabled, widgets.delaySecondsLabel, widgets.delaySeconds }, false)
 
-            local talentEnabled = talentControlsVisible and (state.checkTalent == true)
-            SetEnabled(widgets.checkTalent, talentControlsVisible and isCooldown)
+            local talentEnabled = talentControlsVisible and (state.checkTalent == true) and cdTalentAvailable
+            SetEnabled(widgets.checkTalent, talentControlsVisible and isCooldown and cdTalentAvailable)
+            if widgets.cdModeDrop then
+                Widgets:SetDropdownItems(widgets.cdModeDrop, self:GetCdmModeItems())
+                Widgets:SetDropdownValue(widgets.cdModeDrop, state.cdMode or "ready", L("CD_MODE_READY"))
+                Widgets:SetDropdownEnabled(widgets.cdModeDrop, isCooldown and not isItemObject)
+                SetLabelsEnabled({ widgets.cdModeLabel }, isCooldown and not isItemObject)
+            end
             SetEnabled(widgets.talentId, talentEnabled)
             SetEnabled(widgets.talentName, talentEnabled)
             SetEnabled(widgets.talentCD, talentEnabled and isCooldown)
@@ -1564,7 +1884,46 @@ function Fields:PushToWidgets(editor)
             SetEnabled(widgets.castDelaySeconds, delayInputEnabled)
             if widgets.castDelayModeDrop and widgets.castDelayModeDrop.Hide then widgets.castDelayModeDrop:Hide() end
             SetLabelsEnabled({ widgets.castDelayLabel, widgets.castDelayAfterLabel }, delayInputEnabled)
-            SetEnabled(widgets.baseCD, isCooldown)
+            -- The fixed CD number is only used by the "fixed" CD source.
+            SetEnabled(widgets.baseCD, isCooldown and not self:IsGameStateCdMode(state))
+
+            if widgets.cdmSkillDrop then
+                local showPicker = (isCooldown or isCast) and not isItemObject
+                SetManyShown({ widgets.skillFilterLabel, widgets.skillFilterDrop, widgets.cdmPickLabel, widgets.cdmSkillDrop }, showPicker)
+                if showPicker then
+                    local items, pickerEnabled, pickerReason, currentSpecID = self:GetCdmSkillItems()
+                    frame.qfxsaCdmSkillItems = items
+                    local selectedSpec = tonumber(frame.qfxsaSkillFilter) or 0
+                    if selectedSpec <= 0 then
+                        selectedSpec = tonumber(currentSpecID) or 0
+                        frame.qfxsaSkillFilter = selectedSpec
+                    end
+                    if widgets.skillFilterDrop then
+                        local filterItems = self:GetSkillFilterItems()
+                        Widgets:SetDropdownItems(widgets.skillFilterDrop, filterItems)
+                        local filterFallback = filterItems[1] and filterItems[1].text or ""
+                        Widgets:SetDropdownValue(widgets.skillFilterDrop, selectedSpec, filterFallback)
+                    end
+                    items = self:FilterSkillItems(items, selectedSpec)
+                    local noMatch = #items == 0
+                    Widgets:SetDropdownItems(widgets.cdmSkillDrop, items)
+                    Widgets:SetDropdownSearchable(widgets.cdmSkillDrop, true, L("CDM_SEARCH_SKILL"))
+                    local fallback = L("PLACEHOLDER_CDM_PICK")
+                    if pickerEnabled == true and noMatch then
+                        fallback = L("PLACEHOLDER_NO_MATCH_SKILL")
+                    elseif pickerReason == "combat" then
+                        fallback = L("CDM_COMBAT_BLOCKED")
+                    elseif pickerReason == "not_available" then
+                        fallback = L("CDM_NOT_AVAILABLE")
+                    elseif pickerReason == "data_not_ready" then
+                        fallback = L("CDM_DATA_NOT_READY")
+                    end
+                    Widgets:SetDropdownValue(widgets.cdmSkillDrop, tonumber(state.spellId) or 0, fallback)
+                    Widgets:SetDropdownEnabled(widgets.cdmSkillDrop, pickerEnabled == true and noMatch == false)
+                    SetLabelsEnabled({ widgets.cdmPickLabel }, pickerEnabled == true)
+                    SetLabelsEnabled({ widgets.skillFilterLabel }, pickerEnabled == true)
+                end
+            end
         end
     end
 
@@ -1773,13 +2132,19 @@ function Fields:PushToWidgets(editor)
     if showSettings then
         if widgets.conditionOp then
             local conditionEnabled = isCooldown or isCustom
-            Widgets:SetDropdownEnabled(widgets.conditionOp, conditionEnabled)
-            SetEnabled(widgets.conditionTime, conditionEnabled)
+            -- Game-cooldown-state entries announce exactly at the API ready
+            -- edge, so there is no countdown number to compare against: the
+            -- condition operator/time stay disabled there (only the action
+            -- selection is meaningful).
+            local gameStateOnly = isCooldown and self:IsGameStateCdMode(state)
+            Widgets:SetDropdownEnabled(widgets.conditionOp, conditionEnabled and not gameStateOnly)
+            SetEnabled(widgets.conditionTime, conditionEnabled and not gameStateOnly)
             Widgets:SetDropdownEnabled(widgets.conditionActionsDrop, conditionEnabled and not isCustom)
             Widgets:SetDropdownEnabled(widgets.customNotifyActionsDrop, isCustom)
             Widgets:SetDropdownEnabled(widgets.customConditionLogicDrop, isCustom)
             Widgets:SetDropdownEnabled(widgets.customConditionVarDrop, false)
-            SetLabelsEnabled({ widgets.conditionWhenLabel, widgets.conditionSpellNameText, widgets.conditionRemainingLabel, widgets.conditionSecLabel, widgets.conditionExecuteLabel, widgets.conditionActionHint }, isCooldown)
+            SetLabelsEnabled({ widgets.conditionWhenLabel, widgets.conditionSpellNameText, widgets.conditionExecuteLabel, widgets.conditionActionHint }, isCooldown)
+            SetLabelsEnabled({ widgets.conditionRemainingLabel, widgets.conditionSecLabel }, isCooldown and not gameStateOnly)
             SetLabelsEnabled({ widgets.customConditionVarLabel, widgets.customConditionValueLabel }, false)
             if type(widgets.customNotifyRows) == "table" then
                 for _, row in ipairs(widgets.customNotifyRows) do
@@ -1854,7 +2219,11 @@ function Fields:PushToWidgets(editor)
         local linked = linkedVisualLayout == true
         local textOnly = textOnlyPositionLayout == true
         local countdownEnabled = isCooldown and state.textCooldownCountdown == true
-        SetControlsEnabled({ widgets.textAlert, widgets.textSize, widgets.textCooldownCountdown }, enabled)
+        local gameStateOnly = isCooldown and self:IsGameStateCdMode(state)
+        SetControlsEnabled({ widgets.textAlert, widgets.textSize }, enabled)
+        -- No countdown exists in game-cooldown-state mode, so the countdown
+        -- display stays disabled there.
+        SetControlsEnabled({ widgets.textCooldownCountdown }, enabled and not gameStateOnly)
         SetControlsEnabled({ widgets.textDurationEnabled }, enabled and not countdownEnabled)
         SetManyShown({ widgets.textCooldownCountdown }, isCooldown)
         if Layout.SetValueSliderLabelEnabled then Layout.SetValueSliderLabelEnabled(widgets.textSize, enabled) end
@@ -1935,7 +2304,6 @@ function Fields:RefreshLocale(editor)
         return
     end
 
-    ClearDropdownItemCache()
     if SoundFields and type(SoundFields.ClearDropdownItemCache) == "function" then
         SoundFields:ClearDropdownItemCache()
     end
@@ -1973,9 +2341,10 @@ function Fields:RefreshLocale(editor)
     SetSectionLocaleText(widgets.textPositionSection, L("LABEL_TEXT_POSITION"))
     SetSectionLocaleText(widgets.visualLayoutSection, L("LABEL_TEXT_LAYOUT"))
 
-    SetLocaleText(widgets.classLabel, L("LABEL_CLASS"))
-    SetLocaleText(widgets.specLabel, L("LABEL_SPEC"))
-    SetCheckButtonLocaleText(widgets.objectTypeItem, L("LABEL_IS_ITEM"))
+    SetLocaleText(widgets.scopeRaceLabel, L("LABEL_SCOPE_RACE"))
+    SetLocaleText(widgets.scopeClassLabel, L("LABEL_CLASS"))
+    SetLocaleText(widgets.scopeSpecLabel, L("LABEL_SPEC"))
+    SetLocaleText(widgets.objectTypeLabel, L("LABEL_OBJECT_TYPE"))
     SetCheckButtonLocaleText(widgets.itemLoadEquipped, L("LABEL_ITEM_LOAD_EQUIPPED"))
     SetCheckButtonLocaleText(widgets.itemLoadBags, L("LABEL_ITEM_LOAD_BAGS"))
     SetCheckButtonLocaleText(widgets.itemLoadSameName, L("LABEL_ITEM_LOAD_SAME_NAME"))
@@ -2070,6 +2439,9 @@ function Fields:RefreshLocale(editor)
     SetLocaleText(widgets.textConditionSecLabel, L("LABEL_SECONDS_SHORT"))
 
     SetCheckButtonLocaleText(widgets.checkTalent, L("LABEL_CHECK_TALENT"))
+    if widgets.cdModeLabel then SetLocaleText(widgets.cdModeLabel, L("LABEL_CD_MODE")) end
+    if widgets.cdmPickLabel then SetLocaleText(widgets.cdmPickLabel, L("LABEL_CDM_PICK")) end
+    if widgets.skillFilterLabel then SetLocaleText(widgets.skillFilterLabel, L("LABEL_SKILL_FILTER")) end
     SetCheckButtonLocaleText(widgets.delayEnabled, L("LABEL_DELAY_CAST_SUCCESS"))
     SetCheckButtonLocaleText(widgets.castImmediateEnabled, L("LABEL_CAST_IMMEDIATE_EXECUTE"))
     SetCheckButtonLocaleText(widgets.castDelayEnabled, L("LABEL_CAST_DELAY_EXECUTE"))

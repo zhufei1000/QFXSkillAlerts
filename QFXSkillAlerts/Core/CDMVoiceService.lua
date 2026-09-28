@@ -38,6 +38,27 @@ local function IsInCombat()
     return type(InCombatLockdown) == "function" and InCombatLockdown() == true
 end
 
+-- Secret values are active during restricted content (raids, Mythic+, etc.).
+-- Writing the Cooldown Manager layout in that state taints it in place, which
+-- then makes Blizzard's CooldownViewer error out while it refreshes secret
+-- aura/cooldown data in combat. Block those writes even outside combat.
+local function IsRestrictedState()
+    local secrets = rawget(_G, "C_Secrets")
+    if type(secrets) ~= "table" then
+        return false
+    end
+    local check = secrets.ShouldCooldownsBeSecret
+    if type(check) ~= "function" then
+        return false
+    end
+    local ok, secret = pcall(check)
+    return ok and secret == true
+end
+
+local function AreCDMWritesBlocked()
+    return IsInCombat() or IsRestrictedState()
+end
+
 local function IsSuccessStatus(status)
     return tonumber(status) == 0
 end
@@ -842,11 +863,11 @@ local function VerifyRemoveOperation(manager, operation)
     return true
 end
 
-function Service:ApplyCDMRemovalPlanWithoutReload(plan, options)
+function Service:ApplyCDMRemovalPlanAndReload(plan, options)
     plan = type(plan) == "table" and plan or {}
     options = type(options) == "table" and options or {}
     local summary = NewBatchSummary(options.summary)
-    if IsInCombat() then
+    if AreCDMWritesBlocked() then
         return false, summary, "combat"
     end
     local store = NS.Core and NS.Core.CDMVoicePresetStore
@@ -971,6 +992,11 @@ function Service:ApplyCDMRemovalPlanWithoutReload(plan, options)
         self.lastBatchResults = {}
         self.lastBatchSummary = summary
         self:EndCDMMutation()
+        if mutationStarted then
+            -- Aborted writes may already have tainted the layout data; reload
+            -- so the CooldownViewer comes back up with clean data.
+            ReloadNow()
+        end
         return false, summary, failureReason
     end
 
@@ -988,14 +1014,18 @@ function Service:ApplyCDMRemovalPlanWithoutReload(plan, options)
     self.lastBatchSummary = summary
     self:EndCDMMutation()
     self:RefreshRuntimeData(options.reason or "manual_delete")
-    return true, summary, "deleted"
+    -- The removal touched the Cooldown Manager layout outside of Blizzard's
+    -- own UI, so the data is tainted for this session; reload exactly like the
+    -- set path so the CooldownViewer reloads it clean before combat.
+    ReloadNow()
+    return true, summary, "reload_requested"
 end
 
 function Service:ApplyCDMPlanAndReload(plan, options)
     plan = type(plan) == "table" and plan or {}
     options = type(options) == "table" and options or {}
     local summary = NewBatchSummary(options.summary)
-    if IsInCombat() then
+    if AreCDMWritesBlocked() then
         return false, summary, "combat"
     end
     local store = NS.Core and NS.Core.CDMVoicePresetStore
@@ -1409,6 +1439,7 @@ local function BuildCDMSavedEntry(store, record, evaluation, display, includeSco
         statusText = L(display.localeKey),
         soundDetail = eventText .. " | " .. voiceName,
         scopeText = includeScopeText and ResolveCDMScopeText(classID, specID, display.isLoaded) or "",
+        scopeDetail = includeScopeText and ResolveCDMScopeText(classID, specID, display.isLoaded) or nil,
         runtimeStatus = runtimeStatus,
         runtimeReason = runtimeStatus,
         loadState = display.loadState,
@@ -1489,6 +1520,113 @@ function Service:GetSavedEntries()
         )
     end
     return result
+end
+
+-- Blizzard only exposes the active spec's Cooldown Manager catalog, so each
+-- spec's full skill list is remembered here the first time it is read. The
+-- editor merges these cached catalogs to offer cross-spec skill picking.
+function Service:GetCachedSkillCatalog()
+    local db = type(QFXSkillAlertsDB) == "table" and QFXSkillAlertsDB or {}
+    return type(db.cdmSkillCatalog) == "table" and db.cdmSkillCatalog or {}
+end
+
+function Service:SaveSkillCatalog(classID, specID, items)
+    classID = tonumber(classID)
+    specID = tonumber(specID)
+    if not classID or not specID or classID <= 0 or specID <= 0 or type(items) ~= "table" then
+        return false
+    end
+    local entries, signatureParts = {}, {}
+    for _, item in ipairs(items) do
+        local spellID = tonumber(item.spellID or item.value)
+        if spellID and spellID > 0 then
+            entries[#entries + 1] = {
+                spellID = spellID,
+                spellName = tostring(item.spellName or item.text or spellID),
+            }
+            signatureParts[#signatureParts + 1] = tostring(spellID)
+        end
+    end
+    if #entries == 0 then
+        return false
+    end
+    local signature = table.concat(signatureParts, ",")
+    local db = type(QFXSkillAlertsDB) == "table" and QFXSkillAlertsDB or {}
+    QFXSkillAlertsDB = db
+    local catalog = type(db.cdmSkillCatalog) == "table" and db.cdmSkillCatalog or {}
+    db.cdmSkillCatalog = catalog
+    local classCatalog = type(catalog[classID]) == "table" and catalog[classID] or {}
+    catalog[classID] = classCatalog
+    local existing = classCatalog[specID]
+    if type(existing) == "table" and existing.signature == signature then
+        return false
+    end
+    classCatalog[specID] = {
+        updated = type(time) == "function" and time() or 0,
+        signature = signature,
+        items = entries,
+    }
+    return true
+end
+
+-- Collects this spec's complete Cooldown Manager skill list (including
+-- unlearned abilities when the client exposes the full category set) and
+-- remembers it in the addon database for cross-spec skill picking.
+function Service:CaptureCurrentSpecCatalog()
+    if IsInCombat() then
+        return false
+    end
+    local classID, specID = self:GetCurrentClassSpec()
+    classID = tonumber(classID) or 0
+    specID = tonumber(specID) or 0
+    if classID <= 0 or specID <= 0 then
+        return false
+    end
+    local items, seen = {}, {}
+    local categorySetAPI = type(C_CooldownViewer) == "table" and C_CooldownViewer.GetCooldownViewerCategorySet or nil
+    if type(categorySetAPI) == "function" then
+        local enumTable = Enum and Enum.CooldownViewerCategory
+        for _, def in ipairs(CATEGORY_DEFS) do
+            if def.key ~= "trackedBuff" and def.key ~= "trackedBar" then
+                local enumValue = enumTable and enumTable[def.enumKey]
+                local ok, ids = pcall(categorySetAPI, enumValue, true)
+                if ok and type(ids) == "table" then
+                    for _, cooldownID in ipairs(ids) do
+                        local info = self:GetCooldownInfo(cooldownID)
+                        local spellID = info and tonumber(info.spellID) or 0
+                        if spellID > 0 and not seen[spellID] then
+                            seen[spellID] = true
+                            items[#items + 1] = {
+                                spellID = spellID,
+                                spellName = tostring(info.spellName or spellID),
+                            }
+                        end
+                    end
+                end
+            end
+        end
+    end
+    if #items == 0 then
+        -- Fallback for clients without the category-set API: the layout list.
+        for _, def in ipairs(CATEGORY_DEFS) do
+            if def.key ~= "trackedBuff" and def.key ~= "trackedBar" then
+                for _, info in ipairs(self:GetCooldownsForCategory(def.key)) do
+                    local spellID = tonumber(info.spellID)
+                    if spellID and spellID > 0 and not seen[spellID] then
+                        seen[spellID] = true
+                        items[#items + 1] = {
+                            spellID = spellID,
+                            spellName = tostring(info.spellName or spellID),
+                        }
+                    end
+                end
+            end
+        end
+    end
+    if #items == 0 then
+        return false
+    end
+    return self:SaveSkillCatalog(classID, specID, items)
 end
 
 function Service:ParseSavedEntryKey(key)

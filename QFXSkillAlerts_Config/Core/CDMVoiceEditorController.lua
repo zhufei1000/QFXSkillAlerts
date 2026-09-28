@@ -271,6 +271,29 @@ function Controller:Refresh(reason)
     if rows and type(rows.Render) == "function" then
         rows:Render(frame, cooldowns, self.pendingEdit)
     end
+    -- Cache this spec's full skill catalog for the cross-spec skill picker
+    -- (Blizzard only exposes the active spec's Cooldown Manager data).
+    if available and type(api.SaveCDMVoiceSkillCatalog) == "function"
+        and self.openedClassID and self.openedSpecID then
+        local catalogItems = {}
+        for _, category in ipairs(categories) do
+            local categoryKey = tostring(category.key or "")
+            if categoryKey ~= "trackedBuff" and categoryKey ~= "trackedBar" then
+                for _, info in ipairs(api.GetCDMVoiceCooldownsForCategory(category.key) or {}) do
+                    local spellID = tonumber(info.spellID)
+                    if spellID and spellID > 0 then
+                        catalogItems[#catalogItems + 1] = {
+                            spellID = spellID,
+                            spellName = tostring(info.spellName or spellID),
+                        }
+                    end
+                end
+            end
+        end
+        if #catalogItems > 0 then
+            api.SaveCDMVoiceSkillCatalog(self.openedClassID, self.openedSpecID, catalogItems)
+        end
+    end
     local pendingSummary = type(api.GetCurrentSpecCDMPendingSummary) == "function"
         and api.GetCurrentSpecCDMPendingSummary() or {}
     local dirtyCount = 0
@@ -487,6 +510,22 @@ function Controller:CollectDirtyDrafts()
     return drafts
 end
 
+-- Marks the row's current event as configured in the open dropdown so the
+-- per-event setup stays visible right after Save / Apply without a full list
+-- refresh.
+local function MarkRowEventConfigured(row)
+    if not (row and row.eventDropdown and NS.UI and NS.UI.Widgets) then
+        return
+    end
+    local selected = tonumber(row.selectedEvent)
+    for _, item in ipairs(row.eventDropdown.qfxsaItems or {}) do
+        if tonumber(item.value) == selected and tostring(item.text or ""):find("✓", 1, true) == nil then
+            item.text = tostring(item.text or "") .. "  |cff40ff40✓|r"
+        end
+    end
+    NS.UI.Widgets:SetDropdownValue(row.eventDropdown, selected, L("CDM_EVENT"))
+end
+
 function Controller:SaveRow(row)
     if not row or not row.cooldownInfo then
         return false
@@ -508,6 +547,7 @@ function Controller:SaveRow(row)
     end
     row.recordKey = recordKeyOrReason
     row.originalRecordKey = recordKeyOrReason
+    MarkRowEventConfigured(row)
     self:ClearDirtyDraft(row)
     if syncState == "loaded" then
         row.hint:SetText(L("CDM_STATUS_APPLIED"))
@@ -543,6 +583,7 @@ function Controller:ApplyRow(row)
     end
     row.recordKey = recordKey or row.recordKey
     row.originalRecordKey = row.recordKey
+    MarkRowEventConfigured(row)
     self:ClearDirtyDraft(row)
     if reason == "already_applied" or reason == "no_changes" then
         self:SetStatus(L("CDM_SAVE_ALREADY_APPLIED"), { 0.2, 1, 0.25 })

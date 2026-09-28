@@ -78,10 +78,22 @@ end
 
 dofile("QFXSkillAlerts/Core/EntryMap.lua")
 dofile("QFXSkillAlerts/Core/EventContext.lua")
+dofile("QFXSkillAlerts/Core/GroupDeathMonitor.lua")
 dofile("QFXSkillAlerts/Core/EventVoice.lua")
 
 local EntryMap = QFXSkillAlertsNS.Core.EntryMap
 local EventVoice = QFXSkillAlertsNS.Core.EventVoice
+local GroupDeathMonitor = QFXSkillAlertsNS.Core.GroupDeathMonitor
+local groupDeathMonitorEnabled = false
+local originalSetGroupDeathEnabled = GroupDeathMonitor.SetEnabled
+GroupDeathMonitor.SetEnabled = function(self, value)
+    groupDeathMonitorEnabled = value == true
+    return originalSetGroupDeathEnabled(self, value)
+end
+Assert(EventVoice:NormalizeEventKey("group_member_dead") == "group_member_dead",
+    "group-member death should be available without replacing player death")
+Assert(EventVoice:NormalizeEventKey("player_dead") == "player_dead",
+    "player death should remain available")
 local played = {}
 local playedPaths = {}
 EventVoice:Configure({
@@ -118,10 +130,14 @@ Assert(EventVoice:Dispatch("PLAYER_REGEN_DISABLED"), "combat event should play a
 Equal(played[1], "combat_start", "combat start should route to the correct entry")
 Equal(played[2], "combat_start", "combat start should route again after throttle")
 
-Assert(EventVoice:Dispatch("ENCOUNTER_END", 10, "Boss", 8, 5, 1), "successful encounter should play")
+local encounterUnitStatus = {
+    { creatureID = 123, creatureName = "Boss", remainingHealthPercent = 0 },
+}
+Assert(EventVoice:Dispatch("ENCOUNTER_END", 10, "Boss", 8, 5, 1, encounterUnitStatus), "successful encounter should play")
 Equal(played[#played], "encounter_success", "success result should not trigger wipe voice")
-Assert(EventVoice:Dispatch("ENCOUNTER_END", 10, "Boss", 8, 5, 0), "failed encounter should play")
+Assert(EventVoice:Dispatch("ENCOUNTER_END", 10, "Boss", 8, 5, 0, encounterUnitStatus), "failed encounter should play")
 Equal(played[#played], "encounter_wipe", "wipe result should not trigger success voice")
+Assert(EventVoice:Dispatch("ENCOUNTER_END", 10, "Boss", 8, 5, 1), "successful encounter without unit status should still play")
 
 globalMap[6] = {
     entryType = "event", eventKey = "role_check_start", eventThrottle = 0,
@@ -173,10 +189,26 @@ currentInstanceName, currentInstanceType = "Test Dungeon", "party"
 Assert(EventVoice:Dispatch("PLAYER_REGEN_DISABLED"), "dungeon event config should play in a dungeon")
 Equal(playedPaths[#playedPaths], "dungeon.ogg", "dungeon should use the dungeon-specific event config")
 
+globalMap = {
+    [1] = {
+        entryType = "event", eventKey = "group_member_dead", eventThrottle = 1,
+        voiceEnabled = true, notifyMode = "tts", ttsText = "Group member died",
+        alertClassIDs = { [0] = true }, alertSpecIDs = { [0] = true }, alertRaceIDs = { [0] = true },
+    },
+}
+local _, groupDeathCount = EventVoice:Rebuild()
+Equal(groupDeathCount, 1, "group-member death should build as an event voice")
+Assert(groupDeathMonitorEnabled,
+    "an active group-member death entry should enable its dedicated monitor")
+Assert(not frame.registered.QFXSA_GROUP_MEMBER_DEAD,
+    "the internal group-death signal must not be registered as a Blizzard event")
+
 globalMap = {}
 local _, emptyCount = EventVoice:Rebuild()
 Equal(emptyCount, 0, "empty rebuild should clear active event voices")
 Assert(next(frame.registered) == nil, "empty rebuild should unregister every event")
+Assert(not groupDeathMonitorEnabled,
+    "removing the group-member death entry should disable its monitor")
 
 local eventEntry = { entryType = "event", eventKey = "combat_start", spellId = 0 }
 Assert(EntryMap:GetEntry({ [1] = eventEntry }, 1) == eventEntry, "event entries must remain valid without a spell ID")

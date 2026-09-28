@@ -317,6 +317,17 @@ function Util:SanitizeEntryForImport(entry)
         objectType = OBJECT_TYPE_SPELL
     end
 
+    local cdMode = "fixed"
+    if entryType == "cooldown" and objectType ~= OBJECT_TYPE_ITEM then
+        local mode = tostring(entry.cdMode or ""):lower()
+        if mode ~= "ready" and mode ~= "fixed" and mode ~= "cooldown" then
+            mode = (entry.gameStateCD == true or mode == "charge") and "ready" or "fixed"
+        end
+        cdMode = mode
+    end
+    -- CD-change talent only makes sense for a fixed cooldown number.
+    local cdTalentAllowed = entryType == "cooldown" and objectType ~= OBJECT_TYPE_ITEM and cdMode == "fixed"
+
     local hasIndependentLoadTalent = entry.loadTalentEnabled ~= nil
         or entry.loadTalentId ~= nil or entry.loadTalentName ~= nil
     local loadTalentEnabled = entry.loadTalentEnabled == true
@@ -350,12 +361,12 @@ function Util:SanitizeEntryForImport(entry)
         triggerSpellName = TrimText(entry.triggerSpellName or ""),
         baseCD = entryType == "cooldown" and (tonumber(string.format("%.2f", tonumber(entry.baseCD) or 0)) or 0) or 0,
         fixedCD = true,
-        checkTalent = objectType ~= OBJECT_TYPE_ITEM and entryType == "cooldown"
-            and entry.checkTalent == true and (tonumber(entry.talentId) or 0) > 0,
-        talentId = not isEventEntry and objectType ~= OBJECT_TYPE_ITEM and math.floor(tonumber(entry.talentId) or 0) or 0,
-        talentName = not isEventEntry and objectType ~= OBJECT_TYPE_ITEM and TrimText(entry.talentName or "") or "",
-        talentCD = objectType ~= OBJECT_TYPE_ITEM and entryType == "cooldown"
-            and (tonumber(string.format("%.2f", tonumber(entry.talentCD) or 0)) or 0) or 0,
+        cdMode = cdMode,
+        gameStateCD = cdMode ~= "fixed",
+        checkTalent = cdTalentAllowed and entry.checkTalent == true and (tonumber(entry.talentId) or 0) > 0,
+        talentId = cdTalentAllowed and math.floor(tonumber(entry.talentId) or 0) or 0,
+        talentName = cdTalentAllowed and TrimText(entry.talentName or "") or "",
+        talentCD = cdTalentAllowed and (tonumber(string.format("%.2f", tonumber(entry.talentCD) or 0)) or 0) or 0,
         talentLoadFilter = false,
         loadTalentEnabled = not isEventEntry and objectType ~= OBJECT_TYPE_ITEM and loadTalentEnabled and loadTalentId > 0,
         loadTalentId = not isEventEntry and objectType ~= OBJECT_TYPE_ITEM and loadTalentEnabled and math.floor(loadTalentId) or 0,

@@ -227,22 +227,10 @@ function Builder:Rebuild(spellToPrimary, runtimeCfg)
         for _, index in ipairs(GetOrderedEntryIndices(entryMap)) do
             local entry = GetEntry(entryMap, index)
             if entry and tostring(entry.entryType or "cooldown") == "cooldown" and IsScopeMatched(entry, scopeClassID, scopeSpecID, classID, specID, raceID) then
-                local objectID = tonumber(entry.spellId) or 0
-                local objectType = ResolveObjectType(objectID, entry.objectType)
-                if objectType == OBJECT_TYPE_ITEM then
-                    local loadMode = tostring(entry.itemLoadMode or ""):lower()
-                    if loadMode == ITEM_LOAD_EQUIPPED then
-                        itemLoadEventNeeds.equipped = true
-                    elseif loadMode == ITEM_LOAD_BAGS then
-                        itemLoadEventNeeds.bags = true
-                    end
-                    if not IsItemLoadRequirementMet(entry) then
-                        objectID = 0
-                    else
-                        ResolveItemTriggerForEntry(entry, true)
-                    end
-                end
-                local triggerSpellID = GetObjectTriggerSpellID(objectID, objectType, entry.triggerSpellID or entry.triggerSpellId)
+                -- Evaluate the talent load filter first: an entry that cannot
+                -- load must register no bag/equipment event needs and resolve
+                -- no item trigger. It stays completely idle until a talent or
+                -- scope refresh rebuilds this config.
                 local talentId = tonumber(entry.talentId) or 0
                 local checkTalent = entry.checkTalent == true and talentId > 0
                 local talentOK = checkTalent and IsTalentSelected(talentId)
@@ -257,10 +245,40 @@ function Builder:Rebuild(spellToPrimary, runtimeCfg)
                     loadTalentId = talentId
                     loadTalentEnabled = checkTalent
                 end
+                local loadBlocked = false
                 if loadTalentEnabled and not IsTalentSelected(loadTalentId) then
                     effectiveCD = 0
+                    loadBlocked = true
                 end
-                if objectID > 0 and triggerSpellID > 0 and effectiveCD > 0 then
+
+                local objectID = tonumber(entry.spellId) or 0
+                local objectType = ResolveObjectType(objectID, entry.objectType)
+                local triggerSpellID = 0
+                if not loadBlocked then
+                    if objectType == OBJECT_TYPE_ITEM then
+                        local loadMode = tostring(entry.itemLoadMode or ""):lower()
+                        if loadMode == ITEM_LOAD_EQUIPPED then
+                            itemLoadEventNeeds.equipped = true
+                        elseif loadMode == ITEM_LOAD_BAGS then
+                            itemLoadEventNeeds.bags = true
+                        end
+                        if not IsItemLoadRequirementMet(entry) then
+                            objectID = 0
+                        else
+                            ResolveItemTriggerForEntry(entry, true)
+                        end
+                    end
+                    triggerSpellID = GetObjectTriggerSpellID(objectID, objectType, entry.triggerSpellID or entry.triggerSpellId)
+                end
+                -- Game-cooldown-state entries need no fixed number: the runtime
+                -- watches the NeverSecret API readiness booleans instead.
+                local cdMode = tostring(entry.cdMode or ""):lower()
+                if cdMode ~= "ready" and cdMode ~= "fixed" and cdMode ~= "cooldown" then
+                    cdMode = entry.gameStateCD == true and "ready" or "fixed"
+                end
+                local gameStateCD = cdMode ~= "fixed" and objectType == OBJECT_TYPE_SPELL
+                if objectID > 0 and triggerSpellID > 0 and not loadBlocked
+                    and (effectiveCD > 0 or gameStateCD) then
                     local objectKey = MakeObjectKey(objectType, objectID)
                     -- 触发事件里拿到的是技能ID；物品会映射到该物品“使用时触发的技能ID”。
                     spellToPrimary[triggerSpellID] = objectKey
@@ -271,6 +289,8 @@ function Builder:Rebuild(spellToPrimary, runtimeCfg)
                         triggerSpellID = triggerSpellID,
                         spellName = tostring(entry.spellName or ""),
                         baseCD = effectiveCD,
+                        gameStateCD = gameStateCD,
+                        cdMode = gameStateCD and cdMode or "fixed",
                         chargeInput = math.max(1, math.floor(tonumber(entry.chargeInput or entry.charge) or 1)),
                         cooldownAlertTime = math.max(0, tonumber(entry.cooldownAlertTime or entry.alertLeadTime) or 0),
                         voiceConditionOp = NormalizeConditionOp(entry.voiceConditionOp),

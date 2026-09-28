@@ -177,7 +177,7 @@ local function BuildVirtualItems(state, loadedEntries, unloadedEntries, loadedDi
             }, false, true, false, false)
         else
             for _, entry in ipairs(loadedEntries) do
-                addRow(entry, false, false, true, true)
+                addRow(entry, true, false, true, true)
             end
         end
     end
@@ -257,7 +257,7 @@ local function RenderFullRows(list, state, selectedKey, loadedEntries, unloadedE
             }, false, true, false, false)
         else
             for _, entry in ipairs(loadedEntries) do
-                updateRow(entry, false, false, true, true)
+                updateRow(entry, true, false, true, true)
             end
         end
     end

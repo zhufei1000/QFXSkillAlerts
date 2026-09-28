@@ -275,9 +275,18 @@ function RowFactory:EnsureRow(list, index)
         end
     end)
 
-    row:SetScript("OnEnter", function()
+    row:SetScript("OnEnter", function(self)
         if list.dragKey then
             UpdateDropPreview(list, true)
+        end
+        if GameTooltip and not self.isPlaceholder and self.main then
+            GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+            GameTooltip:SetText(self.main:GetText() or "", 1, 1, 1, 1, true)
+            if type(self.scopeDetail) == "string" and self.scopeDetail ~= "" then
+                GameTooltip:AddLine(" ")
+                GameTooltip:AddLine(self.scopeDetail, 0.80, 0.80, 0.80, true)
+            end
+            GameTooltip:Show()
         end
     end)
 
@@ -287,6 +296,9 @@ function RowFactory:EnsureRow(list, index)
             list.dragHoverMode = nil
         end
         HideRowDropPreview(row)
+        if GameTooltip_Hide then
+            GameTooltip_Hide()
+        end
     end)
 
     row:SetScript("OnDragStart", function()

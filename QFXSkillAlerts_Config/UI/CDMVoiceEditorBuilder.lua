@@ -20,7 +20,7 @@ function Builder:Ensure()
     end
 
     local frame = CreateFrame("Frame", "QFXSkillAlertsCDMVoiceEditorFrame", UIParent, "BackdropTemplate")
-    frame:SetSize(1040, 650)
+    frame:SetSize(1040, 700)
     frame:SetPoint("CENTER", UIParent, "CENTER", 70, 0)
     frame:SetFrameStrata("FULLSCREEN_DIALOG")
     frame:SetFrameLevel(130)
@@ -43,8 +43,15 @@ function Builder:Ensure()
     close:SetScript("OnClick", function() frame:Hide() end)
     if Skin and Skin.SkinCloseButton then Skin:SkinCloseButton(close) end
 
+    frame.desc = Label(frame, L("CDM_VOICE_EDITOR_DESC"), "GameFontHighlightSmall")
+    frame.desc:SetPoint("TOP", frame.title, "BOTTOM", 0, -8)
+    frame.desc:SetWidth(880)
+    frame.desc:SetJustifyH("CENTER")
+    if frame.desc.SetWordWrap then frame.desc:SetWordWrap(true) end
+    if Skin and Skin.StyleFont then Skin:StyleFont(frame.desc, "muted") end
+
     frame.classLabel = Label(frame, L("CDM_CURRENT_CLASS"))
-    frame.classLabel:SetPoint("TOPLEFT", frame, "TOPLEFT", 28, -54)
+    frame.classLabel:SetPoint("TOPLEFT", frame, "TOPLEFT", 28, -104)
     frame.classValue = Label(frame, "", "GameFontNormal")
     frame.classValue:SetPoint("LEFT", frame.classLabel, "RIGHT", 6, 0)
 
@@ -54,14 +61,14 @@ function Builder:Ensure()
     frame.specValue:SetPoint("LEFT", frame.specLabel, "RIGHT", 6, 0)
 
     frame.categoryLabel = Label(frame, L("CDM_CATEGORY"))
-    frame.categoryLabel:SetPoint("TOPLEFT", frame, "TOPLEFT", 28, -86)
+    frame.categoryLabel:SetPoint("TOPLEFT", frame, "TOPLEFT", 28, -138)
     frame.categoryDropdown = Widgets:CreateDropdown(frame, nil, 260)
     frame.categoryDropdown:SetPoint("LEFT", frame.categoryLabel, "RIGHT", 10, 0)
     frame.categoryDropdown.qfxsaOnValueChanged = function(value)
         Controller:OnCategoryChanged(value)
     end
 
-    local headerY = -126
+    local headerY = -178
     local headers = {
         { text = L("CDM_SKILL"), x = 28, width = 215 },
         { text = L("CDM_EVENT"), x = 255, width = 175 },
@@ -79,6 +86,7 @@ function Builder:Ensure()
 
     frame.RefreshLocale = function(selfFrame)
         selfFrame.title:SetText(L("CDM_VOICE_EDITOR_TITLE"))
+        selfFrame.desc:SetText(L("CDM_VOICE_EDITOR_DESC"))
         selfFrame.classLabel:SetText(L("CDM_CURRENT_CLASS"))
         selfFrame.specLabel:SetText(L("CDM_CURRENT_SPEC"))
         selfFrame.categoryLabel:SetText(L("CDM_CATEGORY"))
@@ -96,7 +104,7 @@ function Builder:Ensure()
         bottomPadding = 0,
         wheelStep = 50,
     })
-    frame.scrollHost:SetPoint("TOPLEFT", frame, "TOPLEFT", 20, -148)
+    frame.scrollHost:SetPoint("TOPLEFT", frame, "TOPLEFT", 20, -200)
     frame.scrollHost:SetPoint("BOTTOMRIGHT", frame, "BOTTOMRIGHT", -20, 82)
 
     frame.statusText = Label(frame, "", "GameFontHighlightSmall")

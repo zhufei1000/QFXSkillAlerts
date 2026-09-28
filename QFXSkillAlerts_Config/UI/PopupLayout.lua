@@ -83,13 +83,13 @@ Layout.Editor = Layout.Editor or {
         left = 8,
         width = 680,
         classTop = -8,
-        classHeight = 104,
-        spellTop = -124,
+        classHeight = 122,
+        spellTop = -142,
         spellHeight = 312,
-        conditionTop = -454,
+        conditionTop = -472,
         conditionHeight = 266,
-        customCodeTop = -452,
-        customConditionTop = -742,
+        customCodeTop = -470,
+        customConditionTop = -760,
         notifyTop = -8,
         notifyHeight = 420,
         bloodlustTop = -8,
@@ -128,17 +128,10 @@ end
 function Layout:CreateHeaderDescription(parent, text)
     local desc = Widgets:CreateLabel(parent, text or "", "GameFontHighlightSmall")
     desc:SetJustifyH("CENTER")
-    desc:SetPoint("TOPLEFT", parent, "TOPLEFT", 62, self.Editor.Frame.headerDescY)
-    desc:SetPoint("TOPRIGHT", parent, "TOPRIGHT", -62, self.Editor.Frame.headerDescY)
+    desc:SetPoint("TOPLEFT", parent, "TOPLEFT", 36, self.Editor.Frame.headerDescY)
+    desc:SetPoint("TOPRIGHT", parent, "TOPRIGHT", -36, self.Editor.Frame.headerDescY)
     StyleDescription(desc)
     return desc
-end
-
-function Layout:CreateModule(parent, title, y)
-    local section = Widgets:CreateSection(parent, title)
-    section:SetPoint("TOPLEFT", parent, "TOPLEFT", 0, y)
-    section:SetPoint("RIGHT", parent, "RIGHT", 0, 0)
-    return section
 end
 
 local function SetNativeLabelColor(label, enabled)

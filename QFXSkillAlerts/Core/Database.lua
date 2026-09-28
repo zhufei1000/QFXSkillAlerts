@@ -220,7 +220,7 @@ local function CopyKnownSavedFields(target, source)
     for _, key in ipairs({
         "specConfigs", "castSuccessConfigs", "bloodlustConfig", "minimap", "collectionData", "deletedEntries",
         "cdmVoiceRegistry", "cdmVoiceUI", "cdmVoiceProfiles", "cdmVoiceDisabledPresets",
-        "cdmVoicePendingRemovals", "cdmVoiceApplyState", "cdmVoiceSyncState",
+        "cdmVoicePendingRemovals", "cdmVoiceApplyState", "cdmVoiceSyncState", "cdmSkillCatalog",
     }) do
         if type(sourceProfile[key]) == "table" then
             if type(target[key]) ~= "table" then
@@ -331,6 +331,7 @@ function Database:Initialize()
             importedVersion = 0,
             pendingRuntimeReload = false,
         },
+        cdmSkillCatalog = {},
         languageMode = "auto",
         uiSkinMode = "auto",
     })

@@ -20,6 +20,22 @@ local ITEM_LOAD_BAGS = CONST.ITEM_LOAD_BAGS or "bags"
 local DEFAULT_COLLECTION_ICON = CONST.DEFAULT_COLLECTION_ICON or "Interface\\Icons\\INV_Misc_Note_01"
 
 local ENTRY_ROW_CACHE = {}
+-- The cache key multiplies every entry by the viewer's class/spec/race and the
+-- scope mode, so a long session with frequent spec switches could accumulate
+-- row copies without limit. Flush the whole cache once it passes this many
+-- distinct display rows; the rows themselves are still reused by the list.
+local ENTRY_ROW_CACHE_LIMIT = 256
+local entryRowCacheCount = 0
+
+-- Cached rows contain localized strings (mode/sound/scope text), so the cache
+-- is cleared whenever the addon language changes.
+function SavedListLayout:ClearRowCache()
+    for key in pairs(ENTRY_ROW_CACHE) do
+        ENTRY_ROW_CACHE[key] = nil
+    end
+    entryRowCacheCount = 0
+    return true
+end
 
 local function CopyTableShallow(source)
     local copy = {}
@@ -379,6 +395,38 @@ function SavedListLayout:GetSavedListLayoutForScope(owner, classID, specID, incl
         return string.format("%s / %s%s", classText, specText, loadedTag)
     end
 
+    -- Full (uncapped) scope description for the row tooltip, so entries with
+    -- many classes/specs remain inspectable even when the row text is clipped.
+    local function buildEntryScopeDetail(entry, rowClassID, rowSpecID)
+        local classIDs = collectSelectedIDs(entry.alertClassIDs or entry.customClassIDs, ALL_CLASSES_ID, rowClassID)
+        local specIDs = collectSelectedIDs(entry.alertSpecIDs or entry.customSpecIDs, ALL_SPECS_ID, rowSpecID)
+        local lines = {}
+
+        if classIDs[1] == ALL_CLASSES_ID then
+            lines[#lines + 1] = L("SCOPE_ALL_CLASSES")
+        else
+            local names = {}
+            for _, classID in ipairs(classIDs) do
+                names[#names + 1] = resolveClassNameCached(classID)
+            end
+            lines[#lines + 1] = table.concat(names, " / ")
+        end
+
+        if specIDs[1] == ALL_SPECS_ID then
+            lines[#lines + 1] = L("SCOPE_ALL_SPECS")
+        elseif #classIDs == 1 and classIDs[1] ~= ALL_CLASSES_ID then
+            local names = {}
+            for _, specID in ipairs(specIDs) do
+                names[#names + 1] = resolveSpecNameCached(classIDs[1], specID)
+            end
+            lines[#lines + 1] = table.concat(names, " / ")
+        else
+            lines[#lines + 1] = L("SCOPE_SPEC_COUNT", #specIDs)
+        end
+
+        return table.concat(lines, "\n")
+    end
+
     local function buildEntryRow(rowClassID, rowSpecID, rowIndex, depth, parentGroupID, parentGroupKey)
         rowClassID = tonumber(rowClassID) or 0
         rowSpecID = tonumber(rowSpecID) or 0
@@ -412,7 +460,7 @@ function SavedListLayout:GetSavedListLayoutForScope(owner, classID, specID, incl
         local objectTypeRaw = tostring(entry.objectType or OBJECT_TYPE_SPELL):lower()
         local eventContextKey = entryType == "event" and type(api.GetCurrentEventLoadContextKey) == "function"
             and tostring(api.GetCurrentEventLoadContextKey() or "") or ""
-        local cacheKey = table.concat({ entryKey, includeScopeText and "scope" or "plain", tostring(currentClassID or 0), tostring(currentSpecID or 0), tostring(GetCurrentRaceID()), eventContextKey }, ":")
+        local cacheKey = table.concat({ entryKey, includeScopeText and "scope" or "plain", tostring(currentClassID or 0), tostring(currentSpecID or 0), tostring(GetCurrentRaceID()), eventContextKey, tostring(NS.LOCALE or "") }, ":")
         local signature = table.concat({
             tostring(spellId),
             objectTypeRaw,
@@ -472,6 +520,8 @@ function SavedListLayout:GetSavedListLayoutForScope(owner, classID, specID, incl
             tostring(tonumber(entry.talentId) or 0),
             TrimText(entry.talentName or ""),
             tostring(tonumber(entry.talentCD) or 0),
+            tostring(entry.cdMode or ""),
+            tostring(entry.gameStateCD == true),
             NumberBoolMapSignature(entry.alertRaceIDs),
             NumberBoolMapSignature(entry.alertClassIDs or entry.customClassIDs),
             NumberBoolMapSignature(entry.alertSpecIDs or entry.customSpecIDs),
@@ -544,10 +594,20 @@ function SavedListLayout:GetSavedListLayoutForScope(owner, classID, specID, incl
             talentId = tonumber(entry.talentId) or 0,
             talentName = TrimText(entry.talentName or ""),
             talentCD = tonumber(entry.talentCD) or 0,
+            cdMode = tostring(entry.cdMode or ""),
+            gameStateCD = entry.gameStateCD == true,
             icon = icon,
             scopeText = includeScopeText and buildEntryScopeText(entry, rowClassID, rowSpecID, loadedTag) or "",
+            scopeDetail = buildEntryScopeDetail(entry, rowClassID, rowSpecID),
             isLoaded = isLoaded,
         }
+        entryRowCacheCount = entryRowCacheCount + 1
+        if entryRowCacheCount > ENTRY_ROW_CACHE_LIMIT then
+            for key in pairs(ENTRY_ROW_CACHE) do
+                ENTRY_ROW_CACHE[key] = nil
+            end
+            entryRowCacheCount = 1
+        end
         ENTRY_ROW_CACHE[cacheKey] = { signature = signature, row = row }
 
         local result = CopyTableShallow(row)

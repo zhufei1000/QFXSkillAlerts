@@ -303,6 +303,25 @@ local function IsActiveScopeLoaded(entryClassID, entrySpecID, currentClassID, cu
     return entryClassID == currentClassID and (entrySpecID == currentSpecID or entrySpecID == ALL_SPECS_ID)
 end
 
+-- Mirrors the runtime builder's talent load filter. Entries that cannot load
+-- must not take part in the bag-state signature: they stay refresh-free until
+-- a talent or scope refresh re-registers them.
+local function IsEntryTalentLoadBlocked(entry)
+    local bridge = NS.Core and NS.Core.ResolverBridge
+    if not (bridge and type(bridge.IsTalentSelected) == "function") then
+        return false
+    end
+    local hasIndependentLoadTalent = entry.loadTalentEnabled ~= nil
+        or entry.loadTalentId ~= nil or entry.loadTalentName ~= nil
+    local talentId = tonumber(entry.loadTalentId) or 0
+    local loadTalentEnabled = entry.loadTalentEnabled == true and talentId > 0
+    if not hasIndependentLoadTalent then
+        talentId = tonumber(entry.talentId) or 0
+        loadTalentEnabled = entry.checkTalent == true and talentId > 0
+    end
+    return loadTalentEnabled and not bridge:IsTalentSelected(talentId)
+end
+
 local function BuildActiveBagLoadStateSignature()
     if IsCombatLocked() or not EnsureBagItemCache() then
         return nil
@@ -319,7 +338,8 @@ local function BuildActiveBagLoadStateSignature()
                         for _, entry in pairs(entryMap) do
                             if type(entry) == "table"
                                 and tostring(entry.objectType or ""):lower() == OBJECT_TYPE_ITEM
-                                and NormalizeItemLoadMode(entry.itemLoadMode) == ITEM_LOAD_BAGS then
+                                and NormalizeItemLoadMode(entry.itemLoadMode) == ITEM_LOAD_BAGS
+                                and not IsEntryTalentLoadBlocked(entry) then
                                 local itemID = math.floor(tonumber(entry.itemID or entry.spellId) or 0)
                                 if itemID > 0 then
                                     local sameName = entry.itemLoadSameName == true
@@ -1037,6 +1057,10 @@ local function StartCooldown(spellId)
     return NS.Core.RuntimeBridge:StartCooldown(spellId, MAPPED_SPELL_TO_PRIMARY, MAPPED_RUNTIME_CFG)
 end
 
+local function QueueGameCooldown(spellId)
+    return NS.Core.RuntimeBridge:QueueGameCooldown(spellId, MAPPED_SPELL_TO_PRIMARY, MAPPED_RUNTIME_CFG)
+end
+
 local function GetUsedEntryCount(map)
     local store = GetEntryMapStore()
     if store and type(store.GetUsedEntryCount) == "function" then
@@ -1379,6 +1403,15 @@ local InstalledAPI = PublicAPI:Install({
         GetCDMVoiceSavedEntries = function()
             return NS.Core.CDMVoiceService:GetSavedEntries()
         end,
+        GetCDMVoiceSkillCatalog = function()
+            return NS.Core.CDMVoiceService:GetCachedSkillCatalog()
+        end,
+        CaptureCDMVoiceSkillCatalog = function()
+            return NS.Core.CDMVoiceService:CaptureCurrentSpecCatalog()
+        end,
+        SaveCDMVoiceSkillCatalog = function(classID, specID, items)
+            return NS.Core.CDMVoiceService:SaveSkillCatalog(classID, specID, items)
+        end,
         GetCDMVoiceRefreshSerial = function()
             return tonumber(NS.Core.CDMVoiceService.refreshSerial) or 0
         end,
@@ -1597,6 +1630,7 @@ local function ConfigureStartup()
             end,
             clearDelayedCastSuccessTimers = ClearDelayedCastSuccessTimers,
             startCooldown = StartCooldown,
+            queueGameCooldown = QueueGameCooldown,
             handleCastSuccessSpellcast = HandleCastSuccessSpellcast,
             handleBloodlustAura = HandleBloodlustAura,
             handleItemInventoryChanged = RefreshItemLoadState,

@@ -12,6 +12,22 @@ local Skin = NS.UI.Skin
 local DialogTextArea = NS.UI.DialogTextArea or {}
 local L = NS.L or function(key, ...) if select("#", ...) > 0 then return string.format(tostring(key), ...) end return tostring(key) end
 
+local function CreateMultilineBox(parent, width, height)
+    if DialogTextArea and type(DialogTextArea.Create) == "function" then
+        return DialogTextArea:Create(parent, width, height)
+    end
+
+    local scrollFrame = CreateFrame("ScrollFrame", nil, parent, "UIPanelScrollFrameTemplate,BackdropTemplate")
+    scrollFrame:SetSize(width, height)
+    local editBox = CreateFrame("EditBox", nil, scrollFrame)
+    editBox:SetMultiLine(true)
+    editBox:SetAutoFocus(false)
+    editBox:SetFontObject("ChatFontNormal")
+    editBox:SetSize(math.max(1, width - 34), height)
+    scrollFrame:SetScrollChild(editBox)
+    return scrollFrame, editBox
+end
+
 local function PrepareNativeDialog(dialog, parent, opts)
     if not dialog then
         return dialog
@@ -41,28 +57,8 @@ local function PrepareNativeDialog(dialog, parent, opts)
     return dialog
 end
 
-local function CreateMultilineBox(parent, width, height)
-    if DialogTextArea and type(DialogTextArea.Create) == "function" then
-        return DialogTextArea:Create(parent, width, height)
-    end
-
-    local scrollFrame = CreateFrame("ScrollFrame", nil, parent, "UIPanelScrollFrameTemplate,BackdropTemplate")
-    scrollFrame:SetSize(width, height)
-    local editBox = CreateFrame("EditBox", nil, scrollFrame)
-    editBox:SetMultiLine(true)
-    editBox:SetAutoFocus(false)
-    editBox:SetFontObject("ChatFontNormal")
-    editBox:SetSize(math.max(1, width - 34), height)
-    scrollFrame:SetScrollChild(editBox)
-    return scrollFrame, editBox
-end
-
 function Dialogs:PrepareNativeDialog(dialog, parent, opts)
     return PrepareNativeDialog(dialog, parent, opts)
-end
-
-function Dialogs:CreateMultilineBox(parent, width, height)
-    return CreateMultilineBox(parent, width, height)
 end
 
 function MainFrame:EnsureImportExportDialog()

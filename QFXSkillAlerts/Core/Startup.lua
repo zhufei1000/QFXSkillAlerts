@@ -115,6 +115,7 @@ function Startup:Configure(opts)
     callbacks.resolvePendingItems = opts.resolvePendingItems
     callbacks.clearDelayedCastSuccessTimers = opts.clearDelayedCastSuccessTimers
     callbacks.startCooldown = opts.startCooldown
+    callbacks.queueGameCooldown = opts.queueGameCooldown
     callbacks.handleCastSuccessSpellcast = opts.handleCastSuccessSpellcast
     callbacks.handleBloodlustAura = opts.handleBloodlustAura
     callbacks.handleItemInventoryChanged = opts.handleItemInventoryChanged
@@ -202,6 +203,7 @@ end
 function Startup:OnUnitSpellcastSucceeded(unit, spellId)
     if unit == "player" or unit == "pet" then
         SafeCall("startCooldown", spellId)
+        SafeCall("queueGameCooldown", spellId)
         SafeCall("handleCastSuccessSpellcast", spellId)
     end
 end

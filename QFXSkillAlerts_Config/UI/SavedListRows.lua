@@ -154,14 +154,11 @@ local function GetEntryTypeText(entry)
     return L("ENTRY_TYPE_COOLDOWN")
 end
 
-function Rows.GetEntryTypeText(entry)
-    return GetEntryTypeText(entry)
-end
-
 function Rows.BuildEntryRowText(entry, includeScopeText)
+    local textLocale = tostring(NS.LOCALE or "")
     if type(entry) == "table" then
         local cacheField = includeScopeText and "_mcdRowTextWithScope" or "_mcdRowText"
-        if type(entry[cacheField]) == "string" then
+        if type(entry[cacheField]) == "string" and entry._mcdRowTextLocale == textLocale then
             return entry[cacheField]
         end
     end
@@ -193,6 +190,20 @@ function Rows.BuildEntryRowText(entry, includeScopeText)
                     parts[#parts + 1] = string.format("|cff808080%s|r", L("SAVED_ITEM_LOAD_SAME_NAME"))
                 end
             end
+        elseif tostring(entry and entry.entryType or "cooldown") == "cooldown" then
+            local cdMode = tostring(entry and entry.cdMode or ""):lower()
+            if cdMode ~= "ready" and cdMode ~= "fixed" and cdMode ~= "cooldown" then
+                cdMode = ((entry and entry.gameStateCD == true) or cdMode == "charge") and "ready" or "fixed"
+            end
+            local cdModeText
+            if cdMode == "ready" then
+                cdModeText = L("SAVED_CD_MODE_READY")
+            elseif cdMode == "cooldown" then
+                cdModeText = L("SAVED_CD_MODE_COOLDOWN")
+            else
+                cdModeText = L("SAVED_CD_MODE_FIXED")
+            end
+            parts[#parts + 1] = string.format("|cff808080%s|r", cdModeText)
         end
     end
     if index > 0 then
@@ -243,12 +254,15 @@ function Rows.BuildEntryRowText(entry, includeScopeText)
     if type(entry) == "table" then
         local cacheField = includeScopeText and "_mcdRowTextWithScope" or "_mcdRowText"
         entry[cacheField] = result
+        entry._mcdRowTextLocale = textLocale
     end
     return result
 end
 
 function Rows.BuildGroupRowText(entry)
-    if type(entry) == "table" and type(entry._mcdGroupRowText) == "string" then
+    local textLocale = tostring(NS.LOCALE or "")
+    if type(entry) == "table" and type(entry._mcdGroupRowText) == "string"
+        and entry._mcdGroupRowTextLocale == textLocale then
         return entry._mcdGroupRowText
     end
     local name = TrimText(entry and entry.name)
@@ -269,6 +283,7 @@ function Rows.BuildGroupRowText(entry)
     local result = string.format("|cffffd24a%s|r  %s  |cff808080%s|r", L("COLLECTION_LABEL"), name, countText)
     if type(entry) == "table" then
         entry._mcdGroupRowText = result
+        entry._mcdGroupRowTextLocale = textLocale
     end
     return result
 end

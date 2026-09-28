@@ -50,10 +50,7 @@ local function SelectDropdownValue(dropdown, value, text)
     end
 end
 
-local function RefreshMultiDropdownText(dropdown)
-    if not dropdown then
-        return
-    end
+local function BuildMultiDropdownText(dropdown)
     local selected = dropdown.qfxsaSelectedValues or {}
     local parts = {}
     for _, item in ipairs(dropdown.qfxsaItems or {}) do
@@ -61,7 +58,22 @@ local function RefreshMultiDropdownText(dropdown)
             parts[#parts + 1] = tostring(item.text or item.value or "")
         end
     end
-    local text = #parts > 0 and table.concat(parts, ", ") or tostring(dropdown.qfxsaFallbackText or "")
+    if #parts == 0 then
+        return tostring(dropdown.qfxsaFallbackText or "")
+    end
+    local limit = tonumber(dropdown.qfxsaSummaryLimit) or 0
+    if limit > 0 and #parts > limit and type(dropdown.qfxsaSummaryFormat) == "string" then
+        return string.format(dropdown.qfxsaSummaryFormat, #parts)
+    end
+    return table.concat(parts, ", ")
+end
+
+local function RefreshMultiDropdownText(dropdown)
+    if not dropdown then
+        return
+    end
+    local selected = dropdown.qfxsaSelectedValues or {}
+    local text = BuildMultiDropdownText(dropdown)
     dropdown.qfxsaText = text
     dropdown.qfxsaValue = selected
     if type(dropdown.qfxsaSetVisualText) == "function" then
@@ -75,8 +87,23 @@ local function ToggleDropdownMultiValue(dropdown, value)
     if not dropdown then
         return
     end
-    dropdown.qfxsaSelectedValues = dropdown.qfxsaSelectedValues or {}
-    dropdown.qfxsaSelectedValues[value] = dropdown.qfxsaSelectedValues[value] ~= true
+    local selected = dropdown.qfxsaSelectedValues or {}
+    dropdown.qfxsaSelectedValues = selected
+    selected[value] = selected[value] ~= true
+    -- "All races / classes / specs" is exclusive: selecting it clears the
+    -- concrete entries and selecting any concrete entry clears it.
+    local exclusive = dropdown.qfxsaExclusiveValue
+    if exclusive ~= nil then
+        if value == exclusive and selected[value] == true then
+            for key in pairs(selected) do
+                if key ~= exclusive then
+                    selected[key] = nil
+                end
+            end
+        elseif value ~= exclusive and selected[value] == true then
+            selected[exclusive] = nil
+        end
+    end
     RefreshMultiDropdownText(dropdown)
     if type(dropdown.qfxsaOnValueChanged) == "function" then
         dropdown.qfxsaOnValueChanged(dropdown.qfxsaSelectedValues)

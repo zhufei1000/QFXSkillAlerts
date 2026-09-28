@@ -336,8 +336,9 @@ Assert(Sync:ApplyCurrentDraftAndReload(Draft(101, PAYLOAD_B)), "explicit reapply
 Assert(Sync:VerifyPostReloadApply(), "repaired equivalent set should verify")
 
 -- Manual deletion immediately removes every same-event Sound from all equivalent
--- cooldowns, saves once, and does not reload. The synchronous verification clears
--- the temporary tombstone before returning.
+-- cooldowns, saves once, and requests one reload so the CooldownViewer reloads
+-- the tainted layout data clean. The synchronous verification clears the
+-- temporary tombstone before returning.
 alertsByCooldown[103][#alertsByCooldown[103] + 1] = { SOUND, EVENT_AVAILABLE, 900 }
 alertsByCooldown[103][#alertsByCooldown[103] + 1] = { SOUND, EVENT_AVAILABLE, 901 }
 ResetCalls()
@@ -345,13 +346,13 @@ local deleted, deleteReason = Service:DeleteSoundAlertByKey(
     "cdmpreset:8:62:essential:1001:AVAILABLE"
 )
 Assert(deleted, "saved entry deletion should succeed")
-Equal(deleteReason, "deleted", "manual deletion should apply immediately")
+Equal(deleteReason, "reload_requested", "manual deletion should apply and request reload")
 Equal(CountAlerts(101, SOUND, EVENT_AVAILABLE, PAYLOAD_B), 0, "target payload should be removed")
 Equal(CountAlerts(103, SOUND, EVENT_AVAILABLE), 0, "manual deletion should clear equivalent sounds")
 Equal(CountAlerts(101, VISUAL, EVENT_AVAILABLE), 1, "manual deletion must preserve visual alerts")
 Equal(CountAlerts(101, SOUND, EVENT_OTHER), 1, "manual deletion must preserve other events")
 Equal(CountCalls("save"), 1, "manual deletion should save once")
-Equal(CountCalls("reload"), 0, "manual deletion must not reload")
+Equal(CountCalls("reload"), 1, "manual deletion should reload once to clear the layout taint")
 Equal(CountCalls("lock"), 0, "manual deletion must not leave notifications locked")
 Assert(not Store:GetPendingRemoval(8, 62, recordKey), "manual deletion should clear its tombstone")
 
@@ -374,7 +375,7 @@ ResetCalls()
 Assert(Sync:ApplyAllPendingCurrentSpecAndReload("test_staged_remove"), "staged removal should apply")
 Equal(CountAlerts(101, SOUND, EVENT_AVAILABLE), 0, "staged removal should clear the sound")
 Equal(CountCalls("save"), 1, "staged removal should save once")
-Equal(CountCalls("reload"), 0, "removal-only batch must not reload")
+Equal(CountCalls("reload"), 1, "removal-only batch should reload once to clear the layout taint")
 Equal(CountCalls("lock"), 0, "removal-only batch must not lock notifications")
 Assert(not Store:GetPendingRemoval(8, 62, recordKey), "removal-only batch should clear its tombstone")
 
@@ -394,8 +395,9 @@ Assert(not Store:GetPendingRemoval(8, 62, recordKey), "failed deletion should re
 Equal(CountAlerts(101, SOUND, EVENT_AVAILABLE, PAYLOAD_A), 1, "failed deletion should preserve CDM")
 Equal(#calls, 0, "failed deletion prevalidation must not mutate or reload")
 
--- A save failure after removal restores both the runtime alert and local record,
--- without reloading or leaving a pending tombstone.
+-- A save failure after removal restores both the runtime alert and local record.
+-- The aborted write may have tainted the layout, so it also requests a reload to
+-- bring the CooldownViewer back with clean data, and leaves no pending tombstone.
 failNextSave = true
 ResetCalls()
 local unsavedDelete, unsavedDeleteReason = Service:DeleteSoundAlertByKey(
@@ -407,7 +409,7 @@ Assert(Store:GetEffectiveRecord(8, 62, recordKey), "save failure should restore 
 Assert(not Store:GetPendingRemoval(8, 62, recordKey), "save failure should clear its tombstone")
 Equal(CountAlerts(101, SOUND, EVENT_AVAILABLE, PAYLOAD_A), 1, "save failure should restore CDM")
 Equal(CountCalls("save"), 1, "failed deletion should attempt one save")
-Equal(CountCalls("reload"), 0, "failed deletion must not reload")
+Equal(CountCalls("reload"), 1, "failed deletion after mutation should reload once")
 
 -- Changing the record key keeps the old logical skill/event as a payload-free
 -- tombstone and applies old cleanup plus the new target in one transaction.
@@ -736,5 +738,26 @@ Assert(Store:GetPendingRemoval(2, 70, "utility:1002:AVAILABLE"),
     "collection batch deletion should retain a native-alert cleanup tombstone")
 Assert(batchScheduled, "collection batch deletion should schedule one CDM evaluation")
 Sync.ScheduleEvaluation = originalScheduleEvaluation
+
+-- Restricted content (secret values active) blocks CDM writes even out of
+-- combat, and the gate degrades gracefully when the C_Secrets API is missing.
+ResetCalls()
+C_Secrets = { ShouldCooldownsBeSecret = function() return true end }
+local restrictedRemoval, _, restrictedReason = Service:ApplyCDMRemovalPlanAndReload({}, {})
+Assert(not restrictedRemoval, "restricted removal must be blocked")
+Equal(restrictedReason, "combat", "restricted removal should reuse the combat reason")
+Equal(#calls, 0, "restricted removal must not touch LayoutManager or reload")
+local restrictedSet, _, restrictedSetReason = Sync:ApplyPlanAndReload({}, nil, "test_restricted")
+Assert(not restrictedSet, "restricted set batch must be blocked")
+Equal(restrictedSetReason, "combat", "restricted set batch should reuse the combat reason")
+Equal(#calls, 0, "restricted set batch must not touch LayoutManager or reload")
+C_Secrets.ShouldCooldownsBeSecret = function() return false end
+local allowedRemoval, _, allowedReason = Service:ApplyCDMRemovalPlanAndReload({}, {})
+Assert(allowedRemoval, "unrestricted empty removal should pass the gate")
+Equal(allowedReason, "no_changes", "unrestricted empty removal should be a no-op")
+C_Secrets = nil
+local gateWithoutAPI, _, gateReason = Service:ApplyCDMRemovalPlanAndReload({}, {})
+Assert(gateWithoutAPI, "missing C_Secrets must not block the gate")
+Equal(gateReason, "no_changes", "missing C_Secrets should behave like the legacy combat-only check")
 
 print("CDM explicit apply regression tests passed")

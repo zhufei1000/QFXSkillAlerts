@@ -312,6 +312,10 @@ function Widgets:SetMultiDropdownValues(dropdown, values, fallbackText)
             end
         end
     end
+    local exclusive = dropdown.qfxsaExclusiveValue
+    if exclusive ~= nil and dropdown.qfxsaSelectedValues[exclusive] == true then
+        dropdown.qfxsaSelectedValues = { [exclusive] = true }
+    end
     dropdown.qfxsaFallbackText = tostring(fallbackText or dropdown.qfxsaFallbackText or "")
     dropdown.qfxsaValue = dropdown.qfxsaSelectedValues
     local parts = {}
@@ -320,9 +324,29 @@ function Widgets:SetMultiDropdownValues(dropdown, values, fallbackText)
             parts[#parts + 1] = tostring(item.text or item.value or "")
         end
     end
-    local text = #parts > 0 and table.concat(parts, ", ") or dropdown.qfxsaFallbackText
+    local text
+    if #parts == 0 then
+        text = dropdown.qfxsaFallbackText
+    else
+        local limit = tonumber(dropdown.qfxsaSummaryLimit) or 0
+        if limit > 0 and #parts > limit and type(dropdown.qfxsaSummaryFormat) == "string" then
+            text = string.format(dropdown.qfxsaSummaryFormat, #parts)
+        else
+            text = table.concat(parts, ", ")
+        end
+    end
     dropdown.qfxsaText = text
     SetDropDownVisualText(dropdown, text)
+end
+
+-- Compact display for multi-selects with many entries: show the joined names
+-- up to `limit`, then a localized count summary ("%d Classes" etc.).
+function Widgets:SetMultiDropdownSummary(dropdown, limit, format)
+    if not dropdown then
+        return
+    end
+    dropdown.qfxsaSummaryLimit = tonumber(limit) or 0
+    dropdown.qfxsaSummaryFormat = format
 end
 
 function Widgets:GetMultiDropdownValues(dropdown)
@@ -363,5 +387,20 @@ function Widgets:SetDropdownEnabled(dropdown, enabled)
             dropdown.qfxsaArrow:Disable()
         end
         dropdown:SetAlpha(0.55)
+    end
+end
+
+function Widgets:SetDropdownWidth(dropdown, width)
+    if not dropdown then
+        return
+    end
+    width = math.max(40, tonumber(width) or 180)
+    dropdown.qfxsaOuterWidth = width
+    if dropdown.SetWidth then
+        dropdown:SetWidth(width)
+    end
+    local visualText = dropdown.qfxsaTextOverlay
+    if visualText and MakeSingleLine then
+        MakeSingleLine(visualText, math.max(1, width - DROPDOWN_TEXT_LEFT_INSET - DROPDOWN_TEXT_RIGHT_INSET))
     end
 end

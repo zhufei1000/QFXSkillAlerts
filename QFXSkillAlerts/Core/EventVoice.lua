@@ -11,6 +11,8 @@ local ALL_SPECS_ID = CONST.ALL_SPECS_ID or 0
 local ALL_RACES_ID = CONST.ALL_RACES_ID or 0
 local MODE_SOUND = CONST.MODE_SOUND or "sound"
 local EventContext = NS.Core.EventContext
+local GroupDeathMonitor = NS.Core.GroupDeathMonitor
+local GROUP_MEMBER_DEAD_EVENT = "QFXSA_GROUP_MEMBER_DEAD"
 
 local L = NS.L or function(key)
     return tostring(key)
@@ -29,6 +31,7 @@ local DEFINITIONS = {
     { key = "incoming_summon", wowEvent = "INCOMING_SUMMON_CHANGED", labelKey = "EVENT_VOICE_INCOMING_SUMMON", icon = 136223, incomingSummon = true },
     { key = "incoming_resurrection", wowEvent = "INCOMING_RESURRECT_CHANGED", labelKey = "EVENT_VOICE_INCOMING_RESURRECTION", icon = 135955, incomingResurrection = true },
     { key = "player_dead", wowEvent = "PLAYER_DEAD", labelKey = "EVENT_VOICE_PLAYER_DEAD", icon = 132331 },
+    { key = "group_member_dead", wowEvent = GROUP_MEMBER_DEAD_EVENT, labelKey = "EVENT_VOICE_GROUP_MEMBER_DEAD", icon = 132331 },
 }
 
 local definitionByKey = {}
@@ -108,8 +111,8 @@ end
 
 local function MatchesDefinition(definition, ...)
     if definition.encounterResult ~= nil then
-        local success = tonumber(select(5, ...))
-        return success == definition.encounterResult
+        local success = select(5, ...)
+        return tonumber(success) == definition.encounterResult
     end
     if definition.incomingSummon == true then
         local incoming = rawget(_G, "C_IncomingSummon")
@@ -189,6 +192,13 @@ function EventVoice:Configure(opts)
     callbacks.playNotification = opts.playNotification
     callbacks.getTime = opts.getTime
     callbacks.createFrame = opts.createFrame
+    if GroupDeathMonitor and type(GroupDeathMonitor.Configure) == "function" then
+        GroupDeathMonitor:Configure({
+            onGroupMemberDeath = function(unit)
+                self:Dispatch(GROUP_MEMBER_DEAD_EVENT, unit)
+            end,
+        })
+    end
     return true
 end
 
@@ -215,15 +225,26 @@ function EventVoice:UpdateRegistrations()
     if frame and type(frame.UnregisterAllEvents) == "function" then
         frame:UnregisterAllEvents()
     end
-    if not next(activeByWowEvent) then
-        return true
-    end
-    frame = self:EnsureFrame()
-    if not frame or type(frame.RegisterEvent) ~= "function" then
-        return false
-    end
+    local hasRegisteredEvent = false
     for wowEvent in pairs(activeByWowEvent) do
-        frame:RegisterEvent(wowEvent)
+        if wowEvent ~= GROUP_MEMBER_DEAD_EVENT then
+            hasRegisteredEvent = true
+            break
+        end
+    end
+    if hasRegisteredEvent then
+        frame = self:EnsureFrame()
+        if not frame or type(frame.RegisterEvent) ~= "function" then
+            return false
+        end
+        for wowEvent in pairs(activeByWowEvent) do
+            if wowEvent ~= GROUP_MEMBER_DEAD_EVENT then
+                frame:RegisterEvent(wowEvent)
+            end
+        end
+    end
+    if GroupDeathMonitor and type(GroupDeathMonitor.SetEnabled) == "function" then
+        GroupDeathMonitor:SetEnabled(type(activeByWowEvent[GROUP_MEMBER_DEAD_EVENT]) == "table")
     end
     return true
 end

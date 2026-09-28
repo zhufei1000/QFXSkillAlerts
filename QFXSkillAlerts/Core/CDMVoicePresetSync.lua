@@ -871,10 +871,10 @@ function Sync:ApplyPendingRemovalByKey(recordKey)
     if #plan == 0 then
         return false, summary, "delete_failed"
     end
-    if type(service.ApplyCDMRemovalPlanWithoutReload) ~= "function" then
+    if type(service.ApplyCDMRemovalPlanAndReload) ~= "function" then
         return false, summary, "not_available"
     end
-    return service:ApplyCDMRemovalPlanWithoutReload(plan, {
+    return service:ApplyCDMRemovalPlanAndReload(plan, {
         summary = summary,
         reason = "manual_delete",
         scopeToken = self:CaptureScopeToken(),
@@ -904,8 +904,8 @@ function Sync:ApplyAllPendingCurrentSpecAndReload(reason, drafts)
     end
     local service = GetService()
     if removalOnly and service
-        and type(service.ApplyCDMRemovalPlanWithoutReload) == "function" then
-        return service:ApplyCDMRemovalPlanWithoutReload(plan, {
+        and type(service.ApplyCDMRemovalPlanAndReload) == "function" then
+        return service:ApplyCDMRemovalPlanAndReload(plan, {
             summary = summary,
             reason = reason or "apply_all_removals",
             scopeToken = self:CaptureScopeToken(),
@@ -1109,6 +1109,18 @@ function Sync:Initialize()
             or event == "PLAYER_LOGIN"
         if scopeEvent then
             Sync:AdvanceScope()
+        end
+        -- Keep the cross-spec skill catalog current: Blizzard only exposes the
+        -- active spec's Cooldown Manager data, so cache it whenever a spec's
+        -- data becomes readable (login, spec change, zone, CDM data load).
+        if scopeEvent or event == "ADDON_LOADED"
+            or event == "COOLDOWN_VIEWER_DATA_LOADED"
+            or event == "COOLDOWN_VIEWER_TABLE_HOTFIXED"
+            or event == "PLAYER_REGEN_ENABLED" then
+            local captureService = GetService()
+            if captureService and type(captureService.CaptureCurrentSpecCatalog) == "function" then
+                captureService:CaptureCurrentSpecCatalog()
+            end
         end
         if event == "PLAYER_SPECIALIZATION_CHANGED" then
             -- A specialization revisited later in the same login is a new

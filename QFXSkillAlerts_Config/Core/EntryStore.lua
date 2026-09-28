@@ -57,6 +57,21 @@ local function NormalizeCastDelayMode(value)
     return "show"
 end
 
+-- CD source for cooldown entries: "fixed" (number), "ready" (game readiness
+-- edge) or "cooldown" (real cooldown start). Legacy gameStateCD=true maps to
+-- "ready"; "charge" is no longer offered (per-charge announcements use CDM's
+-- ChargeGained preset) and falls back to "ready".
+local function NormalizeCdMode(value, legacyGameStateCD)
+    value = tostring(value or ""):lower()
+    if value == "ready" or value == "fixed" or value == "cooldown" then
+        return value
+    end
+    if legacyGameStateCD == true or value == "charge" then
+        return "ready"
+    end
+    return "fixed"
+end
+
 local function NormalizeItemLoadMode(value)
     value = tostring(value or ITEM_LOAD_NONE):lower()
     if value == ITEM_LOAD_EQUIPPED or value == ITEM_LOAD_BAGS then
@@ -841,6 +856,8 @@ function EntryStore:LoadSelectedEntry(owner)
     end
     state.baseCD = tonumber(entry.baseCD) or 0
     state.fixedCD = true
+    state.cdMode = NormalizeCdMode(entry.cdMode, entry.gameStateCD == true)
+    state.gameStateCD = state.cdMode ~= "fixed"
     state.checkTalent = entry.checkTalent == true and (tonumber(entry.talentId) or 0) > 0
     state.talentId = tonumber(entry.talentId) or 0
     state.talentName = TrimText(entry.talentName or "")
@@ -1023,6 +1040,9 @@ function EntryStore:SaveEntry(owner)
     local spellId = tonumber(state.spellId) or 0
     local objectType = type(api.ResolveObjectType) == "function" and api.ResolveObjectType(spellId, state.objectType) or OBJECT_TYPE_SPELL
     local baseCD = tonumber(state.baseCD) or 0
+    local cdMode = objectType == OBJECT_TYPE_ITEM and "fixed"
+        or NormalizeCdMode(state.cdMode, state.gameStateCD == true)
+    local gameStateCD = cdMode ~= "fixed"
     local checkTalent = state.checkTalent == true
     local talentId = tonumber(state.talentId) or 0
     local talentName = TrimText(state.talentName or "")
@@ -1128,6 +1148,18 @@ function EntryStore:SaveEntry(owner)
     local isCooldownEntry = entryType == "cooldown"
     local isCastEntry = entryType == "cast"
     local isEventEntry = entryType == "event"
+    -- The CD-change talent only changes the fixed timer; readiness-edge entries
+    -- must not keep stale talent data (the separate load-talent filter stays).
+    if isCooldownEntry and cdMode ~= "fixed" then
+        checkTalent = false
+        talentId = 0
+        talentName = ""
+        talentCD = 0
+        state.checkTalent = false
+        state.talentId = 0
+        state.talentName = ""
+        state.talentCD = 0
+    end
     local eventKey = isEventEntry and NormalizeEventVoiceKey(api, state.eventKey) or nil
     local eventThrottle = isEventEntry and math.max(0, math.min(300, tonumber(state.eventThrottle) or 1)) or nil
     local eventLoadContexts = isEventEntry and NormalizeEventLoadContexts(api, state.eventLoadContexts) or nil
@@ -1193,7 +1225,7 @@ function EntryStore:SaveEntry(owner)
         print("[QFX-SA] " .. L("MSG_INVALID_SPELL_ID"))
         return
     end
-    if isCooldownEntry and baseCD <= 0 then
+    if isCooldownEntry and baseCD <= 0 and cdMode == "fixed" then
         print("[QFX-SA] " .. L("MSG_INVALID_FIXED_CD"))
         return
     end
@@ -1320,6 +1352,8 @@ function EntryStore:SaveEntry(owner)
         itemLoadSameName = (objectType == OBJECT_TYPE_ITEM and itemLoadMode == ITEM_LOAD_BAGS and state.itemLoadSameName == true) or nil,
         baseCD = isCooldownEntry and tonumber(string.format("%.2f", baseCD)) or 0,
         fixedCD = true,
+        cdMode = isCooldownEntry and cdMode or "fixed",
+        gameStateCD = (isCooldownEntry and gameStateCD == true) or false,
         checkTalent = objectType ~= OBJECT_TYPE_ITEM and checkTalent and talentId > 0,
         talentId = (objectType ~= OBJECT_TYPE_ITEM and checkTalent) and math.floor(talentId) or 0,
         talentName = (objectType ~= OBJECT_TYPE_ITEM and checkTalent) and talentName or "",
