@@ -38,6 +38,29 @@ local function IsInCombat()
     return type(InCombatLockdown) == "function" and InCombatLockdown() == true
 end
 
+-- Throttle for the cross-spec skill catalog capture below. Combat-end fires
+-- far more often than login / spec change / data load, and re-walking every
+-- Cooldown Manager category there costs C-API calls, table churn and string
+-- work on every fight. Same spec re-captures are skipped for a while unless
+-- forced by a data-changing trigger.
+local lastCatalogCaptureScope = nil
+local lastCatalogCaptureTime = 0
+local CATALOG_CAPTURE_THROTTLE = 300
+
+local function ShouldSkipCatalogCapture(classID, specID, force)
+    if force == true then
+        return false
+    end
+    local now = (type(GetTime) == "function" and GetTime()) or 0
+    local scope = tostring(classID) .. ":" .. tostring(specID)
+    if scope == lastCatalogCaptureScope and (now - lastCatalogCaptureTime) < CATALOG_CAPTURE_THROTTLE then
+        return true
+    end
+    lastCatalogCaptureScope = scope
+    lastCatalogCaptureTime = now
+    return false
+end
+
 -- Secret values are active during restricted content (raids, Mythic+, etc.).
 -- Writing the Cooldown Manager layout in that state taints it in place, which
 -- then makes Blizzard's CooldownViewer error out while it refreshes secret
@@ -119,26 +142,6 @@ local function GetLayoutManager()
     local ok, manager = pcall(CooldownViewerSettings.GetLayoutManager, CooldownViewerSettings)
     if ok and type(manager) == "table" then
         return manager
-    end
-    return nil
-end
-
-local function GetDataProvider()
-    if not EnsureCooldownViewerLoaded() then
-        return nil
-    end
-    if type(CooldownViewerSettings.GetDataProvider) == "function" then
-        local ok, provider = pcall(CooldownViewerSettings.GetDataProvider, CooldownViewerSettings)
-        if ok and type(provider) == "table" then
-            return provider
-        end
-    end
-    local manager = GetLayoutManager()
-    if manager and type(manager.GetDataProvider) == "function" then
-        local ok, provider = pcall(manager.GetDataProvider, manager)
-        if ok and type(provider) == "table" then
-            return provider
-        end
     end
     return nil
 end
@@ -281,15 +284,15 @@ function Service:IsAvailable()
     if not EnsureCooldownViewerLoaded() then
         return false, "not_loaded"
     end
-    local manager, provider = GetLayoutManager(), GetDataProvider()
-    if not manager or not provider
+    local manager = GetLayoutManager()
+    if not manager
         or type(manager.GetAlerts) ~= "function"
         or type(manager.AddAlert) ~= "function"
         or type(manager.RemoveAlert) ~= "function"
         or type(manager.LockNotifications) ~= "function"
         or type(manager.SaveLayouts) ~= "function"
-        or (type(provider.GetOrderedCooldownIDsForCategory) ~= "function"
-            and type(provider.GetOrderedCooldownIDs) ~= "function") then
+        or type(C_CooldownViewer.GetCooldownViewerCategorySet) ~= "function"
+        or type(C_CooldownViewer.GetCooldownViewerCooldownInfo) ~= "function" then
         return false, "data_not_ready"
     end
     local _, specID = self:GetCurrentClassSpec()
@@ -317,8 +320,7 @@ end
 
 function Service:GetCooldownsForCategory(category)
     local categoryValue, def = ResolveCategory(category)
-    local provider = GetDataProvider()
-    if categoryValue == nil or not provider then
+    if categoryValue == nil then
         return {}
     end
 
@@ -329,26 +331,22 @@ function Service:GetCooldownsForCategory(category)
         return cached
     end
 
+    -- Read the category set through the C API instead of the settings data
+    -- provider. The provider's Lua getters lazily build and cache their
+    -- display data inside the caller's execution; when an addon triggers that
+    -- build, the cache is created in tainted execution and Blizzard's
+    -- CooldownViewer then errors while reading its own cache in restricted
+    -- content ("table that cannot be accessed while tainted").
     local ids
-    if type(provider.GetOrderedCooldownIDsForCategory) == "function" then
-        local ok, result = pcall(provider.GetOrderedCooldownIDsForCategory, provider, categoryValue, false)
+    if type(C_CooldownViewer) == "table"
+        and type(C_CooldownViewer.GetCooldownViewerCategorySet) == "function" then
+        local ok, result = pcall(C_CooldownViewer.GetCooldownViewerCategorySet, categoryValue, false)
         if ok and type(result) == "table" then
             ids = result
         end
     end
     if type(ids) ~= "table" then
         ids = {}
-        if type(provider.GetOrderedCooldownIDs) == "function" then
-            local ok, ordered = pcall(provider.GetOrderedCooldownIDs, provider)
-            if ok and type(ordered) == "table" then
-                for _, cooldownID in ipairs(ordered) do
-                    local info = self:GetCooldownInfo(cooldownID)
-                    if info and tonumber(info.category) == tonumber(categoryValue) then
-                        ids[#ids + 1] = cooldownID
-                    end
-                end
-            end
-        end
     end
 
     local result = {}
@@ -375,15 +373,14 @@ function Service:GetCooldownInfo(cooldownID)
     if self.cooldownInfoCache[cooldownID] then
         return self.cooldownInfoCache[cooldownID]
     end
-    local provider = GetDataProvider()
+    -- Read through the C API instead of the settings data provider. The
+    -- provider's GetCooldownInfoForID() lazily builds and caches its display
+    -- data inside the caller's execution; when an addon triggers that build,
+    -- the cache is created in tainted execution and Blizzard's CooldownViewer
+    -- then errors while reading its own cache in restricted content.
     local rawInfo
-    if provider and type(provider.GetCooldownInfoForID) == "function" then
-        local ok, result = pcall(provider.GetCooldownInfoForID, provider, cooldownID)
-        if ok and type(result) == "table" then
-            rawInfo = result
-        end
-    end
-    if not rawInfo and type(C_CooldownViewer) == "table" and type(C_CooldownViewer.GetCooldownViewerCooldownInfo) == "function" then
+    if type(C_CooldownViewer) == "table"
+        and type(C_CooldownViewer.GetCooldownViewerCooldownInfo) == "function" then
         local ok, result = pcall(C_CooldownViewer.GetCooldownViewerCooldownInfo, cooldownID)
         if ok and type(result) == "table" then
             rawInfo = result
@@ -393,13 +390,28 @@ function Service:GetCooldownInfo(cooldownID)
         return nil
     end
 
+    -- The active layout can override the default category. Read the override
+    -- from the layout block directly; this is a plain read and never builds
+    -- the provider's display cache.
+    local category = tonumber(rawInfo.category)
+    local manager = GetLayoutManager()
+    local accessMode = GetAccessMode("AccessOnly")
+    if manager and accessMode ~= nil and type(manager.GetCooldownIDDataBlock) == "function" then
+        local ok, block = pcall(manager.GetCooldownIDDataBlock, manager, cooldownID, accessMode)
+        if ok and type(block) == "table" and block.category ~= nil then
+            category = tonumber(block.category) or category
+        end
+    end
+
     local spellID = tonumber(rawInfo.overrideTooltipSpellID)
         or tonumber(rawInfo.overrideSpellID)
         or tonumber(rawInfo.spellID)
     local name = GetSpellName(spellID) or L("CDM_UNKNOWN_SKILL", cooldownID)
+    -- Only keep the fields the addon actually reads; the full Blizzard table
+    -- is deliberately dropped so it can be garbage-collected.
     local info = {
         cooldownID = cooldownID,
-        category = rawInfo.category,
+        category = category,
         spellID = spellID,
         baseSpellID = tonumber(rawInfo.spellID),
         overrideSpellID = tonumber(rawInfo.overrideSpellID),
@@ -408,7 +420,6 @@ function Service:GetCooldownInfo(cooldownID)
         spellName = name,
         icon = GetSpellIcon(spellID),
         isKnown = rawInfo.isKnown ~= false,
-        rawInfo = rawInfo,
     }
     self.cooldownInfoCache[cooldownID] = info
     return info
@@ -875,7 +886,9 @@ function Service:ApplyCDMRemovalPlanAndReload(plan, options)
     if not store or not manager or type(manager.GetAlerts) ~= "function"
         or type(manager.AddAlert) ~= "function"
         or type(manager.RemoveAlert) ~= "function"
-        or type(manager.SaveLayouts) ~= "function" then
+        or type(manager.SaveLayouts) ~= "function"
+        or (type(ReloadUI) ~= "function"
+            and (type(C_UI) ~= "table" or type(C_UI.Reload) ~= "function")) then
         return false, summary, "data_not_ready"
     end
     local classID, specID = self:GetCurrentClassSpec()
@@ -1243,6 +1256,118 @@ function Service:ApplySoundAlertsBatch(operations, options)
     return self:ApplyCDMPlanAndReload(operations, options)
 end
 
+-- Counts (without removing) the legacy QFX sound alerts still stored in the
+-- Cooldown Manager layout for the addon-played events.
+function Service:CountNativeCDMAlerts()
+    local native = NS.Core and NS.Core.CDMNativeEvents
+    if not native or type(native.IsNativeAlertEventType) ~= "function" then
+        return 0
+    end
+    local manager = GetLayoutManager()
+    if not manager or type(manager.GetAlerts) ~= "function"
+        or type(C_CooldownViewer) ~= "table"
+        or type(C_CooldownViewer.GetCooldownViewerCategorySet) ~= "function" then
+        return 0
+    end
+    local count = 0
+    local seen = {}
+    for _, category in ipairs(self:GetCategories()) do
+        local ok, ids = pcall(C_CooldownViewer.GetCooldownViewerCategorySet, category.category, true)
+        if ok and type(ids) == "table" then
+            for _, cooldownID in ipairs(ids) do
+                cooldownID = tonumber(cooldownID)
+                if cooldownID and not seen[cooldownID] then
+                    seen[cooldownID] = true
+                    local alerts = self:GetAlerts(cooldownID)
+                    if type(alerts) == "table" then
+                        for _, alert in ipairs(alerts) do
+                            if GetAlertType(alert) == GetSoundAlertType()
+                                and native:IsNativeAlertEventType(GetAlertEvent(alert)) then
+                                local payload = GetAlertPayload(alert)
+                                if Registry and Registry:IsOwnedPayload(payload) then
+                                    count = count + 1
+                                end
+                            end
+                        end
+                    end
+                end
+            end
+        end
+    end
+    return count
+end
+
+-- Removes every QFX sound alert for the addon-played events (ready,
+-- on-cooldown, aura applied/removed) from the Cooldown Manager layout.
+-- Charge-gained and pandemic alerts stay because they are still played by the
+-- Cooldown Manager. One-time migration helper: writing the layout taints the
+-- session, so the UI reloads whenever anything was removed. Call this from a
+-- hardware event (e.g. a popup button) because C_UI.Reload is protected.
+function Service:CleanupNativeCDMAlerts()
+    if AreCDMWritesBlocked() then
+        return false, 0, "combat"
+    end
+    local native = NS.Core and NS.Core.CDMNativeEvents
+    if not native or type(native.IsNativeAlertEventType) ~= "function" then
+        return false, 0, "data_not_ready"
+    end
+    local manager = GetLayoutManager()
+    if not manager or type(manager.GetAlerts) ~= "function"
+        or type(manager.RemoveAlert) ~= "function"
+        or type(manager.SaveLayouts) ~= "function"
+        or type(C_CooldownViewer) ~= "table"
+        or type(C_CooldownViewer.GetCooldownViewerCategorySet) ~= "function" then
+        return false, 0, "data_not_ready"
+    end
+
+    local removed = 0
+    local seen = {}
+    for _, category in ipairs(self:GetCategories()) do
+        local ok, ids = pcall(C_CooldownViewer.GetCooldownViewerCategorySet, category.category, true)
+        if ok and type(ids) == "table" then
+            for _, cooldownID in ipairs(ids) do
+                cooldownID = tonumber(cooldownID)
+                if cooldownID and not seen[cooldownID] then
+                    seen[cooldownID] = true
+                    local alerts = self:GetAlerts(cooldownID)
+                    if type(alerts) == "table" then
+                        local removeList = {}
+                        for _, alert in ipairs(alerts) do
+                            if GetAlertType(alert) == GetSoundAlertType()
+                                and native:IsNativeAlertEventType(GetAlertEvent(alert)) then
+                                local payload = GetAlertPayload(alert)
+                                if Registry and Registry:IsOwnedPayload(payload) then
+                                    removeList[#removeList + 1] = alert
+                                end
+                            end
+                        end
+                        for _, alert in ipairs(removeList) do
+                            if pcall(manager.RemoveAlert, manager, cooldownID, alert) then
+                                removed = removed + 1
+                            end
+                        end
+                    end
+                end
+            end
+        end
+    end
+
+    if removed == 0 then
+        return true, 0, "no_changes"
+    end
+
+    self:BeginCDMMutation("qfx_native_cleanup")
+    local saveOK = ManagerCallSucceeded(manager.SaveLayouts, manager)
+    self:EndCDMMutation()
+    -- The layout write taints the session; reload either way so the data comes
+    -- back clean.
+    ReloadNow()
+    if not saveOK then
+        return false, removed, "save_failed"
+    end
+    return true, removed, "reload_requested"
+end
+
 function Service:BuildCDMVoiceDraft(cooldownID, eventType, payload, expectedClassID, expectedSpecID, expectedCategory)
     local classID, specID = self:GetCurrentClassSpec()
     if (expectedClassID and tonumber(expectedClassID) ~= classID)
@@ -1308,6 +1433,38 @@ function Service:SaveVoicePresetOnly(cooldownID, eventType, payload, expectedCla
         return false, reason or "invalid_record"
     end
     local store = NS.Core and NS.Core.CDMVoicePresetStore
+    -- Ready / cooldown records are stored as shared cooldown alert entries.
+    local bridge = NS.Core and NS.Core.CDMAlertBridge
+    local cdMode = bridge and type(bridge.GetModeForEventKey) == "function"
+        and bridge:GetModeForEventKey(record.eventKey) or nil
+    if cdMode then
+        if not store then
+            return false, "data_not_ready"
+        end
+        local voiceItem = store:ResolveVoice(record)
+        local saved, saveReason = bridge:SaveRecord(
+            record.classID,
+            record.specID,
+            record.spellID,
+            record.spellName,
+            cdMode,
+            voiceItem
+        )
+        if not saved then
+            return false, saveReason or "save_failed"
+        end
+        if originalRecordKey then
+            local originalRecord = store:GetEffectiveRecord(record.classID, record.specID, originalRecordKey)
+            if originalRecord then
+                store:RemoveOrDisableRecord(
+                    record.classID, record.specID, originalRecordKey,
+                    { createPendingRemoval = true }
+                )
+            end
+        end
+        self:RefreshRuntimeData("preset_saved_local")
+        return true, record.recordKey, "loaded", record
+    end
     local originalRecord = originalRecordKey and store
         and store:GetEffectiveRecord(record.classID, record.specID, originalRecordKey) or nil
     local recordKey, savedRecord = store and store:SaveAppliedRecord(record)
@@ -1332,6 +1489,10 @@ function Service:SaveVoicePresetOnly(cooldownID, eventType, payload, expectedCla
         end
     end
     self:RefreshRuntimeData("preset_saved_local")
+    local native = NS.Core and NS.Core.CDMNativeEvents
+    if native and type(native.SyncAll) == "function" then
+        pcall(native.SyncAll, native)
+    end
     return true, recordKey, status, savedRecord
 end
 
@@ -1451,6 +1612,103 @@ local function BuildCDMSavedEntry(store, record, evaluation, display, includeSco
     }
 end
 
+function Service:GetSpellToCooldownMap()
+    EnsureCooldownCacheScope(self)
+    if self.spellToCooldownCache
+        and self.spellToCooldownCacheGeneration == self.cooldownCacheGeneration then
+        return self.spellToCooldownCache
+    end
+    local map = {}
+    for _, category in ipairs(self:GetCategories()) do
+        for _, info in ipairs(self:GetCooldownsForCategory(category.key)) do
+            for _, key in ipairs({ "spellID", "baseSpellID", "overrideSpellID", "overrideTooltipSpellID" }) do
+                local id = tonumber(info[key])
+                if id and id > 0 and not map[id] then
+                    map[id] = info
+                end
+            end
+        end
+    end
+    self.spellToCooldownCache = map
+    self.spellToCooldownCacheGeneration = self.cooldownCacheGeneration
+    return map
+end
+
+-- Editor entry for a bridged ready / cooldown record: the configuration lives
+-- in the cooldown alert entries, so the row shows the entry's voice and the
+-- cooldown alert's state.
+local function BuildVirtualSavedEntry(store, virtual)
+    local classID = tonumber(virtual.classID) or 0
+    local specID = tonumber(virtual.specID) or 0
+    local spellID = tonumber(virtual.spellID) or 0
+    local eventType = store and type(store.EventKeyToType) == "function"
+        and tonumber(store:EventKeyToType(virtual.eventKey)) or nil
+    local eventText = tostring(virtual.eventKey or "")
+    if eventType then
+        eventText = L("CDM_EVENT_FALLBACK", eventType)
+        if type(CooldownViewerAlert_GetEventText) == "function" then
+            local ok, value = pcall(CooldownViewerAlert_GetEventText, eventType)
+            if ok and type(value) == "string" and value ~= "" then
+                eventText = value
+            end
+        end
+    end
+    local info = Service:GetSpellToCooldownMap()[spellID]
+    local category = info and info.categoryKey or "essential"
+    local voiceItem
+    if store and type(store.ResolveVoice) == "function" then
+        voiceItem = store:ResolveVoice({ voiceName = virtual.voiceName, voicePath = virtual.voicePath })
+    end
+    local voiceName = tostring(virtual.voiceName or "")
+    if voiceName == "" and voiceItem then
+        voiceName = tostring(voiceItem.name or "")
+    end
+    if voiceName == "" then
+        voiceName = L("CDM_MISSING_VOICE")
+    end
+    local available = true
+    local native = NS.Core and NS.Core.CDMNativeEvents
+    if native and type(native.IsRecordAvailable) == "function" then
+        available = native:IsRecordAvailable({ spellID = spellID })
+    end
+    local display = available and CDM_SAVED_STATUS_DISPLAY.loaded
+        or CDM_SAVED_STATUS_DISPLAY.skillMissing
+    return {
+        key = string.format("cdmpreset:%d:%d:%s:%d:%s", classID, specID, category, spellID, virtual.eventKey),
+        entryType = "cdmVoice",
+        itemType = "entry",
+        classID = classID,
+        specID = specID,
+        recordKey = string.format("%s:%d:%s", category, spellID, virtual.eventKey),
+        category = category,
+        spellId = spellID,
+        eventKey = virtual.eventKey,
+        alertEvent = eventType,
+        voiceIdentity = voiceItem and voiceItem.identity or nil,
+        voiceName = voiceName,
+        voicePath = (voiceItem and voiceItem.path) or virtual.voicePath,
+        cooldownID = info and tonumber(info.cooldownID) or nil,
+        voicePayload = voiceItem and tonumber(voiceItem.payload) or nil,
+        currentPayload = nil,
+        spellName = (info and info.spellName) or GetSpellName(spellID) or L("CDM_UNKNOWN_SKILL", spellID),
+        icon = (info and info.icon) or GetSpellIcon(spellID),
+        eventText = eventText,
+        statusText = L(display.localeKey),
+        soundDetail = eventText .. " | " .. voiceName,
+        scopeText = "",
+        scopeDetail = nil,
+        runtimeStatus = available and "loaded" or "skillMissing",
+        runtimeReason = available and "loaded" or "skillMissing",
+        loadState = display.loadState,
+        isLoaded = display.isLoaded,
+        displaySection = display.displaySection,
+        isVirtual = true,
+        canDrag = false,
+        isCurrentScope = true,
+        isCDAlert = true,
+    }
+end
+
 function Service:GetCurrentSpecSavedEntries()
     local classID, specID = self:GetCurrentClassSpec()
     if not classID or not specID then
@@ -1466,6 +1724,13 @@ function Service:GetCurrentSpecSavedEntries()
         local evaluation = sync:EvaluateRecord(record)
         local display = CDM_SAVED_STATUS_DISPLAY[evaluation.status] or CDM_SAVED_STATUS_DISPLAY.skillMissing
         result[#result + 1] = BuildCDMSavedEntry(store, record, evaluation, display, false)
+    end
+    -- Bridged ready / cooldown records come from the cooldown alert entries.
+    local bridge = NS.Core and NS.Core.CDMAlertBridge
+    if bridge and type(bridge.BuildVirtualRecords) == "function" then
+        for _, virtual in ipairs(bridge:BuildVirtualRecords(classID, specID)) do
+            result[#result + 1] = BuildVirtualSavedEntry(store, virtual)
+        end
     end
     return result
 end
@@ -1536,7 +1801,7 @@ function Service:SaveSkillCatalog(classID, specID, items)
     if not classID or not specID or classID <= 0 or specID <= 0 or type(items) ~= "table" then
         return false
     end
-    local entries, signatureParts = {}, {}
+    local entries = {}
     for _, item in ipairs(items) do
         local spellID = tonumber(item.spellID or item.value)
         if spellID and spellID > 0 then
@@ -1544,26 +1809,36 @@ function Service:SaveSkillCatalog(classID, specID, items)
                 spellID = spellID,
                 spellName = tostring(item.spellName or item.text or spellID),
             }
-            signatureParts[#signatureParts + 1] = tostring(spellID)
         end
     end
     if #entries == 0 then
         return false
     end
-    local signature = table.concat(signatureParts, ",")
     local db = type(QFXSkillAlertsDB) == "table" and QFXSkillAlertsDB or {}
     QFXSkillAlertsDB = db
     local catalog = type(db.cdmSkillCatalog) == "table" and db.cdmSkillCatalog or {}
     db.cdmSkillCatalog = catalog
     local classCatalog = type(catalog[classID]) == "table" and catalog[classID] or {}
     catalog[classID] = classCatalog
+    -- Structural comparison instead of a long comma-joined signature string:
+    -- same count with identical spell IDs in order means nothing changed, and
+    -- no signature string is built, stored, or kept in SavedVariables.
     local existing = classCatalog[specID]
-    if type(existing) == "table" and existing.signature == signature then
-        return false
+    if type(existing) == "table" and type(existing.items) == "table" and #existing.items == #entries then
+        local same = true
+        for index, item in ipairs(entries) do
+            local old = existing.items[index]
+            if type(old) ~= "table" or old.spellID ~= item.spellID then
+                same = false
+                break
+            end
+        end
+        if same then
+            return false
+        end
     end
     classCatalog[specID] = {
         updated = type(time) == "function" and time() or 0,
-        signature = signature,
         items = entries,
     }
     return true
@@ -1572,7 +1847,10 @@ end
 -- Collects this spec's complete Cooldown Manager skill list (including
 -- unlearned abilities when the client exposes the full category set) and
 -- remembers it in the addon database for cross-spec skill picking.
-function Service:CaptureCurrentSpecCatalog()
+-- Pass force=true from data-changing triggers (login, spec change, CDM data
+-- load / hotfix); recurring triggers such as combat-end share a throttle so
+-- the expensive category walk does not run after every fight.
+function Service:CaptureCurrentSpecCatalog(force)
     if IsInCombat() then
         return false
     end
@@ -1580,6 +1858,9 @@ function Service:CaptureCurrentSpecCatalog()
     classID = tonumber(classID) or 0
     specID = tonumber(specID) or 0
     if classID <= 0 or specID <= 0 then
+        return false
+    end
+    if ShouldSkipCatalogCapture(classID, specID, force) then
         return false
     end
     local items, seen = {}, {}
@@ -1680,6 +1961,26 @@ function Service:StageSoundAlertRemovalByKey(key, options)
         end
         local record = store and store:GetEffectiveRecord(parsed.classID, parsed.specID, parsed.recordKey)
         if not record then
+            -- Ready / cooldown records live as regular cooldown alert entries
+            -- now; delete the bridged entry instead.
+            local bridge = NS.Core and NS.Core.CDMAlertBridge
+            local cdMode = bridge and type(bridge.GetModeForEventKey) == "function"
+                and bridge:GetModeForEventKey(parsed.eventKey) or nil
+            if cdMode then
+                local deleted, deleteReason = bridge:DeleteRecord(
+                    parsed.classID, parsed.specID, parsed.spellID, cdMode
+                )
+                if not deleted then
+                    return false, deleteReason or "not_found"
+                end
+                self:RefreshRuntimeData("preset_deleted_local")
+                local sync = NS.Core and NS.Core.CDMVoicePresetSync
+                if options.scheduleEvaluation ~= false
+                    and sync and type(sync.ScheduleEvaluation) == "function" then
+                    sync:ScheduleEvaluation("preset_deleted_local")
+                end
+                return true, "local_deleted", parsed.recordKey
+            end
             return false, "not_found"
         end
         local sync = NS.Core and NS.Core.CDMVoicePresetSync

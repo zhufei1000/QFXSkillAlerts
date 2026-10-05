@@ -118,7 +118,11 @@ function Actions:Install(owner, frame)
     local imageSourceDrop = widgets.imageSourceDrop
     local imageIconID = widgets.imageIconID
     local imagePath = widgets.imagePath
+    local imageSharedMediaDrop = widgets.imageSharedMediaDrop
     local imageSize = widgets.imageSize
+    local imageStrataDrop = widgets.imageStrataDrop
+    local imageEndEventsDrop = widgets.imageEndEventsDrop
+    local textEndEventsDrop = widgets.textEndEventsDrop
     local textSize = widgets.textSize
     local textAlert = widgets.textAlert
     local spellId = widgets.spellId
@@ -568,16 +572,46 @@ function Actions:Install(owner, frame)
         objectTypeDrop.qfxsaOnValueChanged = function(value)
             Pull(owner)
             local state = GetState()
-            state.objectType = tostring(value or "") == "item" and "item" or "spell"
-            if state.objectType == "item" then
-                state.checkTalent = false
-                state.loadTalentEnabled = false
-                state.itemLoadMode = state.itemLoadMode or ITEM_LOAD_NONE
-                state.cdMode = "fixed"
-                state.gameStateCD = false
-            else
+            local selected = tostring(value or "")
+            if selected == "cast" then
+                state.entryType = "cast"
+                state.objectType = "spell"
                 state.itemLoadMode = ITEM_LOAD_NONE
                 state.itemLoadSameName = false
+                state.checkTalent = false
+                state.loadTalentEnabled = false
+                state.cdMode = "fixed"
+                state.gameStateCD = false
+            elseif selected == "aura" then
+                state.entryType = "aura"
+                state.objectType = "spell"
+                state.itemLoadMode = ITEM_LOAD_NONE
+                state.itemLoadSameName = false
+                state.checkTalent = false
+                state.loadTalentEnabled = false
+                state.cdMode = "fixed"
+                state.gameStateCD = false
+                state.delayEnabled = false
+                -- Aura alerts only support voice playback.
+                state.imageEnabled = false
+                state.textEnabled = false
+                state.auraTrigger = state.auraTrigger or "applied"
+                state.auraUnit = state.auraUnit or "player"
+                -- Aura alerts are voice-only.
+                state.voiceEnabled = true
+            else
+                state.entryType = "cooldown"
+                state.objectType = selected == "item" and "item" or "spell"
+                if state.objectType == "item" then
+                    state.checkTalent = false
+                    state.loadTalentEnabled = false
+                    state.itemLoadMode = state.itemLoadMode or ITEM_LOAD_NONE
+                    state.cdMode = "fixed"
+                    state.gameStateCD = false
+                else
+                    state.itemLoadMode = ITEM_LOAD_NONE
+                    state.itemLoadSameName = false
+                end
             end
             Refresh(owner)
             RefreshImageIconPreview()
@@ -656,17 +690,55 @@ function Actions:Install(owner, frame)
             local state = GetState()
             state[stateKey] = value
             RefreshPreview()
+            -- Keep an already-visible runtime alert in sync while the slider
+            -- moves, so image / text size changes are visible immediately.
+            RefreshRuntimeVisualFromEditor()
         end)
     end
 
-    InstallSizeSlider(imageSize, "imageSize", 16, 256)
+    InstallSizeSlider(imageSize, "imageSize", 16, 512)
     InstallSizeSlider(textSize, "textSize", 8, 64)
+
+    if imageStrataDrop then
+        imageStrataDrop.qfxsaOnValueChanged = function(value)
+            Pull(owner)
+            local state = GetState()
+            state.imageStrata = tostring(value or "")
+            -- Apply the new layer to an alert that is already on screen.
+            RefreshRuntimeVisualFromEditor()
+        end
+    end
+    if imageEndEventsDrop then
+        imageEndEventsDrop.qfxsaOnValueChanged = function()
+            Pull(owner)
+            RefreshRuntimeVisualFromEditor()
+        end
+    end
+    if textEndEventsDrop then
+        textEndEventsDrop.qfxsaOnValueChanged = function()
+            Pull(owner)
+            RefreshRuntimeVisualFromEditor()
+        end
+    end
 
     if imageSourceDrop then
         imageSourceDrop.qfxsaOnValueChanged = function(value)
             Pull(owner)
             local state = GetState()
             state.imageSource = tostring(value or "auto")
+            Refresh(owner)
+            if NS.UI and NS.UI.EditorFields and type(NS.UI.EditorFields.UpdateImageIconPreview) == "function" then
+                NS.UI.EditorFields:UpdateImageIconPreview(owner)
+            end
+            RefreshPreview()
+        end
+    end
+
+    if imageSharedMediaDrop then
+        imageSharedMediaDrop.qfxsaOnValueChanged = function(value)
+            Pull(owner)
+            local state = GetState()
+            state.imageSharedMedia = tostring(value or "")
             Refresh(owner)
             if NS.UI and NS.UI.EditorFields and type(NS.UI.EditorFields.UpdateImageIconPreview) == "function" then
                 NS.UI.EditorFields:UpdateImageIconPreview(owner)

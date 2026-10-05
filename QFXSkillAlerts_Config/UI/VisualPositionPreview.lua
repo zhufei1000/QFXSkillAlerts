@@ -167,6 +167,21 @@ local function ResolveItemIcon(itemID)
     return nil
 end
 
+local function ResolveSharedMediaImage(name)
+    name = Trim(name)
+    if name == "" then
+        return nil
+    end
+    local api = NS.AceOptions
+    if api and type(api.FetchSharedMediaTexturePath) == "function" then
+        local ok, path = pcall(api.FetchSharedMediaTexturePath, api, name)
+        if ok and type(path) == "string" and Trim(path) ~= "" then
+            return Trim(path)
+        end
+    end
+    return nil
+end
+
 local function ResolveImageTexture(state)
     local source = tostring(state.imageSource or "auto")
     if source == "spell" then
@@ -176,14 +191,22 @@ local function ResolveImageTexture(state)
     elseif source == "icon" then
         local iconID = tonumber(state.imageIconID) or 0
         return iconID > 0 and math.floor(iconID) or 134400
+    elseif source == "sharedmedia" then
+        return ResolveSharedMediaImage(state.imageSharedMedia) or 134400
     elseif source == "path" then
         local value = Trim(state.imagePath or "")
         return value ~= "" and (tonumber(value) or value) or 134400
     end
     return ResolveSpellIcon(state.spellId)
+        or ResolveSharedMediaImage(state.imageSharedMedia)
         or ((tonumber(state.imageIconID) or 0) > 0 and math.floor(tonumber(state.imageIconID) or 0) or nil)
         or (Trim(state.imagePath or "") ~= "" and (tonumber(Trim(state.imagePath or "")) or Trim(state.imagePath or "")) or nil)
         or 134400
+end
+
+local function IsFreeformImageSource(state)
+    local source = tostring((state and state.imageSource) or "auto")
+    return source == "path" or source == "sharedmedia"
 end
 
 function Preview:Ensure()
@@ -290,6 +313,13 @@ function Preview:Layout(frame, state)
     frame.text:ClearAllPoints()
     frame.image:SetSize(imageSize, imageSize)
     frame.image:SetTexture(ResolveImageTexture(state))
+    if frame.image.SetTexCoord then
+        if IsFreeformImageSource(state) then
+            frame.image:SetTexCoord(0, 1, 0, 1)
+        else
+            frame.image:SetTexCoord(0.08, 0.92, 0.08, 0.92)
+        end
+    end
     if imageEnabled then frame.image:Show() else frame.image:Hide() end
 
     local text = Trim(state.textAlert or "")

@@ -1,5 +1,51 @@
 # Changelog
 
+## 1.0.236 - 2026-10-04
+
+- Performance pass: cooldown completion now polls every 0.05s during the final second (alerts land within ~50ms instead of ~100ms) while idle polling is unchanged; the cross-spec skill catalog no longer re-walks every Cooldown Manager category after each fight (5-minute throttle per spec, forced refresh on login / spec change / data load); the catalog no longer builds or stores a long signature string per spec; per-cooldown info no longer retains Blizzard's full raw table; bag rescans use the lightweight item-ID getter instead of allocating an info table per slot.
+- The shared dropdown popup now unhooks its per-frame hover / auto-close poll when hidden, so no per-frame work remains after the config UI closes.
+
+## 1.0.235 - 2026-10-04
+
+- Image alerts gained a display-layer setting (frame strata): Background / Low / Medium / High / Dialog / Fullscreen / Fullscreen Dialog (default) / Tooltip, so artwork can sit under or above other UI. The layer applies to the shared image + text frame.
+- Image and text alerts can now end early on player events instead of only running their duration out: player dies, player alive (accept rez), player alive (corpse run), enter combat, leave combat, change target, change focus, start moving, stop moving, entering world, change zone, change specialization, mount changed, encounter start, encounter end and level up. Each channel has its own end-event multi-select; when image and text are shown together only the matching part is hidden, and the whole alert is released once both parts are gone. One shared low-frequency event watcher handles all events.
+- The editor Test button, the live editor refresh, Bloodlust config and export / import all carry the new fields; Bloodlust entries get the same controls in their Image / Text tabs.
+- Regression coverage: `tests/test_visual_end_events.lua` plus extended visual config assertions in `tests/test_event_voice.lua`.
+
+## 1.0.234 - 2026-10-04
+
+- Free-form artwork (custom image paths and SharedMedia images) is no longer cropped: alerts and the editor position preview now draw those textures over the full 0..1 texture coordinates, while spell / item / icon art keeps the 8% per-side crop that hides Blizzard's icon border. This fixes shared images looking cut off.
+- The editor position preview resolves SharedMedia images now (it previously fell back to the question-mark icon), and the image-size slider pushes the new size to an already-visible runtime alert immediately, so resizing can be judged live. The editor Test button also passes the SharedMedia image name through, so the test alert previews the shared image correctly.
+
+## 1.0.233 - 2026-10-04
+
+- The shared-image picker now lists every LibSharedMedia media type that carries display textures - `texture` plus `background`, `statusbar` and `border` - instead of only the non-standard `texture` type, and resolves a picked name across those types in the same order. Media packs that register their artwork as background (for example the `QFX_SharedMedia` PersonalTags images) are now selectable; duplicate names collapse to one entry and prefer the `texture` library. The dropdown is searchable like the SharedMedia voice list, and the name lookup is shared with runtime playback, so editor previews and live alerts resolve the same path.
+- Regression coverage: `tests/test_shared_media_images.lua` (merged listing, de-duplication, cross-type fetch order).
+
+## 1.0.232 - 2026-10-04
+
+- Event settings page: the "Alert Actions" voice / image / text multi-select now behaves like the cooldown alerts' action selector instead of the locked aura row - the dropdown is interactive, the "Execute" label stays enabled, and the execute row is force-restored when the Settings tab is reopened.
+- Image size slider range raised from 16-256 to 16-512; new alerts still default to 96.
+
+## 1.0.231 - 2026-10-04
+
+- Event alerts now support the image and text channels in addition to voice: the editor shows the Image / Text tabs for event entries, a visual-only event (voice unchecked) still fires, and the runtime passes the saved visual configuration straight to the shared notifier, so position, size, duration and the chosen image all apply.
+- The image source dropdown gained a "Shared media image" option backed by LibSharedMedia's texture library: any registered SharedMedia texture can be used, the shared image name is saved with the entry, travels through export/import, and is resolved through LSM at playback time. `MediaCatalog` exposes `GetSharedMediaTextureList` / `FetchSharedMediaTexturePath` for this.
+- Saving an event entry keeps its image/text flags instead of clearing them, and the "event voice is required" save gate is gone (an event needs at least one channel enabled). Import sanitization no longer strips image/text from event entries.
+- Fixed the quick skill picker caching duplicate catalog entries when one spell is exposed by both aura-tracking categories; the cached per-spec catalog is now deduplicated. Updated `tests/test_cdm_picker_categories.lua`, `tests/test_event_voice.lua` (visual-only event coverage) and the event import expectations.
+- Event editor fixes: the aura trigger / unit dropdowns no longer leak into the event settings page (the event branch now hides them explicitly), the event settings page shows its own "Alert Actions" section with the voice / image / text multi-select just like cooldown alerts, and the event refresh no longer resets the image / text flags, so the checkboxes and the action dropdown stay in sync and can be toggled.
+
+## 1.0.230 - 2026-10-03
+
+- Cooldown Manager voices for the ready, on-cooldown, aura-applied and aura-removed events are now played by the addon itself instead of through the Cooldown Manager layout. Ready / on-cooldown voices are watched through the NeverSecret cooldown booleans (`isActive` / `isOnGCD` / `isEnabled`) in the addon's own update loop; aura voices are registered with the client through `C_UnitAuras.AddAuraSound` (12.1+), which does the edge detection and playback. Saving or deleting these records no longer writes the Cooldown Manager layout and no longer reloads the UI: they take effect immediately, work in restricted combat, and cannot misfire when the Cooldown Manager rebuilds its item frames (for example when leaving an instance).
+- Charge-gained and pandemic-time voices stay on the Cooldown Manager path because the underlying data (`currentCharges`, aura remaining time) is secret while cooldowns are restricted; only those records still apply with a reload.
+- Stale Cooldown Manager alerts left in the layout by earlier versions stay silent for the native events, so a voice is never played twice. Charge and pandemic alerts keep playing through the existing hook.
+- The Cooldown Manager voice hook now suppresses repeated alerts inside a 0.25s window (configurable through `QFXSkillAlertsDB.cdmVoiceUI.duplicateWindow`), reports playback failures once per payload including the file path, and wraps the handler so hook errors cannot surface as Lua errors.
+- New regression coverage: `tests/test_cdm_native_events.lua` (event classification, ready/cooldown edge watching with GCD filtering, aura registration / teardown / restricted retry) and an updated `tests/test_cdm_voice_hook.lua`.
+- Code cleanup after the migration: removed the now-unused settings data provider access, two unused registration-state helpers, the duplicated native-event lookup (now shared in `CDMNativeEvents`) and an unused hook argument; the ready/cooldown watcher reuses a single frame and only carries its OnUpdate script while records exist.
+- Cooldown Manager ready / on-cooldown voices are now stored as regular cooldown alert entries (`cdMode = "ready"` / `"cooldown"`): the Cooldown Manager voice editor and the cooldown alert editor share one record, the state shown in both editors matches, and the main runtime plays them with the full cooldown alert feature set (conditions, TTS, icons, text). The cooldown alert duplicate check now keeps ready and cooldown entries of the same spell separate. Existing ready / cooldown records are migrated automatically on the next login; aura, charge and pandemic events keep their own paths. The addon-side ready/cooldown watcher is removed.
+- The alert editor now covers every alert kind in one place: the type dropdown offers Spell / Item / Cast Success / Aura (with an applied / removed / applications trigger) and the separate Cast Success entry button is gone. Aura alerts are registered through `C_UnitAuras.AddAuraSound` from their saved entries and only support voice playback - the image / text tabs and controls stay disabled for them and saving drops any image/text flags. Existing aura records in `cdmVoiceProfiles` migrate into aura entries together with the ready / cooldown records. The old "CD Alert" label is now "Alerts" / "提醒".
+
 ## 1.0.229 - 2026-09-26
 
 - Cooldown Manager voice deletion now reloads the UI after the layout is saved, exactly like the set/apply path. Writing the Cooldown Manager layout from addon code taints it for the rest of the session, and Blizzard's CooldownViewer then errors while refreshing secret aura/totem data in combat (`GetUnitAuras(): Auras cannot be accessed when secret while tainted by 'QFXSkillAlerts'`, `attempt to compare a secret number value`, `hasTotem`). Reloading immediately drops the tainted layout before combat; a deletion that already touched the layout and then failed also reloads. The removal path is renamed `ApplyCDMRemovalPlanAndReload` to match the behavior, and the delete confirmation now shows the applying/reloading status on success.

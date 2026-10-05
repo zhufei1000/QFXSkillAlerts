@@ -14,6 +14,8 @@ function Drafts:NormalizeEntryType(value)
         return "event"
     elseif value == "bloodlust" then
         return "bloodlust"
+    elseif value == "aura" then
+        return "aura"
     end
     return "cooldown"
 end

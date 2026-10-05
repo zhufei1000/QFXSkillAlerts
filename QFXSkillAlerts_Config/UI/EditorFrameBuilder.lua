@@ -183,10 +183,15 @@ local function CreateNotifyControls(content, ctx)
     nw.imageIconPreviewTexture:SetPoint("BOTTOMRIGHT", nw.imageIconPreview, "BOTTOMRIGHT", -4, 4)
     nw.imageIconPreviewTexture:SetTexCoord(0.08, 0.92, 0.08, 0.92)
     nw.imageIconPreview:Hide()
-    nw.imagePathLabel = CreateFieldLabel(notifySection, L("LABEL_IMAGE_PATH"), CUSTOM_X, IMAGE_ROW2_LABEL_Y, CUSTOM_W)
-    nw.imagePath = PlaceControl(Widgets:CreateEditBox(notifySection, CUSTOM_W, 30, false), notifySection, CUSTOM_X, IMAGE_ROW2_CONTROL_Y)
+    nw.imagePathLabel = CreateFieldLabel(notifySection, L("LABEL_IMAGE_PATH"), BUILTIN_X, IMAGE_ROW2_LABEL_Y, BUILTIN_W)
+    nw.imagePath = PlaceControl(Widgets:CreateEditBox(notifySection, BUILTIN_W, 30, false), notifySection, BUILTIN_X, IMAGE_ROW2_CONTROL_Y)
+    nw.imageSharedMediaLabel = CreateFieldLabel(notifySection, L("LABEL_IMAGE_SHAREDMEDIA"), SHAREDMEDIA_X, IMAGE_ROW2_LABEL_Y, SHAREDMEDIA_W)
+    nw.imageSharedMediaDrop = PlaceControl(Widgets:CreateDropdown(notifySection, "QFXSkillAlertsEditorImageSharedMediaDropDown", SHAREDMEDIA_W), notifySection, SHAREDMEDIA_X, IMAGE_ROW2_CONTROL_Y)
+    Widgets:SetDropdownSearchable(nw.imageSharedMediaDrop, true, L("SEARCH_SHAREDMEDIA_IMAGE"))
+    nw.imageSharedMediaDrop.qfxsaPopupStrata = "FULLSCREEN_DIALOG"
+    nw.imageSharedMediaDrop.qfxsaPopupFrameLevel = 260
     nw.imageSizeLabel = CreateFieldLabel(notifySection, L("LABEL_IMAGE_SIZE"), BUILTIN_X, IMAGE_ROW3_LABEL_Y, BUILTIN_W)
-    nw.imageSize = CreateValueSlider and CreateValueSlider(notifySection, 16, 256, 1, 96) or Widgets:CreateEditBox(notifySection, 120, 30, true)
+    nw.imageSize = CreateValueSlider and CreateValueSlider(notifySection, 16, 512, 1, 96) or Widgets:CreateEditBox(notifySection, 120, 30, true)
     PlaceControl(nw.imageSize, notifySection, BUILTIN_X, IMAGE_ROW3_CONTROL_Y)
     nw.imageDurationEnabled = Widgets:CreateCheckButton(notifySection, L("LABEL_LIMIT_IMAGE_DURATION"), 150)
     nw.imageDurationEnabled:SetPoint("TOPLEFT", notifySection, "TOPLEFT", SHAREDMEDIA_X, IMAGE_ROW3_CONTROL_Y - 3)
@@ -194,6 +199,15 @@ local function CreateNotifyControls(content, ctx)
     nw.imageDuration = Widgets:CreateEditBox(notifySection, 72, 30, false)
     nw.imageDuration:SetPoint("LEFT", nw.imageDurationEnabled, "LEFT", 178, 0)
     nw.imageDurationLabel = CreateInlineSecondsLabel(notifySection, nw.imageDuration)
+    nw.imageStrataLabel = CreateFieldLabel(notifySection, L("LABEL_IMAGE_STRATA"), BUILTIN_X, IMAGE_ROW4_LABEL_Y, 140)
+    nw.imageStrataDrop = PlaceControl(Widgets:CreateDropdown(notifySection, "QFXSkillAlertsEditorImageStrataDropDown", 140), notifySection, BUILTIN_X, IMAGE_ROW4_CONTROL_Y)
+    nw.imageEndEventsLabel = CreateFieldLabel(notifySection, L("LABEL_END_EVENTS"), SHAREDMEDIA_X, IMAGE_ROW4_LABEL_Y, SHAREDMEDIA_W)
+    if Widgets.CreateMultiSelectDropdown then
+        nw.imageEndEventsDrop = Widgets:CreateMultiSelectDropdown(notifySection, "QFXSkillAlertsEditorImageEndEventsDropDown", SHAREDMEDIA_W)
+    else
+        nw.imageEndEventsDrop = Widgets:CreateDropdown(notifySection, "QFXSkillAlertsEditorImageEndEventsDropDown", SHAREDMEDIA_W)
+    end
+    nw.imageEndEventsDrop = PlaceControl(nw.imageEndEventsDrop, notifySection, SHAREDMEDIA_X, IMAGE_ROW4_CONTROL_Y)
     local POS_ROW1_LABEL_Y, POS_ROW1_CONTROL_Y = -42, -66
     local POS_ROW2_LABEL_Y, POS_ROW2_CONTROL_Y = -104, -128
 
@@ -234,6 +248,13 @@ local function CreateNotifyControls(content, ctx)
     nw.textDuration = Widgets:CreateEditBox(notifySection, 72, 30, false)
     nw.textDuration:SetPoint("LEFT", nw.textDurationEnabled, "LEFT", 178, 0)
     nw.textDurationLabel = CreateInlineSecondsLabel(notifySection, nw.textDuration)
+    nw.textEndEventsLabel = CreateFieldLabel(notifySection, L("LABEL_END_EVENTS"), BUILTIN_X, NOTIFY_CUSTOM_LABEL_Y, BUILTIN_W)
+    if Widgets.CreateMultiSelectDropdown then
+        nw.textEndEventsDrop = Widgets:CreateMultiSelectDropdown(notifySection, "QFXSkillAlertsEditorTextEndEventsDropDown", SHAREDMEDIA_W)
+    else
+        nw.textEndEventsDrop = Widgets:CreateDropdown(notifySection, "QFXSkillAlertsEditorTextEndEventsDropDown", SHAREDMEDIA_W)
+    end
+    nw.textEndEventsDrop = PlaceControl(nw.textEndEventsDrop, notifySection, BUILTIN_X, NOTIFY_CUSTOM_CONTROL_Y)
     nw.textXLabel = CreateFieldLabel(textPositionSection, L("LABEL_POSITION_X"), BUILTIN_X, POS_ROW1_LABEL_Y, BUILTIN_W)
     nw.textX = PlaceControl(Widgets:CreateEditBox(textPositionSection, 120, 30, false), textPositionSection, BUILTIN_X, POS_ROW1_CONTROL_Y)
     nw.textYLabel = CreateFieldLabel(textPositionSection, L("LABEL_POSITION_Y"), BUILTIN_X + 132, POS_ROW1_LABEL_Y, BUILTIN_W)
@@ -557,10 +578,22 @@ function Builder:EnsureFrame(owner)
         spellSection, 328, -68
     )
 
-    -- Spell / item type selector in front of the picker.
+    -- Spell / item / cast / aura type selector in front of the picker.
     local objectType = {
         label = CreateFieldLabel(spellSection, L("LABEL_OBJECT_TYPE"), INNER, -44, 100),
         drop = PlaceControl(Widgets:CreateDropdown(spellSection, "QFXSkillAlertsEditorObjectTypeDropDown", 100), spellSection, INNER, -68),
+    }
+
+    -- Aura trigger selector (applied / removed / applications) and the unit the
+    -- aura is watched on (player / target / focus), shown only for aura entries.
+    local auraTrigger = {
+        label = CreateFieldLabel(spellSection, L("LABEL_AURA_TRIGGER"), 124, -44, 100),
+        drop = PlaceControl(Widgets:CreateDropdown(spellSection, "QFXSkillAlertsEditorAuraTriggerDropDown", 140), spellSection, 124, -68),
+    }
+
+    local auraUnit = {
+        label = CreateFieldLabel(spellSection, L("LABEL_AURA_UNIT"), 280, -44, 80),
+        drop = PlaceControl(Widgets:CreateDropdown(spellSection, "QFXSkillAlertsEditorAuraUnitDropDown", 100), spellSection, 280, -68),
     }
 
     -- Fixed CD / ready / charge source for cooldown entries; the fixed number
@@ -799,6 +832,10 @@ function Builder:EnsureFrame(owner)
         skillFilterDrop = skillFilter.drop,
         objectTypeLabel = objectType.label,
         objectTypeDrop = objectType.drop,
+        auraTriggerLabel = auraTrigger.label,
+        auraTriggerDrop = auraTrigger.drop,
+        auraUnitLabel = auraUnit.label,
+        auraUnitDrop = auraUnit.drop,
         talentId = talentId,
         talentName = talentName,
         talentCDLabel = talentCDLabel,
@@ -883,8 +920,14 @@ function Builder:EnsureFrame(owner)
         imageIconPreviewTexture = notifyData.imageIconPreviewTexture,
         imagePathLabel = notifyData.imagePathLabel,
         imagePath = notifyData.imagePath,
+        imageSharedMediaLabel = notifyData.imageSharedMediaLabel,
+        imageSharedMediaDrop = notifyData.imageSharedMediaDrop,
         imageSizeLabel = notifyData.imageSizeLabel,
         imageSize = notifyData.imageSize,
+        imageStrataLabel = notifyData.imageStrataLabel,
+        imageStrataDrop = notifyData.imageStrataDrop,
+        imageEndEventsLabel = notifyData.imageEndEventsLabel,
+        imageEndEventsDrop = notifyData.imageEndEventsDrop,
         imageDurationEnabled = notifyData.imageDurationEnabled,
         imageDurationLabel = notifyData.imageDurationLabel,
         imageDuration = notifyData.imageDuration,
@@ -914,6 +957,8 @@ function Builder:EnsureFrame(owner)
         textDurationEnabled = notifyData.textDurationEnabled,
         textDurationLabel = notifyData.textDurationLabel,
         textDuration = notifyData.textDuration,
+        textEndEventsLabel = notifyData.textEndEventsLabel,
+        textEndEventsDrop = notifyData.textEndEventsDrop,
         textXLabel = notifyData.textXLabel,
         textX = notifyData.textX,
         textYLabel = notifyData.textYLabel,

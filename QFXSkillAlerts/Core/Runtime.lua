@@ -29,6 +29,9 @@ local delayedCastToken = 0
 local updateElapsed = 0
 local activeUpdateInterval = UPDATE_INTERVAL_IDLE
 local updating = false
+-- Closest cooldown finish seen in the current processing period; drives the
+-- adaptive poll interval in RuntimeOnUpdate below.
+local tickMinRemaining = nil
 local callbacks = {}
 local ApplyAlertFields
 
@@ -673,6 +676,10 @@ function Runtime:ProcessCooldownRecord(primaryKey, cd, now, processVoice)
     if not isFull then
         local nextChargeAt = tonumber(cd.nextChargeAt) or 0
         remaining = nextChargeAt > 0 and math.max(0, nextChargeAt - now) or 0
+        -- Track the closest finish for the adaptive poll interval below.
+        if tickMinRemaining == nil or remaining < tickMinRemaining then
+            tickMinRemaining = remaining
+        end
     end
 
     if processVoice ~= false and cd.voiceEnabled ~= false then
@@ -798,13 +805,23 @@ local function RuntimeOnUpdate(_, elapsed)
 
     local now = GetTime()
     local active = false
+    tickMinRemaining = nil
     for primaryKey, cd in pairs(cooldowns) do
         if Runtime:ProcessCooldownRecord(primaryKey, cd, now, true) then
             active = true
         end
     end
     local gameActive = Runtime:EvaluateGameCooldowns(now)
-    activeUpdateInterval = GetRuntimeUpdateInterval()
+    local baseInterval = GetRuntimeUpdateInterval()
+    -- Adaptive poll: a cooldown finishing within a second (or an armed
+    -- readiness watch) is time-critical, so poll it twice as fast; otherwise
+    -- keep the configured interval. Completion alerts land within ~50ms
+    -- instead of ~100ms with negligible extra CPU (only the final second).
+    if (tickMinRemaining ~= nil and tickMinRemaining < 1) or gameActive then
+        activeUpdateInterval = math.min(baseInterval, 0.05)
+    else
+        activeUpdateInterval = baseInterval
+    end
     if not active and not gameActive then
         StopUpdate()
     end
@@ -877,8 +894,11 @@ ApplyAlertFields = function(target, cfg)
     target.imageSource = tostring(cfg.imageSource or "auto")
     target.imageIconID = math.max(0, tonumber(cfg.imageIconID) or 0)
     target.imagePath = tostring(cfg.imagePath or "")
+    target.imageSharedMedia = tostring(cfg.imageSharedMedia or "")
     target.resolvedImageTexture = cfg.resolvedImageTexture
     target.imageSize = math.max(16, tonumber(cfg.imageSize) or 96)
+    target.imageStrata = tostring(cfg.imageStrata or "")
+    target.imageEndEvents = type(cfg.imageEndEvents) == "table" and cfg.imageEndEvents or nil
     target.imageDurationEnabled = cfg.imageDurationEnabled == true
     target.imageDuration = math.max(0.1, tonumber(cfg.imageDuration) or 2)
     target.imageX = tonumber(cfg.imageX) or 0
@@ -901,6 +921,7 @@ ApplyAlertFields = function(target, cfg)
     target.textHAlign = tostring(cfg.textHAlign or "center")
     target.textOffsetX = tonumber(cfg.textOffsetX) or 0
     target.textOffsetY = tonumber(cfg.textOffsetY) or 0
+    target.textEndEvents = type(cfg.textEndEvents) == "table" and cfg.textEndEvents or nil
     target.index = tonumber(cfg.index) or 0
     target.scopeClassID = tonumber(cfg.scopeClassID) or 0
     target.scopeSpecID = tonumber(cfg.scopeSpecID) or 0

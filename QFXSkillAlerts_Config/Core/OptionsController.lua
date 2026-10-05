@@ -13,6 +13,7 @@ end
 
 local Utils = NS.Utils or {}
 local CollectionStore = NS.CollectionStore or {}
+local CONST = NS.Constants or {}
 
 local function NormalizeConditionOp(value)
     value = tostring(value or "<=")
@@ -30,6 +31,30 @@ local function TrimText(value)
         return Utils.TrimText(value)
     end
     return tostring(value or ""):match("^%s*(.-)%s*$")
+end
+
+local function NormalizeVisualStrata(value)
+    local options = CONST.VISUAL_STRATA_OPTIONS or { "FULLSCREEN_DIALOG" }
+    local strata = tostring(value or "")
+    for _, option in ipairs(options) do
+        if option == strata then
+            return strata
+        end
+    end
+    return CONST.VISUAL_STRATA_DEFAULT or "FULLSCREEN_DIALOG"
+end
+
+local function NormalizeEndEventMap(value)
+    if type(value) ~= "table" then
+        return {}
+    end
+    local normalized = {}
+    for key, enabled in pairs(value) do
+        if enabled == true and type(key) == "string" and key ~= "" then
+            normalized[key] = true
+        end
+    end
+    return normalized
 end
 
 local function GetApi()
@@ -69,10 +94,13 @@ local function EnsureBloodlustConfigTable()
     cfg.imageConditionOp = NormalizeConditionOp(cfg.imageConditionOp)
     cfg.imageConditionTime = math.max(0, tonumber(cfg.imageConditionTime) or 0)
     cfg.imageSource = tostring(cfg.imageSource or "auto")
-    if cfg.imageSource ~= "spell" and cfg.imageSource ~= "item" and cfg.imageSource ~= "icon" and cfg.imageSource ~= "path" then cfg.imageSource = "auto" end
+    if cfg.imageSource ~= "spell" and cfg.imageSource ~= "item" and cfg.imageSource ~= "icon" and cfg.imageSource ~= "path" and cfg.imageSource ~= "sharedmedia" then cfg.imageSource = "auto" end
     cfg.imageIconID = math.max(0, tonumber(cfg.imageIconID) or 0)
     cfg.imagePath = TrimText(cfg.imagePath or "")
+    cfg.imageSharedMedia = TrimText(cfg.imageSharedMedia or "")
     cfg.imageSize = math.max(16, tonumber(cfg.imageSize) or 96)
+    cfg.imageStrata = NormalizeVisualStrata(cfg.imageStrata)
+    cfg.imageEndEvents = NormalizeEndEventMap(cfg.imageEndEvents)
     cfg.imageDurationEnabled = cfg.imageDurationEnabled == true
     cfg.imageDuration = math.max(0.1, tonumber(cfg.imageDuration) or 2)
     cfg.imageX = tonumber(cfg.imageX) or 0
@@ -97,7 +125,7 @@ local function EnsureBloodlustConfigTable()
     if cfg.textHAlign ~= "left" and cfg.textHAlign ~= "right" then cfg.textHAlign = "center" end
     cfg.textOffsetX = tonumber(cfg.textOffsetX) or 0
     cfg.textOffsetY = tonumber(cfg.textOffsetY) or 0
-    return cfg
+    cfg.textEndEvents = NormalizeEndEventMap(cfg.textEndEvents)
 end
 
 local function FirstNonEmptyCustomPath(cfg)
@@ -184,7 +212,10 @@ function Controller:LoadBloodlustConfig(aceOptions)
     state.imageSource = tostring(cfg.imageSource or "auto")
     state.imageIconID = math.max(0, tonumber(cfg.imageIconID) or 0)
     state.imagePath = TrimText(cfg.imagePath or "")
+    state.imageSharedMedia = TrimText(cfg.imageSharedMedia or "")
     state.imageSize = math.max(16, tonumber(cfg.imageSize) or 96)
+    state.imageStrata = NormalizeVisualStrata(cfg.imageStrata)
+    state.imageEndEvents = NormalizeEndEventMap(cfg.imageEndEvents)
     state.imageDurationEnabled = cfg.imageDurationEnabled == true
     state.imageDuration = math.max(0.1, tonumber(cfg.imageDuration) or 2)
     state.imageX = tonumber(cfg.imageX) or 0
@@ -206,6 +237,7 @@ function Controller:LoadBloodlustConfig(aceOptions)
     state.textHAlign = tostring(cfg.textHAlign or "center")
     state.textOffsetX = tonumber(cfg.textOffsetX) or 0
     state.textOffsetY = tonumber(cfg.textOffsetY) or 0
+    state.textEndEvents = NormalizeEndEventMap(cfg.textEndEvents)
 end
 
 function Controller:GetBloodlustSummary(aceOptions)
@@ -284,7 +316,10 @@ function Controller:SaveBloodlustConfig(aceOptions)
     cfg.imageSource = tostring(state.imageSource or "auto")
     cfg.imageIconID = math.max(0, tonumber(state.imageIconID) or 0)
     cfg.imagePath = TrimText(state.imagePath or "")
+    cfg.imageSharedMedia = TrimText(state.imageSharedMedia or "")
     cfg.imageSize = math.max(16, tonumber(state.imageSize) or 96)
+    cfg.imageStrata = NormalizeVisualStrata(state.imageStrata)
+    cfg.imageEndEvents = NormalizeEndEventMap(state.imageEndEvents)
     cfg.imageDurationEnabled = state.imageDurationEnabled == true
     cfg.imageDuration = math.max(0.1, tonumber(state.imageDuration) or 2)
     cfg.imageX = math.floor((tonumber(state.imageX) or 0) + 0.5)
@@ -308,6 +343,7 @@ function Controller:SaveBloodlustConfig(aceOptions)
     cfg.textHAlign = tostring(state.textHAlign or "center")
     cfg.textOffsetX = math.floor((tonumber(state.textOffsetX) or 0) + 0.5)
     cfg.textOffsetY = math.floor((tonumber(state.textOffsetY) or 0) + 0.5)
+    cfg.textEndEvents = NormalizeEndEventMap(state.textEndEvents)
 
     self:LoadBloodlustConfig(aceOptions)
     state.selectedKey = "bloodlust"

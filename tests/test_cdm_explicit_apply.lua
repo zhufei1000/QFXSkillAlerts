@@ -97,10 +97,6 @@ local cooldownInfo = {
 }
 local providerCategoryCalls = 0
 local provider = {}
-function provider:GetOrderedCooldownIDsForCategory(category)
-    providerCategoryCalls = providerCategoryCalls + 1
-    return category == 1 and { 101, 102, 103 } or {}
-end
 function provider:GetCooldownInfoForID(cooldownID)
     return cooldownInfo[cooldownID]
 end
@@ -117,6 +113,10 @@ C_CooldownViewer = {
     IsCooldownViewerAvailable = function() return true end,
     GetValidAlertTypes = function() return { EVENT_AVAILABLE, EVENT_OTHER } end,
     GetCooldownViewerCooldownInfo = function(cooldownID) return cooldownInfo[cooldownID] end,
+    GetCooldownViewerCategorySet = function(category)
+        providerCategoryCalls = providerCategoryCalls + 1
+        return category == 1 and { 101, 102, 103 } or {}
+    end,
 }
 C_AddOns = { LoadAddOn = function() return true end }
 C_UI = { Reload = function() PushCall("fallback_reload") end }
@@ -142,6 +142,17 @@ QFXSkillAlertsNS = {
     Core = {},
     Utils = {},
     L = function(key) return key end,
+}
+
+-- Native-runtime facade: the CDM-path tests keep IsNativeRecord false so every
+-- saved record still goes through the Cooldown Manager plan; the cleanup test
+-- uses the enum check for Available/OnCooldown.
+QFXSkillAlertsNS.Core.CDMNativeEvents = {
+    IsNativeRecord = function() return false end,
+    IsNativeAlertEventType = function(_, eventType)
+        return tonumber(eventType) == EVENT_AVAILABLE or tonumber(eventType) == EVENT_OTHER
+    end,
+    SyncAll = function() end,
 }
 
 local voiceItems = {
@@ -230,8 +241,10 @@ Assert(saved, "local save should succeed")
 Equal(status, "pending", "local save should report pending")
 Equal(#calls, 0, "local save must not call LayoutManager or reload")
 
--- A multi-record pending evaluation enumerates the CDM provider once per
--- category for the whole plan, not once per record.
+-- A multi-record pending evaluation enumerates the CDM category set once per
+-- category for the whole plan, not once per record. The category set is read
+-- through the C API so the addon never triggers the provider's taint-prone
+-- display cache build.
 Service:InvalidateCooldownCache("test")
 Sync.cooldownCatalogCacheKey = nil
 Sync.cooldownCatalogCache = nil
@@ -759,5 +772,33 @@ C_Secrets = nil
 local gateWithoutAPI, _, gateReason = Service:ApplyCDMRemovalPlanAndReload({}, {})
 Assert(gateWithoutAPI, "missing C_Secrets must not block the gate")
 Equal(gateReason, "no_changes", "missing C_Secrets should behave like the legacy combat-only check")
+
+-- Native cleanup removes QFX ready/cooldown alerts from the CDM layout but
+-- keeps charge alerts, foreign events and foreign payloads.
+alertsByCooldown[101] = {
+    { SOUND, EVENT_AVAILABLE, PAYLOAD_A }, -- Available (native) -> remove
+    { SOUND, EVENT_OTHER, PAYLOAD_A },     -- OnCooldown (native) -> remove
+    { SOUND, 99, PAYLOAD_A },              -- foreign event -> keep
+    { SOUND, EVENT_AVAILABLE, -999999 },   -- foreign payload -> keep
+}
+alertsByCooldown[102] = {}
+alertsByCooldown[103] = {}
+ResetCalls()
+local cleanupOK, removedCount, cleanupReason = Service:CleanupNativeCDMAlerts()
+Assert(cleanupOK, "native cleanup should succeed")
+Equal(removedCount, 2, "native cleanup should remove only the native alerts")
+Equal(cleanupReason, "reload_requested", "native cleanup should request a reload")
+Equal(CountCalls("remove:"), 2, "native cleanup should call RemoveAlert twice")
+Equal(CountCalls("save"), 1, "native cleanup should save once")
+Equal(CountCalls("reload"), 1, "native cleanup should reload once")
+Equal(#alertsByCooldown[101], 2, "foreign alerts should stay in the layout")
+
+-- A layout without native alerts is a no-op.
+ResetCalls()
+local cleanOK, cleanRemoved, cleanReason = Service:CleanupNativeCDMAlerts()
+Assert(cleanOK, "clean cleanup should succeed")
+Equal(cleanRemoved, 0, "clean cleanup should remove nothing")
+Equal(cleanReason, "no_changes", "clean cleanup should report no changes")
+Equal(#calls, 0, "clean cleanup must not touch LayoutManager or reload")
 
 print("CDM explicit apply regression tests passed")

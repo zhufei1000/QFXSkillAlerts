@@ -265,13 +265,14 @@ function EventVoice:Rebuild()
             local entry = SafeCall("getEntry", entryMap, index)
             local eventKey = entry and self:NormalizeEventKey(entry.eventKey)
             if entry and tostring(entry.entryType or "") == "event" and eventKey
-                and entry.voiceEnabled ~= false
+                and (entry.voiceEnabled ~= false or entry.imageEnabled == true or entry.textEnabled == true)
                 and IsScopeMatched(entry, scopeClassID, scopeSpecID, currentClassID, currentSpecID, currentRaceID) then
                 local loadSignature = EventContext and EventContext:BuildLoadConditionSignature(entry) or ""
                 local identity = eventKey .. "|" .. loadSignature
                 if not effectiveByIdentity[identity] then identityOrder[#identityOrder + 1] = identity end
                 effectiveByIdentity[identity] = {
                     runtimeKey = identity,
+                    primaryKey = identity,
                     eventKey = eventKey,
                     eventName = self:GetDisplayName(eventKey),
                     notifyMode = tostring(entry.notifyMode or MODE_SOUND),
@@ -283,7 +284,36 @@ function EventVoice:Rebuild()
                     customSoundPath = tostring(entry.customSoundPath or ""),
                     sharedMediaSound = tostring(entry.sharedMediaSound or ""),
                     resolvedSoundPath = tostring(SafeCall("resolveEntrySoundPath", entry) or ""),
-                    voiceEnabled = true,
+                    voiceEnabled = entry.voiceEnabled ~= false,
+                    imageEnabled = entry.imageEnabled == true,
+                    imageConditionOp = tostring(entry.imageConditionOp or "<="),
+                    imageConditionTime = math.max(0, tonumber(entry.imageConditionTime) or 0),
+                    imageSource = tostring(entry.imageSource or "auto"),
+                    imageIconID = math.max(0, tonumber(entry.imageIconID) or 0),
+                    imagePath = tostring(entry.imagePath or ""),
+                    imageSharedMedia = tostring(entry.imageSharedMedia or ""),
+                    imageSize = math.max(16, tonumber(entry.imageSize) or 96),
+                    imageStrata = tostring(entry.imageStrata or ""),
+                    imageEndEvents = type(entry.imageEndEvents) == "table" and entry.imageEndEvents or nil,
+                    imageDurationEnabled = entry.imageDurationEnabled == true,
+                    imageDuration = math.max(0.1, tonumber(entry.imageDuration) or 2),
+                    imageX = tonumber(entry.imageX) or 0,
+                    imageY = tonumber(entry.imageY) or 120,
+                    textEnabled = entry.textEnabled == true,
+                    textConditionOp = tostring(entry.textConditionOp or "<="),
+                    textConditionTime = math.max(0, tonumber(entry.textConditionTime) or 0),
+                    textAlert = tostring(entry.textAlert or ""),
+                    textSize = math.max(8, tonumber(entry.textSize) or 24),
+                    textDurationEnabled = entry.textDurationEnabled == true,
+                    textDuration = math.max(0.1, tonumber(entry.textDuration) or 2),
+                    textX = tonumber(entry.textX) or 0,
+                    textY = tonumber(entry.textY) or 120,
+                    textAttachMode = tostring(entry.textAttachMode or "outside"),
+                    textVAlign = tostring(entry.textVAlign or "bottom"),
+                    textHAlign = tostring(entry.textHAlign or "center"),
+                    textOffsetX = tonumber(entry.textOffsetX) or 0,
+                    textOffsetY = tonumber(entry.textOffsetY) or 0,
+                    textEndEvents = type(entry.textEndEvents) == "table" and entry.textEndEvents or nil,
                     eventThrottle = math.max(0, math.min(300, tonumber(entry.eventThrottle) or 1)),
                     eventLoadContexts = EventContext and EventContext:NormalizeLoadContexts(entry.eventLoadContexts) or entry.eventLoadContexts,
                     eventDungeonMode = EventContext and EventContext:NormalizeInstanceMode(entry.eventDungeonMode) or tostring(entry.eventDungeonMode or "any"),
@@ -293,6 +323,10 @@ function EventVoice:Rebuild()
                     eventDungeonSelectionNames = EventContext and EventContext:NormalizeInstanceSelectionNames(entry.eventDungeonSelectionNames) or entry.eventDungeonSelectionNames,
                     eventRaidSelectionNames = EventContext and EventContext:NormalizeInstanceSelectionNames(entry.eventRaidSelectionNames) or entry.eventRaidSelectionNames,
                 }
+                local utils = NS.Utils
+                if utils and type(utils.SyncLinkedVisualDurations) == "function" then
+                    utils.SyncLinkedVisualDurations(effectiveByIdentity[identity])
+                end
                 if EventContext and type(EventContext.WarmForEntry) == "function" then
                     EventContext:WarmForEntry(effectiveByIdentity[identity])
                 end

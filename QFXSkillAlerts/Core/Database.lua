@@ -23,6 +23,8 @@ local defaults = {
             imageSource = "auto",
             imageIconID = 0,
             imageSize = 96,
+            imageStrata = "FULLSCREEN_DIALOG",
+            imageEndEvents = {},
             imageDurationEnabled = false,
             imageDuration = 2,
             imageX = 0,
@@ -40,6 +42,7 @@ local defaults = {
             textHAlign = "center",
             textOffsetX = 0,
             textOffsetY = 0,
+            textEndEvents = {},
         },
         minimap = {
             angle = 225,
@@ -287,6 +290,8 @@ function Database:Initialize()
             imageSource = "auto",
             imageIconID = 0,
             imageSize = 96,
+            imageStrata = "FULLSCREEN_DIALOG",
+            imageEndEvents = {},
             imageDurationEnabled = false,
             imageDuration = 2,
             imageX = 0,
@@ -304,6 +309,7 @@ function Database:Initialize()
             textHAlign = "center",
             textOffsetX = 0,
             textOffsetY = 0,
+            textEndEvents = {},
         },
         minimap = {
             angle = 225,

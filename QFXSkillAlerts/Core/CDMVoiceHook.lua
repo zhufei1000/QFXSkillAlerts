@@ -6,8 +6,28 @@ NS.Core.CDMVoiceHook = NS.Core.CDMVoiceHook or {}
 
 local Hook = NS.Core.CDMVoiceHook
 local Registry = NS.Core.CDMVoiceRegistry
+local Native = NS.Core.CDMNativeEvents
 
 Hook.missingPayloadNotified = Hook.missingPayloadNotified or {}
+Hook.playFailedNotified = Hook.playFailedNotified or {}
+Hook.lastPlayedAt = Hook.lastPlayedAt or {}
+
+-- The Cooldown Manager can fire the same alert several times in a row (the
+-- same spell can sit in more than one viewer, and an event can retrigger
+-- across consecutive frames). Blizzard's own sound kits collapse that into
+-- one audible sound; PlaySoundFile does not, so a file would stutter. Collapse
+-- repeats here. A zero or negative window disables the suppression.
+local DEFAULT_DUPLICATE_WINDOW = 0.25
+
+local function GetDuplicateWindow()
+    local db = type(QFXSkillAlertsDB) == "table" and QFXSkillAlertsDB or nil
+    local ui = db and type(db.cdmVoiceUI) == "table" and db.cdmVoiceUI or nil
+    local value = ui and tonumber(ui.duplicateWindow)
+    if value and value >= 0 then
+        return value
+    end
+    return DEFAULT_DUPLICATE_WINDOW
+end
 
 local function IsCooldownViewerLoaded()
     if type(C_AddOns) == "table" and type(C_AddOns.IsAddOnLoaded) == "function" then
@@ -45,6 +65,24 @@ local function GetAlertPayload(alert)
     return tonumber(alert[3])
 end
 
+local function GetAlertEvent(alert)
+    if type(alert) ~= "table" then
+        return nil
+    end
+    if type(CooldownViewerAlert_GetEvent) == "function" then
+        local ok, value = pcall(CooldownViewerAlert_GetEvent, alert)
+        if ok then
+            return tonumber(value)
+        end
+    end
+    return tonumber(alert[2])
+end
+
+-- Ready / cooldown-start / aura events are played by the addon's own runtimes
+-- (CDMNativeWatch and CDMNativeAuraSounds). Alerts left in the Cooldown
+-- Manager layout from earlier versions must stay silent so a voice is never
+-- played twice; the shared check lives in CDMNativeEvents.
+
 function Hook:NotifyMissingOnce(payload)
     local key = tostring(payload)
     if self.missingPayloadNotified[key] then
@@ -53,6 +91,36 @@ function Hook:NotifyMissingOnce(payload)
     self.missingPayloadNotified[key] = true
     local message = type(NS.L) == "function" and NS.L("CDM_MISSING_VOICE") or "Missing voice"
     print("[QFX-SA] " .. tostring(message) .. " (payload: " .. key .. ")")
+end
+
+function Hook:NotifyPlayFailedOnce(payload, path)
+    local key = tostring(payload)
+    if self.playFailedNotified[key] then
+        return
+    end
+    self.playFailedNotified[key] = true
+    local message
+    if type(NS.L) == "function" then
+        message = NS.L("CDM_PLAY_FAILED", tostring(path))
+    else
+        message = "Could not play the Cooldown Manager voice: " .. tostring(path)
+    end
+    print("[QFX-SA] " .. tostring(message) .. " (payload: " .. key .. ")")
+end
+
+function Hook:IsDuplicate(payload, eventType)
+    local window = GetDuplicateWindow()
+    if window <= 0 then
+        return false
+    end
+    local now = type(GetTime) == "function" and GetTime() or 0
+    local key = tostring(payload) .. ":" .. tostring(eventType or "?")
+    local last = self.lastPlayedAt[key]
+    if last and (now - last) < window then
+        return true
+    end
+    self.lastPlayedAt[key] = now
+    return false
 end
 
 function Hook:HandleAlert(alert)
@@ -66,6 +134,16 @@ function Hook:HandleAlert(alert)
 
     local payload = GetAlertPayload(alert)
     if not payload then
+        return
+    end
+
+    local eventType = GetAlertEvent(alert)
+
+    -- Native events are handled by the addon itself; stale CDM alerts must stay
+    -- silent so a voice is never played twice. Charge and pandemic alerts keep
+    -- playing from here.
+    if Native and type(Native.IsNativeAlertEventType) == "function"
+        and Native:IsNativeAlertEventType(eventType) then
         return
     end
 
@@ -83,8 +161,15 @@ function Hook:HandleAlert(alert)
         return
     end
 
+    if self:IsDuplicate(payload, eventType) then
+        return
+    end
+
     if type(PlaySoundFile) == "function" then
-        pcall(PlaySoundFile, path, "Master")
+        local ok, willPlay = pcall(PlaySoundFile, path, "Master")
+        if ok and not willPlay then
+            self:NotifyPlayFailedOnce(payload, path)
+        end
     end
 end
 
@@ -97,7 +182,11 @@ function Hook:Install()
     end
 
     hooksecurefunc("CooldownViewerAlert_PlayAlert", function(_cooldownItem, _spellName, alert)
-        Hook:HandleAlert(alert)
+        local ok, err = pcall(Hook.HandleAlert, Hook, alert)
+        if not ok and not Hook.errorNotified then
+            Hook.errorNotified = true
+            print("[QFX-SA] Cooldown Manager voice hook error: " .. tostring(err))
+        end
     end)
     self.hooked = true
     return true

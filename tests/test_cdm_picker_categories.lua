@@ -1,8 +1,9 @@
--- The quick skill picker only offers real spell cooldowns: the aura-tracking
--- categories (Tracked Buffs / Tracked Bars) are excluded, while essential and
--- utility abilities remain selectable. Every class/spec keeps its own list
--- (no cross-spec spellID dedup) and entries read "Class·Spec · Skill"; saved
--- CDM presets only fill specs that have no cached catalog yet.
+-- The quick skill picker offers cooldowns from every category, including the
+-- aura-tracking ones (Tracked Buffs / Tracked Bars) used by aura entries,
+-- while essential and utility abilities remain selectable. Every class/spec
+-- keeps its own list (no cross-spec spellID dedup) and entries read
+-- "Class·Spec · Skill"; saved CDM presets only fill specs that have no cached
+-- catalog yet.
 
 local function Fail(message)
     error(message, 2)
@@ -115,7 +116,8 @@ end
 
 Assert(byValue[100] and byValue[100].text == "Essential · essential", "essential keeps category label")
 Assert(byValue[200] and byValue[200].text == "Utility · utility", "utility keeps category label")
-Assert(not byValue[300], "tracked buffs / tracked bars excluded")
+Assert(byValue[300] and byValue[300].text == "Tracked Buffs · trackedBuff",
+    "aura-tracking categories are offered for aura entries")
 
 -- Catalog-backed specs keep their full list; the current spec's live layout
 -- wins and only its missing catalog entries are appended.
@@ -129,7 +131,7 @@ Assert(holyLabel, "cached catalog entry uses its class/spec label")
 Assert(byValue[700] and byValue[700].text == "Warrior·Arms · Current Spec Cache",
     "current spec catalog gaps are appended after the live layout")
 Assert(savedCatalog and savedCatalog.classID == 1 and savedCatalog.specID == 71
-    and savedCatalog.count == 2 and savedCatalog.first == 100,
+    and savedCatalog.count == 3 and savedCatalog.first == 100,
     "live catalog is cached for the current spec")
 
 -- No cross-spec dedup: the same spellID appears once per spec.

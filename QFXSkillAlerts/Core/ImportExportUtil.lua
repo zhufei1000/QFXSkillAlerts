@@ -388,18 +388,21 @@ function Util:SanitizeEntryForImport(entry)
         voiceEnabled = entry.voiceEnabled ~= false,
         voiceConditionOp = entryType == "cooldown" and NormalizeConditionOp(entry.voiceConditionOp) or "<=",
         voiceConditionTime = entryType == "cooldown" and NormalizeConditionTime(entry.voiceConditionTime, entry.cooldownAlertTime or entry.alertLeadTime) or 0,
-        imageEnabled = not isEventEntry and entry.imageEnabled == true,
+        imageEnabled = entry.imageEnabled == true,
         imageConditionOp = entryType == "cooldown" and NormalizeConditionOp(entry.imageConditionOp) or "<=",
         imageConditionTime = entryType == "cooldown" and NormalizeConditionTime(entry.imageConditionTime, entry.cooldownAlertTime or entry.alertLeadTime) or 0,
         imageSource = tostring(entry.imageSource or "auto"),
         imageIconID = math.max(0, tonumber(entry.imageIconID) or 0),
         imagePath = TrimText(entry.imagePath or ""),
+        imageSharedMedia = TrimText(entry.imageSharedMedia or ""),
         imageSize = math.max(16, tonumber(entry.imageSize) or 96),
+        imageStrata = tostring(entry.imageStrata or ""),
+        imageEndEvents = type(entry.imageEndEvents) == "table" and self:DeepCopyTable(entry.imageEndEvents) or nil,
         imageDurationEnabled = entry.imageDurationEnabled == true,
         imageDuration = math.max(0.1, tonumber(entry.imageDuration) or 2),
         imageX = tonumber(entry.imageX) or 0,
         imageY = tonumber(entry.imageY) or 120,
-        textEnabled = not isEventEntry and entry.textEnabled == true,
+        textEnabled = entry.textEnabled == true,
         textCooldownCountdown = entryType == "cooldown" and entry.textEnabled == true
             and entry.textCooldownCountdown == true,
         textConditionOp = entryType == "cooldown" and NormalizeConditionOp(entry.textConditionOp) or "<=",
@@ -415,6 +418,7 @@ function Util:SanitizeEntryForImport(entry)
         textHAlign = tostring(entry.textHAlign or "center"),
         textOffsetX = tonumber(entry.textOffsetX) or 0,
         textOffsetY = tonumber(entry.textOffsetY) or 0,
+        textEndEvents = type(entry.textEndEvents) == "table" and self:DeepCopyTable(entry.textEndEvents) or nil,
         customName = nil,
         customCode = nil,
         customUseEvents = nil,
@@ -440,7 +444,7 @@ function Util:SanitizeEntryForImport(entry)
         Utils.SyncLinkedVisualDurations(sanitized)
     end
 
-    if sanitized.imageSource ~= "spell" and sanitized.imageSource ~= "item" and sanitized.imageSource ~= "icon" and sanitized.imageSource ~= "path" then
+    if sanitized.imageSource ~= "spell" and sanitized.imageSource ~= "item" and sanitized.imageSource ~= "icon" and sanitized.imageSource ~= "path" and sanitized.imageSource ~= "sharedmedia" then
         sanitized.imageSource = "auto"
     end
     if sanitized.textAttachMode ~= "inside" then sanitized.textAttachMode = "outside" end

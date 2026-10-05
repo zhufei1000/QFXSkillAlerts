@@ -109,7 +109,7 @@ end
 
 local function NormalizeImageSource(value)
     value = tostring(value or "auto")
-    if value == "spell" or value == "item" or value == "icon" or value == "path" then
+    if value == "spell" or value == "item" or value == "icon" or value == "path" or value == "sharedmedia" then
         return value
     end
     return "auto"
@@ -152,12 +152,59 @@ local function GetConditionOperatorItems()
     return CONDITION_OPERATOR_ITEMS
 end
 
-local function GetConditionActionItems()
+local function GetConditionActionItems(isAura)
+    -- Aura alerts only support voice playback, so the image / text entries are
+    -- shown greyed out instead of disappearing.
     return {
         { value = "voice", text = L("TAB_VOICE") },
-        { value = "image", text = L("TAB_IMAGE") },
-        { value = "text", text = L("TAB_TEXT") },
+        { value = "image", text = L("TAB_IMAGE"), disabled = isAura == true },
+        { value = "text", text = L("TAB_TEXT"), disabled = isAura == true },
     }
+end
+
+local function NormalizeVisualStrataValue(value)
+    local options = (NS.Constants and NS.Constants.VISUAL_STRATA_OPTIONS) or { "FULLSCREEN_DIALOG" }
+    local strata = tostring(value or "")
+    for _, option in ipairs(options) do
+        if option == strata then
+            return strata
+        end
+    end
+    return (NS.Constants and NS.Constants.VISUAL_STRATA_DEFAULT) or "FULLSCREEN_DIALOG"
+end
+
+local function GetVisualStrataItems()
+    local options = (NS.Constants and NS.Constants.VISUAL_STRATA_OPTIONS) or { "FULLSCREEN_DIALOG" }
+    local items = {}
+    for _, strata in ipairs(options) do
+        items[#items + 1] = { value = strata, text = L("STRATA_" .. strata) }
+    end
+    return items
+end
+
+local endEventItemsCache = nil
+
+local function GetEndEventItems()
+    if endEventItemsCache then
+        return endEventItemsCache
+    end
+    local defs = (NS.Constants and NS.Constants.VISUAL_END_EVENTS) or {}
+    local items = {}
+    for _, def in ipairs(defs) do
+        local eventName = type(def) == "table" and def.event or def
+        if type(eventName) == "string" and eventName ~= "" then
+            items[#items + 1] = { value = eventName, text = L("END_EVENT_" .. eventName) }
+        end
+    end
+    endEventItemsCache = items
+    return items
+end
+
+local function NormalizeEndEventState(value)
+    if type(value) ~= "table" then
+        return {}
+    end
+    return value
 end
 
 local CUSTOM_CONDITION_LOGIC_ITEMS = {
@@ -470,8 +517,33 @@ local function GetImageSourceItems()
         { value = "spell", text = L("IMAGE_SOURCE_SPELL") },
         { value = "item", text = L("IMAGE_SOURCE_ITEM") },
         { value = "icon", text = L("IMAGE_SOURCE_ICON") },
+        { value = "sharedmedia", text = L("IMAGE_SOURCE_SHAREDMEDIA") },
         { value = "path", text = L("IMAGE_SOURCE_PATH") },
     }
+end
+
+local sharedMediaImageItemsCache = nil
+
+local function BuildSharedMediaImageItems()
+    local items = {}
+    if not NS.AceOptions or type(NS.AceOptions.GetSharedMediaTextureList) ~= "function" then
+        return items
+    end
+    for name in pairs(NS.AceOptions:GetSharedMediaTextureList()) do
+        local text = tostring(name or "")
+        if text ~= "" then
+            items[#items + 1] = { value = text, text = text }
+        end
+    end
+    table.sort(items, function(a, b) return tostring(a.text or "") < tostring(b.text or "") end)
+    return items
+end
+
+local function GetSharedMediaImageItems()
+    if not sharedMediaImageItemsCache then
+        sharedMediaImageItemsCache = BuildSharedMediaImageItems()
+    end
+    return sharedMediaImageItemsCache
 end
 
 local function GetImageIDLabel(source)
@@ -590,31 +662,33 @@ function Fields:GetCdmSkillItems()
     local items = {}
     local catalogItems = {}
     local liveSeen = {}
+    local catalogSeen = {}
     for _, category in ipairs(api.GetCDMVoiceCategories() or {}) do
-        -- CD alerts only detect real spell cooldowns / readiness edges, so the
-        -- aura-tracking categories (Tracked Buffs / Tracked Bars) are not
-        -- offered here; use the CDM voice editor for aura events instead.
-        local categoryKey = tostring(category.key or "")
-        if categoryKey ~= "trackedBuff" and categoryKey ~= "trackedBar" then
-            local rows = api.GetCDMVoiceCooldownsForCategory(category.key) or {}
-            for _, info in ipairs(rows) do
-                local spellID = tonumber(info.spellID)
-                if spellID and spellID > 0 then
+        -- Aura-tracking categories (Tracked Buffs / Tracked Bars) are listed
+        -- too now: aura entries pick their spell from the same dropdown.
+        local rows = api.GetCDMVoiceCooldownsForCategory(category.key) or {}
+        for _, info in ipairs(rows) do
+            local spellID = tonumber(info.spellID)
+            if spellID and spellID > 0 then
+                -- The same spell may be exposed by several categories; the
+                -- cached catalog keeps one record per spell per spec.
+                if not catalogSeen[spellID] then
+                    catalogSeen[spellID] = true
                     catalogItems[#catalogItems + 1] = {
                         spellID = spellID,
                         spellName = tostring(info.spellName or spellID),
                     }
-                    if not liveSeen[spellID] then
-                        liveSeen[spellID] = true
-                        items[#items + 1] = {
-                            value = spellID,
-                            text = string.format("%s · %s",
-                                tostring(category.name or category.key or ""),
-                                tostring(info.spellName or spellID)),
-                            classID = classID,
-                            specID = specID,
-                        }
-                    end
+                end
+                if not liveSeen[spellID] then
+                    liveSeen[spellID] = true
+                    items[#items + 1] = {
+                        value = spellID,
+                        text = string.format("%s · %s",
+                            tostring(category.name or category.key or ""),
+                            tostring(info.spellName or spellID)),
+                        classID = classID,
+                        specID = specID,
+                    }
                 end
             end
         end
@@ -860,11 +934,14 @@ function Fields:IsGameStateCdMode(state)
     return state.gameStateCD == true
 end
 
--- Spell / item type selector shown in front of the Cooldown Manager picker.
+-- Type selector shown in front of the Cooldown Manager picker. Cast-success
+-- and aura alerts share the same editor now.
 function Fields:GetObjectTypeItems()
     return {
         { value = OBJECT_TYPE_SPELL, text = L("OBJECT_TYPE_SPELL") },
         { value = OBJECT_TYPE_ITEM, text = L("OBJECT_TYPE_ITEM") },
+        { value = "cast", text = L("OBJECT_TYPE_CAST") },
+        { value = "aura", text = L("OBJECT_TYPE_AURA") },
     }
 end
 
@@ -873,7 +950,16 @@ function Fields:PushObjectTypeDropdown(widgets, state)
         return
     end
     Widgets:SetDropdownItems(widgets.objectTypeDrop, self:GetObjectTypeItems())
-    Widgets:SetDropdownValue(widgets.objectTypeDrop, state.objectType, L("OBJECT_TYPE_SPELL"))
+    local entryType = tostring(state.entryType or "cooldown")
+    local value = OBJECT_TYPE_SPELL
+    if entryType == "cast" then
+        value = "cast"
+    elseif entryType == "aura" then
+        value = "aura"
+    elseif tostring(state.objectType or "") == OBJECT_TYPE_ITEM then
+        value = OBJECT_TYPE_ITEM
+    end
+    Widgets:SetDropdownValue(widgets.objectTypeDrop, value, L("OBJECT_TYPE_SPELL"))
 end
 
 -- Always-visible race / class / spec multi-select dropdowns. The class
@@ -939,7 +1025,7 @@ end
 -- Two layouts share the spell section: the redesigned four-row spell layout
 -- (picker on top, CD source + fixed CD on one row, one talent per row) and the
 -- original item layout (ID / name / fixed CD with the item load checkboxes).
-function Fields:ApplySpellSectionLayout(widgets, isItemObject)
+function Fields:ApplySpellSectionLayout(widgets, isItemObject, isAura)
     local section = widgets and widgets.spellSection
     if not section then
         return false
@@ -947,6 +1033,45 @@ function Fields:ApplySpellSectionLayout(widgets, isItemObject)
     -- Event-voice entries hide the type selector; switching back to a
     -- cooldown/cast entry in the same session must re-show it.
     SetManyShown({ widgets.objectTypeLabel, widgets.objectTypeDrop }, true)
+    if isAura then
+        -- Aura entries use the quick pick (aura categories included) plus the
+        -- trigger and unit; the CD timer, talent and item controls stay hidden.
+        SetManyShown({ widgets.auraTriggerLabel, widgets.auraTriggerDrop, widgets.auraUnitLabel, widgets.auraUnitDrop }, true)
+        SetManyShown({
+            widgets.cdModeLabel, widgets.cdModeDrop,
+            widgets.checkTalent,
+            widgets.talentIdLabel, widgets.talentId,
+            widgets.talentNameLabel, widgets.talentName,
+            widgets.talentCDLabel, widgets.talentCD,
+            widgets.loadTalentEnabled,
+            widgets.loadTalentIdLabel, widgets.loadTalentId,
+            widgets.loadTalentNameLabel, widgets.loadTalentName,
+            widgets.baseCDLabel, widgets.baseCD,
+            widgets.itemLoadEquipped, widgets.itemLoadBags, widgets.itemLoadSameName,
+        }, false)
+        SetManyShown({ widgets.skillFilterLabel, widgets.skillFilterDrop, widgets.cdmPickLabel, widgets.cdmSkillDrop }, true)
+        Widgets:SetDropdownWidth(widgets.objectTypeDrop, 100)
+        self:PlaceSectionWidget(section, widgets.objectTypeLabel, 16, -44)
+        self:PlaceSectionWidget(section, widgets.objectTypeDrop, 16, -68)
+        self:PlaceSectionWidget(section, widgets.skillFilterLabel, 124, -44)
+        self:PlaceSectionWidget(section, widgets.skillFilterDrop, 124, -68)
+        Widgets:SetDropdownWidth(widgets.skillFilterDrop, 196)
+        self:PlaceSectionWidget(section, widgets.cdmPickLabel, 328, -44)
+        self:PlaceSectionWidget(section, widgets.cdmSkillDrop, 328, -68)
+        Widgets:SetDropdownWidth(widgets.cdmSkillDrop, 320)
+        self:PlaceSectionWidget(section, widgets.spellIdLabel, 16, -106)
+        self:PlaceSectionWidget(section, widgets.spellId, 16, -130)
+        self:PlaceSectionWidget(section, widgets.spellNameLabel, 140, -106)
+        self:PlaceSectionWidget(section, widgets.spellName, 140, -130)
+        self:PlaceSectionWidget(section, widgets.auraTriggerLabel, 372, -106)
+        self:PlaceSectionWidget(section, widgets.auraTriggerDrop, 372, -130)
+        Widgets:SetDropdownWidth(widgets.auraTriggerDrop, 120)
+        self:PlaceSectionWidget(section, widgets.auraUnitLabel, 504, -106)
+        self:PlaceSectionWidget(section, widgets.auraUnitDrop, 504, -130)
+        Widgets:SetDropdownWidth(widgets.auraUnitDrop, 100)
+        return true
+    end
+    SetManyShown({ widgets.auraTriggerLabel, widgets.auraTriggerDrop, widgets.auraUnitLabel, widgets.auraUnitDrop }, false)
     -- Keep the ID / name / CD fields on one shared width grid.
     if widgets.spellId and widgets.spellId.SetWidth then widgets.spellId:SetWidth(112) end
     if widgets.spellIdLabel and widgets.spellIdLabel.SetWidth then widgets.spellIdLabel:SetWidth(112) end
@@ -1129,6 +1254,24 @@ local function ForceShowCustomCondition(widgets)
     end
 end
 
+-- Event entries keep only the execute row of the condition section; like the
+-- cooldown editor, force the action multi-select back into view when the
+-- settings tab is reopened.
+local function ForceShowEventCondition(widgets)
+    if not widgets then
+        return
+    end
+    SetManyShown({
+        widgets.conditionRow2, widgets.conditionExecuteLabel, widgets.conditionActionsDrop,
+    }, true)
+    if widgets.conditionRow2 and widgets.conditionRow2.SetAlpha then widgets.conditionRow2:SetAlpha(1) end
+    if widgets.conditionActionsDrop then
+        if widgets.conditionActionsDrop.Show then widgets.conditionActionsDrop:Show() end
+        if widgets.conditionActionsDrop.SetAlpha then widgets.conditionActionsDrop:SetAlpha(1) end
+        if widgets.conditionActionsDrop.EnableMouse then widgets.conditionActionsDrop:EnableMouse(true) end
+    end
+end
+
 local function Trim(value)
     if NS.AceOptions and NS.AceOptions.TrimText then
         return NS.AceOptions.TrimText(value or "")
@@ -1197,6 +1340,15 @@ local function ResolveImagePreviewTexture(state)
         return ResolveItemIcon(value)
     elseif source == "icon" then
         return value > 0 and math.floor(value) or nil
+    elseif source == "sharedmedia" then
+        local name = Trim(state.imageSharedMedia or "")
+        if name ~= "" and NS.AceOptions and type(NS.AceOptions.FetchSharedMediaTexturePath) == "function" then
+            local path = NS.AceOptions:FetchSharedMediaTexturePath(name)
+            if path ~= "" then
+                return path
+            end
+        end
+        return nil
     elseif source == "path" then
         local path = Trim(state.imagePath or "")
         return path ~= "" and (tonumber(path) or path) or nil
@@ -1249,7 +1401,7 @@ function Fields:PullFromWidgets(editor)
     local isCustomEntry = tostring(state.entryType or "") == "custom"
 
     state.activeAlertTab = NormalizeAlertTab(state.activeAlertTab)
-    if isCooldownEntry and widgets.conditionActionsDrop and Widgets.GetMultiDropdownValues then
+    if (isCooldownEntry or isEventEntry) and widgets.conditionActionsDrop and Widgets.GetMultiDropdownValues then
         local selectedActions = Widgets:GetMultiDropdownValues(widgets.conditionActionsDrop)
         if state.activeAlertTab == "voice" and widgets.voiceEnabled then
             selectedActions.voice = widgets.voiceEnabled:GetChecked() == true
@@ -1318,8 +1470,11 @@ function Fields:PullFromWidgets(editor)
         state.cooldownAlertTime = 0
     elseif isEventEntry then
         state.voiceEnabled = (not widgets.voiceEnabled) or widgets.voiceEnabled:GetChecked() == true
-        state.imageEnabled = false
-        state.textEnabled = false
+        state.imageEnabled = widgets.imageEnabled and widgets.imageEnabled:GetChecked() == true or false
+        state.textEnabled = widgets.textEnabled and widgets.textEnabled:GetChecked() == true or false
+        if widgets.voiceEnabled then widgets.voiceEnabled:SetChecked(state.voiceEnabled == true) end
+        if widgets.imageEnabled then widgets.imageEnabled:SetChecked(state.imageEnabled == true) end
+        if widgets.textEnabled then widgets.textEnabled:SetChecked(state.textEnabled == true) end
         state.voiceConditionOp = "<="
         state.voiceConditionTime = 0
         state.imageConditionOp = "<="
@@ -1350,7 +1505,14 @@ function Fields:PullFromWidgets(editor)
     state.imageSource = NormalizeImageSource(Widgets:GetDropdownValue(widgets.imageSourceDrop) or state.imageSource)
     state.imageIconID = math.max(0, tonumber((widgets.imageIconID and widgets.imageIconID:GetText()) or "") or 0)
     state.imagePath = Trim((widgets.imagePath and widgets.imagePath:GetText()) or "")
+    state.imageSharedMedia = Trim((widgets.imageSharedMediaDrop and Widgets.GetDropdownValue and Widgets:GetDropdownValue(widgets.imageSharedMediaDrop)) or state.imageSharedMedia or "")
     state.imageSize = math.max(16, GetNumericControlValue(widgets.imageSize, 96))
+    if widgets.imageStrataDrop and Widgets.GetDropdownValue then
+        state.imageStrata = NormalizeVisualStrataValue(Widgets:GetDropdownValue(widgets.imageStrataDrop) or state.imageStrata)
+    end
+    if widgets.imageEndEventsDrop and Widgets.GetMultiDropdownValues then
+        state.imageEndEvents = Widgets:GetMultiDropdownValues(widgets.imageEndEventsDrop)
+    end
     state.imageDurationEnabled = widgets.imageDurationEnabled and widgets.imageDurationEnabled:GetChecked() == true or false
     state.imageDuration = math.max(0.1, tonumber((widgets.imageDuration and widgets.imageDuration:GetText()) or "") or 2)
     state.imageX = math.floor((tonumber((widgets.imageX and widgets.imageX:GetText()) or "") or 0) + 0.5)
@@ -1376,6 +1538,9 @@ function Fields:PullFromWidgets(editor)
     state.textHAlign = NormalizeTextHAlign(Widgets:GetDropdownValue(widgets.textHAlignDrop) or state.textHAlign)
     state.textOffsetX = math.floor((tonumber((widgets.textOffsetX and widgets.textOffsetX:GetText()) or "") or 0) + 0.5)
     state.textOffsetY = math.floor((tonumber((widgets.textOffsetY and widgets.textOffsetY:GetText()) or "") or 0) + 0.5)
+    if widgets.textEndEventsDrop and Widgets.GetMultiDropdownValues then
+        state.textEndEvents = Widgets:GetMultiDropdownValues(widgets.textEndEventsDrop)
+    end
 
     if not isBloodlust then
         if self.PullScopeFromDropdowns and widgets.scopeRaceDrop and Widgets.GetMultiDropdownValues then
@@ -1453,11 +1618,19 @@ function Fields:PullFromWidgets(editor)
             state.delayEnabled = false
             state.delaySeconds = 0
             state.castDelayMode = "show"
-            state.imageEnabled = false
-            state.textEnabled = false
         else
             local dropdownObjectType = widgets.objectTypeDrop and Widgets:GetDropdownValue(widgets.objectTypeDrop)
-            state.objectType = tostring(dropdownObjectType or "") == OBJECT_TYPE_ITEM and OBJECT_TYPE_ITEM or OBJECT_TYPE_SPELL
+            local selectedType = tostring(dropdownObjectType or "")
+            if selectedType == "cast" then
+                state.entryType = "cast"
+                state.objectType = OBJECT_TYPE_SPELL
+            elseif selectedType == "aura" then
+                state.entryType = "aura"
+                state.objectType = OBJECT_TYPE_SPELL
+            else
+                state.entryType = "cooldown"
+                state.objectType = selectedType == OBJECT_TYPE_ITEM and OBJECT_TYPE_ITEM or OBJECT_TYPE_SPELL
+            end
             if state.objectType == OBJECT_TYPE_ITEM then
                 local itemLoadEquippedChecked = widgets.itemLoadEquipped and widgets.itemLoadEquipped:GetChecked() == true
                 local itemLoadBagsChecked = widgets.itemLoadBags and widgets.itemLoadBags:GetChecked() == true
@@ -1496,7 +1669,7 @@ function Fields:PullFromWidgets(editor)
             state.loadTalentEnabled = widgets.loadTalentEnabled and widgets.loadTalentEnabled:GetChecked() == true or false
             state.loadTalentId = tonumber((widgets.loadTalentId and widgets.loadTalentId:GetText()) or "") or 0
             state.loadTalentName = tostring((widgets.loadTalentName and widgets.loadTalentName:GetText()) or "")
-            if isCastEntry then
+            if tostring(state.entryType or "") == "cast" then
                 state.cdMode = "fixed"
                 state.gameStateCD = false
                 local delayChecked = widgets.castDelayEnabled and widgets.castDelayEnabled:GetChecked() == true or false
@@ -1505,6 +1678,16 @@ function Fields:PullFromWidgets(editor)
                 state.castDelayMode = "show"
                 if widgets.castImmediateEnabled then widgets.castImmediateEnabled:SetChecked(state.delayEnabled ~= true) end
                 if widgets.castDelayEnabled then widgets.castDelayEnabled:SetChecked(state.delayEnabled == true) end
+            elseif tostring(state.entryType or "") == "aura" then
+                state.cdMode = "fixed"
+                state.gameStateCD = false
+                state.delayEnabled = false
+                state.delaySeconds = 0
+                state.castDelayMode = "show"
+                state.imageEnabled = false
+                state.textEnabled = false
+                state.auraTrigger = tostring((widgets.auraTriggerDrop and Widgets:GetDropdownValue(widgets.auraTriggerDrop)) or state.auraTrigger or "applied")
+                state.auraUnit = tostring((widgets.auraUnitDrop and Widgets:GetDropdownValue(widgets.auraUnitDrop)) or state.auraUnit or "player")
             else
                 state.delayEnabled = false
                 state.delaySeconds = 0
@@ -1586,14 +1769,13 @@ function Fields:PushToWidgets(editor)
     if frame.description then
         frame.description:SetText(isCooldown and L("EDITOR_DESC_COOLDOWN") or L("EDITOR_DESC"))
     end
-    if isEvent and state.activeAlertTab ~= "settings" and state.activeAlertTab ~= "voice" then
-        state.activeAlertTab = "voice"
-    end
     local activeTab = state.activeAlertTab
+    -- Aura alerts are voice-only, so the image / text tabs have no content.
+    local isAuraEntry = tostring(state.entryType or "") == "aura"
     local showSettings = activeTab == "settings"
     local showVoice = activeTab == "voice"
-    local showImage = activeTab == "image"
-    local showText = activeTab == "text"
+    local showImage = activeTab == "image" and not isAuraEntry
+    local showText = activeTab == "text" and not isAuraEntry
 
     local typeTitle = isBloodlust and L("TAB_BLOODLUST") or (isEvent and L("TAB_EVENT_VOICE") or (isCustom and L("TAB_CUSTOM") or (isCast and L("TAB_CAST") or L("TAB_COOLDOWN"))))
     frame.title:SetText((editor.mode == "new" and L("TITLE_NEW_CONFIG") or L("TITLE_EDIT_CONFIG")) .. " - " .. typeTitle)
@@ -1605,7 +1787,7 @@ function Fields:PushToWidgets(editor)
     SetManyShown({ widgets.classSection }, showSettings and not isBloodlust)
     SetManyShown({ widgets.spellSection }, showSettings and not isBloodlust and not isCustom)
     SetManyShown({ widgets.customSection, widgets.customCodeSection }, showSettings and isCustom)
-    SetManyShown({ widgets.conditionSection }, showSettings and (isCooldown or isCast or isCustom))
+    SetManyShown({ widgets.conditionSection }, showSettings and (isCooldown or isCast or isCustom or isAuraEntry or isEvent))
     SetManyShown({ widgets.bloodlustInfoSection }, showSettings and isBloodlust)
     SetManyShown({ widgets.notifySection }, not showSettings)
     if showSettings then
@@ -1613,17 +1795,20 @@ function Fields:PushToWidgets(editor)
         if widgets.spellSection then widgets.spellSection:SetShown((not isBloodlust) and (not isCustom)) end
         if widgets.customSection then widgets.customSection:SetShown(isCustom) end
         if widgets.customCodeSection then widgets.customCodeSection:SetShown(isCustom) end
-        if widgets.conditionSection then widgets.conditionSection:SetShown(isCooldown or isCast or isCustom) end
+        if widgets.conditionSection then widgets.conditionSection:SetShown(isCooldown or isCast or isCustom or isAuraEntry or isEvent) end
         if widgets.bloodlustInfoSection then widgets.bloodlustInfoSection:SetShown(isBloodlust) end
     end
     if widgets.conditionSection then
         widgets.conditionSection:ClearAllPoints()
         widgets.conditionSection:SetPoint("TOPLEFT", widgets.conditionSection:GetParent(), "TOPLEFT", (PopupLayout and PopupLayout.Editor and PopupLayout.Editor.Modules.left) or 8, isCustom and (widgets.customConditionTop or -660) or (widgets.normalConditionTop or -382))
         if widgets.conditionSection.SetHeight then
-            local conditionHeight = isCustom and GetCustomNotifySectionHeight(state) or ((PopupLayout and PopupLayout.Editor and PopupLayout.Editor.Modules.conditionHeight) or 150)
+            local conditionHeight = isCustom and GetCustomNotifySectionHeight(state)
+                or (isEvent and 90)
+                or ((PopupLayout and PopupLayout.Editor and PopupLayout.Editor.Modules.conditionHeight) or 150)
             widgets.conditionSection:SetHeight(conditionHeight)
         end
-        local title = isCustom and L("SECTION_CUSTOM_EXECUTE_NOTIFY") or L("SECTION_NOTIFY_CONDITIONS")
+        local title = isCustom and L("SECTION_CUSTOM_EXECUTE_NOTIFY")
+            or (isEvent and L("SECTION_EVENT_NOTIFY") or L("SECTION_NOTIFY_CONDITIONS"))
         local label = widgets.conditionSection.qfxsaLabel or widgets.conditionSection.label
         if label and label.SetText then label:SetText(title) end
     end
@@ -1728,8 +1913,6 @@ function Fields:PushToWidgets(editor)
             state.eventDungeonSelectionIDs = FilterCurrentSeasonSelections("dungeon", state.eventDungeonSelectionIDs)
             state.eventRaidSelectionIDs = FilterCurrentSeasonSelections("raid", state.eventRaidSelectionIDs)
             state.voiceEnabled = state.voiceEnabled ~= false
-            state.imageEnabled = false
-            state.textEnabled = false
             if widgets.eventTypeDrop then
                 Widgets:SetDropdownItems(widgets.eventTypeDrop, GetEventVoiceItems())
                 Widgets:SetDropdownValue(widgets.eventTypeDrop, state.eventKey, L("PLACEHOLDER_SELECT_EVENT_VOICE"))
@@ -1778,6 +1961,8 @@ function Fields:PushToWidgets(editor)
                 widgets.cdmPickLabel, widgets.cdmSkillDrop,
                 widgets.skillFilterLabel, widgets.skillFilterDrop,
                 widgets.cdModeLabel, widgets.cdModeDrop,
+                widgets.auraTriggerLabel, widgets.auraTriggerDrop,
+                widgets.auraUnitLabel, widgets.auraUnitDrop,
             }, false)
             Widgets:SetDropdownEnabled(widgets.eventTypeDrop, true)
             SetEnabled(widgets.eventThrottle, true)
@@ -1814,7 +1999,24 @@ function Fields:PushToWidgets(editor)
                 self:PushObjectTypeDropdown(widgets, state)
             end
             -- A layout problem must never abort the rest of the refresh.
-            self:ApplySpellSectionLayout(widgets, isItemObject)
+            local isAura = tostring(state.entryType or "") == "aura"
+            self:ApplySpellSectionLayout(widgets, isItemObject, isAura)
+            if isAura and widgets.auraTriggerDrop then
+                Widgets:SetDropdownItems(widgets.auraTriggerDrop, {
+                    { value = "applied", text = L("AURA_TRIGGER_APPLIED") },
+                    { value = "removed", text = L("AURA_TRIGGER_REMOVED") },
+                    { value = "applications", text = L("AURA_TRIGGER_APPLICATIONS") },
+                })
+                Widgets:SetDropdownValue(widgets.auraTriggerDrop, tostring(state.auraTrigger or "applied"), L("AURA_TRIGGER_APPLIED"))
+            end
+            if isAura and widgets.auraUnitDrop then
+                Widgets:SetDropdownItems(widgets.auraUnitDrop, {
+                    { value = "player", text = L("AURA_UNIT_PLAYER") },
+                    { value = "target", text = L("AURA_UNIT_TARGET") },
+                    { value = "focus", text = L("AURA_UNIT_FOCUS") },
+                })
+                Widgets:SetDropdownValue(widgets.auraUnitDrop, tostring(state.auraUnit or "player"), L("AURA_UNIT_PLAYER"))
+            end
             if widgets.spellIdLabel then widgets.spellIdLabel:SetText(isItemObject and L("LABEL_ITEM_ID") or L("LABEL_OBJECT_SPELL_ID")) end
             state.itemLoadMode = isItemObject and NormalizeItemLoadMode(state.itemLoadMode) or ITEM_LOAD_NONE
             state.itemLoadSameName = isItemObject and state.itemLoadMode == ITEM_LOAD_BAGS and state.itemLoadSameName == true
@@ -1888,7 +2090,8 @@ function Fields:PushToWidgets(editor)
             SetEnabled(widgets.baseCD, isCooldown and not self:IsGameStateCdMode(state))
 
             if widgets.cdmSkillDrop then
-                local showPicker = (isCooldown or isCast) and not isItemObject
+                local isAuraPicker = tostring(state.entryType or "") == "aura"
+                local showPicker = (isCooldown or isCast or isAuraPicker) and not isItemObject
                 SetManyShown({ widgets.skillFilterLabel, widgets.skillFilterDrop, widgets.cdmPickLabel, widgets.cdmSkillDrop }, showPicker)
                 if showPicker then
                     local items, pickerEnabled, pickerReason, currentSpecID = self:GetCdmSkillItems()
@@ -1931,7 +2134,12 @@ function Fields:PushToWidgets(editor)
         SoundFields:PushToWidgets(widgets, state, soundFields, source, isTts)
     end
 
-    if widgets.voiceEnabled then widgets.voiceEnabled:SetChecked(state.voiceEnabled == true) end
+    if widgets.voiceEnabled then
+        -- Aura alerts are voice-only: the voice channel is locked on.
+        local auraVoiceOnly = tostring(state.entryType or "") == "aura"
+        widgets.voiceEnabled:SetChecked(auraVoiceOnly or state.voiceEnabled == true)
+        SetEnabled(widgets.voiceEnabled, not auraVoiceOnly)
+    end
     if widgets.imageEnabled then widgets.imageEnabled:SetChecked(state.imageEnabled == true) end
     if widgets.textEnabled then widgets.textEnabled:SetChecked(state.textEnabled == true) end
     if widgets.conditionSpellNameText then
@@ -1973,15 +2181,15 @@ function Fields:PushToWidgets(editor)
         if widgets.textConditionTime then widgets.textConditionTime:SetText(FormatConditionTime(state.textConditionTime)) end
     end
     if widgets.conditionActionsDrop and Widgets.SetMultiDropdownValues then
-        Widgets:SetDropdownItems(widgets.conditionActionsDrop, GetConditionActionItems())
+        Widgets:SetDropdownItems(widgets.conditionActionsDrop, GetConditionActionItems(isAuraEntry))
         Widgets:SetMultiDropdownValues(widgets.conditionActionsDrop, {
-            voice = state.voiceEnabled == true,
+            voice = state.voiceEnabled == true or isAuraEntry,
             image = state.imageEnabled == true,
             text = state.textEnabled == true,
         }, L("PLACEHOLDER_SELECT_ALERT_ACTIONS"))
     end
     if widgets.customNotifyActionsDrop and Widgets.SetMultiDropdownValues then
-        Widgets:SetDropdownItems(widgets.customNotifyActionsDrop, GetConditionActionItems())
+        Widgets:SetDropdownItems(widgets.customNotifyActionsDrop, GetConditionActionItems(isAuraEntry))
         Widgets:SetMultiDropdownValues(widgets.customNotifyActionsDrop, {
             voice = state.voiceEnabled == true,
             image = state.imageEnabled == true,
@@ -2006,10 +2214,26 @@ function Fields:PushToWidgets(editor)
         Widgets:SetDropdownItems(widgets.imageSourceDrop, GetImageSourceItems())
         Widgets:SetDropdownValue(widgets.imageSourceDrop, state.imageSource, L("IMAGE_SOURCE_AUTO"))
     end
+    if widgets.imageSharedMediaDrop then
+        Widgets:SetDropdownItems(widgets.imageSharedMediaDrop, GetSharedMediaImageItems())
+        Widgets:SetDropdownValue(widgets.imageSharedMediaDrop, tostring(state.imageSharedMedia or ""), L("PLACEHOLDER_SELECT_SHAREDMEDIA_IMAGE"))
+    end
     if widgets.imageIconLabel then widgets.imageIconLabel:SetText(GetImageIDLabel(state.imageSource)) end
     if widgets.imageIconID then widgets.imageIconID:SetText((tonumber(state.imageIconID) or 0) > 0 and tostring(math.floor(tonumber(state.imageIconID) or 0)) or "") end
     if widgets.imagePath then widgets.imagePath:SetText(tostring(state.imagePath or "")) end
     SetNumericControlValue(widgets.imageSize, state.imageSize or 96)
+    if widgets.imageStrataDrop then
+        Widgets:SetDropdownItems(widgets.imageStrataDrop, GetVisualStrataItems())
+        Widgets:SetDropdownValue(widgets.imageStrataDrop, NormalizeVisualStrataValue(state.imageStrata), L("STRATA_FULLSCREEN_DIALOG"))
+    end
+    if widgets.imageEndEventsDrop and Widgets.SetMultiDropdownValues then
+        Widgets:SetDropdownItems(widgets.imageEndEventsDrop, GetEndEventItems())
+        Widgets:SetMultiDropdownValues(widgets.imageEndEventsDrop, NormalizeEndEventState(state.imageEndEvents), L("PLACEHOLDER_SELECT_END_EVENTS"))
+    end
+    if widgets.textEndEventsDrop and Widgets.SetMultiDropdownValues then
+        Widgets:SetDropdownItems(widgets.textEndEventsDrop, GetEndEventItems())
+        Widgets:SetMultiDropdownValues(widgets.textEndEventsDrop, NormalizeEndEventState(state.textEndEvents), L("PLACEHOLDER_SELECT_END_EVENTS"))
+    end
     if widgets.imageDurationEnabled then widgets.imageDurationEnabled:SetChecked(state.imageDurationEnabled == true) end
     if widgets.imageDuration then widgets.imageDuration:SetText(tostring(state.imageDuration or 2)) end
     if widgets.imageX then widgets.imageX:SetText(tostring(state.imageX or 0)) end
@@ -2050,6 +2274,24 @@ function Fields:PushToWidgets(editor)
     SetManyShown(unifiedConditionControls, showSettings and isCooldown)
     SetManyShown(customConditionControls, showSettings and isCustom)
     SetManyShown(castConditionControls, showSettings and isCast)
+    if isAuraEntry or isEvent then
+        -- Aura and event entries keep only the execute-notification row: the
+        -- aura is voice-only, the event picks voice/image/text directly.
+        SetManyShown({
+            widgets.conditionRow1,
+            widgets.conditionWhenLabel, widgets.conditionSpellNameText,
+            widgets.conditionRemainingLabel, widgets.conditionOp,
+            widgets.conditionTime, widgets.conditionSecLabel,
+        }, false)
+        SetManyShown({
+            widgets.conditionRow2,
+            widgets.conditionExecuteLabel, widgets.conditionActionsDrop, widgets.conditionActionHint,
+        }, showSettings)
+        if widgets.conditionRow2 and widgets.conditionRow2.ClearAllPoints and widgets.conditionRow2.SetPoint then
+            widgets.conditionRow2:ClearAllPoints()
+            widgets.conditionRow2:SetPoint("TOPLEFT", widgets.conditionSection, "TOPLEFT", 16, -44)
+        end
+    end
     if showSettings and isCooldown then
         -- Force the inline condition/action controls visible after returning from Voice/Image/Text tabs.
         -- Some native dropdown frames keep their previous hidden state when their parent row was hidden.
@@ -2070,7 +2312,9 @@ function Fields:PushToWidgets(editor)
     }
     local imageControls = {
         widgets.imageEnabled, widgets.imageSourceLabel, widgets.imageSourceDrop, widgets.imageIconLabel, widgets.imageIconID, widgets.imageIconPreview,
-        widgets.imagePathLabel, widgets.imagePath, widgets.imageSizeLabel, widgets.imageSize, widgets.imageDurationEnabled,
+        widgets.imagePathLabel, widgets.imagePath, widgets.imageSharedMediaLabel, widgets.imageSharedMediaDrop,
+        widgets.imageSizeLabel, widgets.imageSize, widgets.imageStrataLabel, widgets.imageStrataDrop,
+        widgets.imageEndEventsLabel, widgets.imageEndEventsDrop, widgets.imageDurationEnabled,
         widgets.imageDurationLabel, widgets.imageDuration,
     }
     local imagePositionControls = {
@@ -2080,7 +2324,7 @@ function Fields:PushToWidgets(editor)
     }
     local textControls = {
         widgets.textEnabled, widgets.textCooldownCountdown, widgets.textAlertLabel, widgets.textAlert, widgets.textSizeLabel, widgets.textSize, widgets.textDurationEnabled,
-        widgets.textDurationLabel, widgets.textDuration,
+        widgets.textDurationLabel, widgets.textDuration, widgets.textEndEventsLabel, widgets.textEndEventsDrop,
     }
     local textPositionControls = {
         widgets.textPositionSection, widgets.textXLabel, widgets.textX, widgets.textYLabel, widgets.textY,
@@ -2125,8 +2369,16 @@ function Fields:PushToWidgets(editor)
     end
     if widgets.textOffsetX then widgets.textOffsetX:Hide() end
     if widgets.textOffsetY then widgets.textOffsetY:Hide() end
-    if widgets.editorHint and widgets.editorHint.Hide then
-        widgets.editorHint:Hide()
+    if widgets.editorHint then
+        if isAuraEntry then
+            -- Tell the user about the client API limitation up front.
+            if widgets.editorHint.SetText then
+                widgets.editorHint:SetText(L("AURA_API_LIMIT_HINT"))
+            end
+            if widgets.editorHint.Show then widgets.editorHint:Show() end
+        elseif widgets.editorHint.Hide then
+            widgets.editorHint:Hide()
+        end
     end
 
     if showSettings then
@@ -2139,11 +2391,15 @@ function Fields:PushToWidgets(editor)
             local gameStateOnly = isCooldown and self:IsGameStateCdMode(state)
             Widgets:SetDropdownEnabled(widgets.conditionOp, conditionEnabled and not gameStateOnly)
             SetEnabled(widgets.conditionTime, conditionEnabled and not gameStateOnly)
-            Widgets:SetDropdownEnabled(widgets.conditionActionsDrop, conditionEnabled and not isCustom)
+            -- Event entries have no countdown condition, so their execute row
+            -- keeps the voice / image / text multi-select interactive exactly
+            -- like cooldown alerts (aura entries stay locked to voice).
+            Widgets:SetDropdownEnabled(widgets.conditionActionsDrop, (isCooldown and not gameStateOnly) or isEvent)
             Widgets:SetDropdownEnabled(widgets.customNotifyActionsDrop, isCustom)
             Widgets:SetDropdownEnabled(widgets.customConditionLogicDrop, isCustom)
             Widgets:SetDropdownEnabled(widgets.customConditionVarDrop, false)
-            SetLabelsEnabled({ widgets.conditionWhenLabel, widgets.conditionSpellNameText, widgets.conditionExecuteLabel, widgets.conditionActionHint }, isCooldown)
+            SetLabelsEnabled({ widgets.conditionWhenLabel, widgets.conditionSpellNameText, widgets.conditionActionHint }, isCooldown)
+            SetLabelsEnabled({ widgets.conditionExecuteLabel }, isCooldown or isEvent)
             SetLabelsEnabled({ widgets.conditionRemainingLabel, widgets.conditionSecLabel }, isCooldown and not gameStateOnly)
             SetLabelsEnabled({ widgets.customConditionVarLabel, widgets.customConditionValueLabel }, false)
             if type(widgets.customNotifyRows) == "table" then
@@ -2164,21 +2420,23 @@ function Fields:PushToWidgets(editor)
             SetLabelsEnabled({ widgets.castDelayLabel, widgets.castDelayAfterLabel }, castDelayInputEnabled)
             SetLabelsEnabled({ widgets.castConditionExecuteLabel }, isCast)
         else
-            local voiceEnabled = state.voiceEnabled == true
+            -- Aura alerts are voice-only (registered through AddAuraSound).
+            local isAuraEntry = tostring(state.entryType or "") == "aura"
+            local voiceEnabled = state.voiceEnabled == true or isAuraEntry
             local imageEnabled = state.imageEnabled == true
             local textEnabled = state.textEnabled == true
             Widgets:SetDropdownEnabled(widgets.voiceConditionOp, voiceEnabled and isCooldown)
             SetEnabled(widgets.voiceConditionTime, voiceEnabled and isCooldown)
             SetLabelsEnabled({ widgets.voiceConditionLabel, widgets.voiceConditionCdLabel, widgets.voiceConditionSecLabel }, voiceEnabled and isCooldown)
-            Widgets:SetDropdownEnabled(widgets.imageConditionOp, imageEnabled and isCooldown)
-            SetEnabled(widgets.imageConditionTime, imageEnabled and isCooldown)
-            SetLabelsEnabled({ widgets.imageConditionLabel, widgets.imageConditionCdLabel, widgets.imageConditionSecLabel }, imageEnabled and isCooldown)
-            Widgets:SetDropdownEnabled(widgets.textConditionOp, textEnabled and isCooldown)
-            SetEnabled(widgets.textConditionTime, textEnabled and isCooldown)
-            SetLabelsEnabled({ widgets.textConditionLabel, widgets.textConditionCdLabel, widgets.textConditionSecLabel }, textEnabled and isCooldown)
+            Widgets:SetDropdownEnabled(widgets.imageConditionOp, imageEnabled and isCooldown and not isAuraEntry)
+            SetEnabled(widgets.imageConditionTime, imageEnabled and isCooldown and not isAuraEntry)
+            SetLabelsEnabled({ widgets.imageConditionLabel, widgets.imageConditionCdLabel, widgets.imageConditionSecLabel }, imageEnabled and isCooldown and not isAuraEntry)
+            Widgets:SetDropdownEnabled(widgets.textConditionOp, textEnabled and isCooldown and not isAuraEntry)
+            SetEnabled(widgets.textConditionTime, textEnabled and isCooldown and not isAuraEntry)
+            SetLabelsEnabled({ widgets.textConditionLabel, widgets.textConditionCdLabel, widgets.textConditionSecLabel }, textEnabled and isCooldown and not isAuraEntry)
         end
     elseif showVoice then
-        local voiceEnabled = state.voiceEnabled == true
+        local voiceEnabled = state.voiceEnabled == true or tostring(state.entryType or "") == "aura"
         Widgets:SetDropdownEnabled(widgets.sourceDrop, voiceEnabled)
         SetNativeLabelColor(widgets.sourceLabel, voiceEnabled)
         if not voiceEnabled then
@@ -2193,17 +2451,21 @@ function Fields:PushToWidgets(editor)
         local imageSource = NormalizeImageSource(state.imageSource)
         local usesID = imageSource == "spell" or imageSource == "item" or imageSource == "icon"
         local usesPath = imageSource == "path"
+        local usesSharedMedia = imageSource == "sharedmedia"
         SetControlsEnabled({ widgets.imageSourceDrop, widgets.imageSize, widgets.imageDurationEnabled }, enabled)
         if Layout.SetValueSliderLabelEnabled then Layout.SetValueSliderLabelEnabled(widgets.imageSize, enabled) end
         SetControlsEnabled({ widgets.imageX, widgets.imageY, widgets.imagePreviewButton, widgets.imageHidePreviewButton, widgets.imageNudgeUp, widgets.imageNudgeDown, widgets.imageNudgeLeft, widgets.imageNudgeRight, widgets.imageNudgeReset }, enabled and imagePositionLayout)
         SetControlsEnabled({ widgets.imageIconID }, enabled and usesID)
         SetControlsEnabled({ widgets.imagePath }, enabled and usesPath)
+        SetControlsEnabled({ widgets.imageSharedMediaDrop }, enabled and usesSharedMedia)
         SetControlsEnabled({ widgets.imageDuration }, enabled and state.imageDurationEnabled == true)
         Widgets:SetDropdownEnabled(widgets.imageSourceDrop, enabled)
+        Widgets:SetDropdownEnabled(widgets.imageSharedMediaDrop, enabled and usesSharedMedia)
         SetLabelsEnabled({ widgets.imageSourceLabel, widgets.imageSizeLabel }, enabled)
         SetLabelsEnabled({ widgets.imageXLabel, widgets.imageYLabel, widgets.imageNudgeLabel }, enabled and imagePositionLayout)
         SetManyShown({ widgets.imageIconLabel, widgets.imageIconID }, showImage and usesID)
         SetManyShown({ widgets.imagePathLabel, widgets.imagePath }, showImage and usesPath)
+        SetManyShown({ widgets.imageSharedMediaLabel, widgets.imageSharedMediaDrop }, showImage and usesSharedMedia)
         SetLabelsEnabled({ widgets.imageIconLabel }, enabled and usesID)
         if widgets.imageIconPreview then
             if showImage and enabled then
@@ -2213,7 +2475,12 @@ function Fields:PushToWidgets(editor)
             end
         end
         SetLabelsEnabled({ widgets.imagePathLabel }, enabled and usesPath)
+        SetLabelsEnabled({ widgets.imageSharedMediaLabel }, enabled and usesSharedMedia)
         SetLabelsEnabled({ widgets.imageDurationLabel }, enabled and state.imageDurationEnabled == true)
+        SetControlsEnabled({ widgets.imageStrataDrop }, enabled)
+        Widgets:SetDropdownEnabled(widgets.imageStrataDrop, enabled)
+        Widgets:SetDropdownEnabled(widgets.imageEndEventsDrop, enabled)
+        SetLabelsEnabled({ widgets.imageStrataLabel, widgets.imageEndEventsLabel }, enabled)
     elseif showText then
         local enabled = state.textEnabled == true
         local linked = linkedVisualLayout == true
@@ -2237,11 +2504,13 @@ function Fields:PushToWidgets(editor)
         SetLabelsEnabled({ widgets.textDurationLabel }, enabled and not countdownEnabled and state.textDurationEnabled == true)
         SetLabelsEnabled({ widgets.textXLabel, widgets.textYLabel, widgets.textSingleNudgeLabel }, enabled and textOnly)
         SetLabelsEnabled({ widgets.textAttachLabel, widgets.textVAlignLabel, widgets.textHAlignLabel, widgets.textNudgeLabel }, enabled and linked)
+        Widgets:SetDropdownEnabled(widgets.textEndEventsDrop, enabled)
+        SetLabelsEnabled({ widgets.textEndEventsLabel }, enabled)
     end
 
     SetManyShown({ widgets.tabTypeLabel, widgets.tabCooldown, widgets.tabCast, widgets.tabBloodlust, widgets.subTabLabel }, false)
-    if widgets.tabImage then widgets.tabImage:SetShown(not isEvent) end
-    if widgets.tabText then widgets.tabText:SetShown(not isEvent) end
+    if widgets.tabImage then widgets.tabImage:SetShown(true) end
+    if widgets.tabText then widgets.tabText:SetShown(true) end
     if widgets.actionTest then
         if showVoice then widgets.actionTest:Show() else widgets.actionTest:Hide() end
     end
@@ -2251,6 +2520,13 @@ function Fields:PushToWidgets(editor)
             widgets.conditionSection:SetHeight(150)
         end
         ForceShowInlineCondition(widgets)
+    elseif showSettings and (isAuraEntry or isEvent) then
+        if widgets.conditionSection and widgets.conditionSection.SetHeight then
+            widgets.conditionSection:SetHeight(90)
+        end
+        if isEvent then
+            ForceShowEventCondition(widgets)
+        end
     elseif showSettings and isCast then
         if widgets.conditionSection and widgets.conditionSection.SetHeight then
             widgets.conditionSection:SetHeight(170)
@@ -2307,6 +2583,7 @@ function Fields:RefreshLocale(editor)
     if SoundFields and type(SoundFields.ClearDropdownItemCache) == "function" then
         SoundFields:ClearDropdownItemCache()
     end
+    endEventItemsCache = nil
 
     local frame = editor.frame
     local widgets = frame.widgets or {}
@@ -2383,6 +2660,9 @@ function Fields:RefreshLocale(editor)
     SetLocaleText(widgets.imageIconLabel, L("LABEL_IMAGE_ICON_ID"))
     SetLocaleText(widgets.imagePathLabel, L("LABEL_IMAGE_PATH"))
     SetLocaleText(widgets.imageSizeLabel, L("LABEL_IMAGE_SIZE"))
+    SetLocaleText(widgets.imageStrataLabel, L("LABEL_IMAGE_STRATA"))
+    SetLocaleText(widgets.imageEndEventsLabel, L("LABEL_END_EVENTS"))
+    SetLocaleText(widgets.textEndEventsLabel, L("LABEL_END_EVENTS"))
     SetLocaleText(widgets.imageDurationLabel, L("LABEL_SECONDS_SHORT"))
     SetLocaleText(widgets.imageXLabel, L("LABEL_POSITION_X"))
     SetLocaleText(widgets.imageYLabel, L("LABEL_POSITION_Y"))

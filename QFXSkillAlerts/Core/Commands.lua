@@ -70,6 +70,28 @@ function Commands:Initialize()
             return
         end
 
+        -- One-time migration: drop QFX ready / on-cooldown / aura alerts from
+        -- the Cooldown Manager layout. Those events are played by the addon
+        -- itself now; charge and pandemic alerts are kept.
+        if cmd == "cleanup" or cmd == "clean" then
+            local service = NS.Core and NS.Core.CDMVoiceService
+            if not service or type(service.CleanupNativeCDMAlerts) ~= "function" then
+                PrintMessage(L("CDM_NOT_AVAILABLE"))
+                return
+            end
+            local ok, removed, reason = service:CleanupNativeCDMAlerts()
+            if not ok then
+                PrintMessage(L(reason == "combat" and "CDM_COMBAT_BLOCKED" or "CDM_CLEANUP_FAILED"))
+                return
+            end
+            if reason == "no_changes" then
+                PrintMessage(L("CDM_CLEANUP_NONE"))
+            else
+                PrintMessage(L("CDM_CLEANUP_DONE", removed))
+            end
+            return
+        end
+
         OpenMainFrame()
     end
 end

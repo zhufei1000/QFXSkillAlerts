@@ -96,6 +96,7 @@ Assert(EventVoice:NormalizeEventKey("player_dead") == "player_dead",
     "player death should remain available")
 local played = {}
 local playedPaths = {}
+local lastCfg = nil
 EventVoice:Configure({
     getCurrentClassSpec = function() return 1, 101 end,
     getStoredEntryMap = function(classID, specID)
@@ -108,6 +109,7 @@ EventVoice:Configure({
     playNotification = function(cfg)
         played[#played + 1] = cfg.eventKey
         playedPaths[#playedPaths + 1] = cfg.soundPath
+        lastCfg = cfg
         return true
     end,
     getTime = function() return now end,
@@ -210,6 +212,41 @@ Assert(next(frame.registered) == nil, "empty rebuild should unregister every eve
 Assert(not groupDeathMonitorEnabled,
     "removing the group-member death entry should disable its monitor")
 
+-- Visual-only event entries (voice disabled, image/text enabled) must build
+-- and dispatch, and their visual fields must reach the runtime config.
+globalMap = {
+    [1] = {
+        entryType = "event", eventKey = "combat_start", eventThrottle = 0,
+        voiceEnabled = false, notifyMode = "sound",
+        imageEnabled = true, imageSource = "sharedmedia", imageSharedMedia = "TestTexture",
+        imageSize = 48, imageStrata = "TOOLTIP", imageEndEvents = { PLAYER_DEAD = true },
+        imageDurationEnabled = true, imageDuration = 3,
+        textEnabled = true, textAlert = "Combat!", textSize = 20, textEndEvents = { PLAYER_REGEN_ENABLED = true },
+        alertClassIDs = { [0] = true }, alertSpecIDs = { [0] = true }, alertRaceIDs = { [0] = true },
+    },
+}
+local _, visualCount = EventVoice:Rebuild()
+Equal(visualCount, 1, "a visual-only event entry should build as an active event")
+played = {}
+now = 300
+Assert(EventVoice:Dispatch("PLAYER_REGEN_DISABLED"), "visual-only event should still dispatch")
+Equal(played[#played], "combat_start", "visual-only event should route through the notifier")
+Assert(type(lastCfg) == "table", "the notifier must receive a runtime config")
+Assert(type(lastCfg.primaryKey) == "string" and lastCfg.primaryKey:match("^combat_start|") ~= nil,
+    "event runtime config must carry a stable visual key")
+Equal(lastCfg.voiceEnabled, false, "the disabled voice channel must stay disabled")
+Assert(lastCfg.imageEnabled == true and lastCfg.textEnabled == true,
+    "visual channels must survive into the runtime config")
+Equal(lastCfg.imageSource, "sharedmedia", "the image source must survive into the runtime config")
+Equal(lastCfg.imageSharedMedia, "TestTexture", "the shared image name must survive into the runtime config")
+Equal(lastCfg.imageSize, 48, "the image size must survive into the runtime config")
+Equal(lastCfg.imageStrata, "TOOLTIP", "the display layer must survive into the runtime config")
+Equal(type(lastCfg.imageEndEvents) == "table" and lastCfg.imageEndEvents.PLAYER_DEAD, true,
+    "the image end-display events must survive into the runtime config")
+Equal(type(lastCfg.textEndEvents) == "table" and lastCfg.textEndEvents.PLAYER_REGEN_ENABLED, true,
+    "the text end-display events must survive into the runtime config")
+Equal(lastCfg.textAlert, "Combat!", "the alert text must survive into the runtime config")
+
 local eventEntry = { entryType = "event", eventKey = "combat_start", spellId = 0 }
 Assert(EntryMap:GetEntry({ [1] = eventEntry }, 1) == eventEntry, "event entries must remain valid without a spell ID")
 Equal(EntryMap:FindFirstFreeIndex({ [1] = eventEntry }), 2, "event entries must occupy saved-list indices")
@@ -279,7 +316,7 @@ Assert(sanitized.eventDungeonSelectionIDs["101"] and sanitized.eventDungeonSelec
 Equal(sanitized.eventDungeonSelectionNames["101"], "Ruby Life Pools",
     "specific dungeon fallback names must survive import sanitization")
 Equal(sanitized.spellId, 0, "event entry must not acquire a fake spell ID")
-Assert(not sanitized.imageEnabled and not sanitized.textEnabled, "event import must remain voice-only")
+Assert(sanitized.imageEnabled and sanitized.textEnabled, "event import must keep image/text channels")
 Assert(QFXSkillAlertsNS.ImportExportUtil:SanitizeEntryForImport({ entryType = "event", eventKey = "invalid" }) == nil,
     "unknown events must be rejected during import")
 

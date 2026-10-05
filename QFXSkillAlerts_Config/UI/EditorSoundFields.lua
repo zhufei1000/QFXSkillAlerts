@@ -117,12 +117,14 @@ local function BuildSharedMediaSoundItems()
     return items
 end
 
-local function BuildSoundSourceItems()
+local function BuildSoundSourceItems(isAura)
+    -- Aura alerts are played by the client through AddAuraSound, which has no
+    -- TTS support: the entry is greyed out instead of disappearing.
     return {
         { value = "builtin", text = L("SOURCE_BUILTIN") },
         { value = "sharedmedia", text = L("SOURCE_SHAREDMEDIA") },
         { value = "custom", text = L("SOURCE_CUSTOM") },
-        { value = "tts", text = L("SOURCE_TTS") },
+        { value = "tts", text = L("SOURCE_TTS"), disabled = isAura == true },
     }
 end
 
@@ -132,11 +134,12 @@ function SoundFields:ClearDropdownItemCache()
     end
 end
 
-function SoundFields:GetSoundSourceItems()
-    if not DropdownItemCache.soundSourceItems then
-        DropdownItemCache.soundSourceItems = BuildSoundSourceItems()
+function SoundFields:GetSoundSourceItems(isAura)
+    local key = isAura and "soundSourceItemsAura" or "soundSourceItems"
+    if not DropdownItemCache[key] then
+        DropdownItemCache[key] = BuildSoundSourceItems(isAura)
     end
-    return DropdownItemCache.soundSourceItems
+    return DropdownItemCache[key]
 end
 
 function SoundFields:GetBuiltinSoundItems()
@@ -223,7 +226,8 @@ function SoundFields:PushToWidgets(widgets, state, soundFields, source, isTts)
     state.useCustomSound = customSound
     state.useSharedMediaSound = sharedMediaSound
 
-    Widgets:SetDropdownItems(widgets.sourceDrop, self:GetSoundSourceItems())
+    local isAuraEntry = tostring(state.entryType or "") == "aura"
+    Widgets:SetDropdownItems(widgets.sourceDrop, self:GetSoundSourceItems(isAuraEntry))
     Widgets:SetDropdownValue(widgets.sourceDrop, selectedSource, L("SOURCE_BUILTIN"))
 
     Widgets:SetDropdownItems(widgets.builtinDrop, self:GetBuiltinSoundItems())

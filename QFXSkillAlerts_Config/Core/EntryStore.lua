@@ -29,6 +29,16 @@ local function GetOptions(owner)
     return owner or NS.AceOptions or {}
 end
 
+-- Aura alerts are registered with the client from the saved entries; rebuild
+-- the registrations right after a save / delete instead of waiting for the
+-- next zone or reload.
+local function SyncNativeRuntimes()
+    local native = NS.Core and NS.Core.CDMNativeEvents
+    if native and type(native.SyncAll) == "function" then
+        pcall(native.SyncAll, native)
+    end
+end
+
 local function GetApi()
     return NS.API
 end
@@ -55,6 +65,34 @@ end
 
 local function NormalizeCastDelayMode(value)
     return "show"
+end
+
+-- Display layer for visual alerts; unknown values fall back to the default
+-- always-on-top layer.
+local function NormalizeVisualStrata(value)
+    local options = CONST.VISUAL_STRATA_OPTIONS or { "FULLSCREEN_DIALOG" }
+    local strata = tostring(value or "")
+    for _, option in ipairs(options) do
+        if option == strata then
+            return strata
+        end
+    end
+    return CONST.VISUAL_STRATA_DEFAULT or "FULLSCREEN_DIALOG"
+end
+
+-- End-display event multi-select: only keep string keys explicitly set true.
+local function NormalizeEndEventMap(value)
+    if type(value) ~= "table" then
+        return nil
+    end
+    local normalized = nil
+    for key, enabled in pairs(value) do
+        if enabled == true and type(key) == "string" and key ~= "" then
+            normalized = normalized or {}
+            normalized[key] = true
+        end
+    end
+    return normalized
 end
 
 -- CD source for cooldown entries: "fixed" (number), "ready" (game readiness
@@ -388,8 +426,32 @@ local function NormalizeEntryTypeValue(value)
         return value
     elseif value == "event" then
         return value
+    elseif value == "aura" then
+        return value
     end
     return "cooldown"
+end
+
+-- Aura alerts are registered with the client through AddAuraSound, which only
+-- supports voice playback.
+local AURA_TRIGGERS = { applied = true, removed = true, applications = true }
+
+local function NormalizeAuraTrigger(value)
+    value = tostring(value or ""):lower()
+    if AURA_TRIGGERS[value] then
+        return value
+    end
+    return nil
+end
+
+local AURA_UNITS = { player = true, target = true, focus = true }
+
+local function NormalizeAuraUnit(value)
+    value = tostring(value or ""):lower()
+    if AURA_UNITS[value] then
+        return value
+    end
+    return "player"
 end
 
 local function NormalizeEventVoiceKey(api, value)
@@ -635,6 +697,8 @@ function EntryStore:GetCurrentScopeEntryList(owner)
             entries[#entries + 1] = {
                 key = BuildEntryKey(state.classID, state.specID, index),
                 entryType = entryType,
+                auraTrigger = entryType == "aura" and tostring(entry.auraTrigger or "") or nil,
+                auraUnit = entryType == "aura" and tostring(entry.auraUnit or "") or nil,
                 eventKey = eventKey,
                 eventThrottle = eventKey and math.max(0, math.min(300, tonumber(entry.eventThrottle) or 1)) or nil,
                 index = index,
@@ -835,6 +899,8 @@ function EntryStore:LoadSelectedEntry(owner)
     state.classID = classID
     state.specID = specID
     state.entryType = NormalizeEntryTypeValue(entry.entryType)
+    state.auraTrigger = state.entryType == "aura" and NormalizeAuraTrigger(entry.auraTrigger) or nil
+    state.auraUnit = state.entryType == "aura" and NormalizeAuraUnit(entry.auraUnit) or nil
     state.eventKey = state.entryType == "event" and NormalizeEventVoiceKey(api, entry.eventKey) or nil
     state.eventThrottle = state.entryType == "event" and math.max(0, math.min(300, tonumber(entry.eventThrottle) or 1)) or 1
     state.eventLoadContexts = state.entryType == "event" and NormalizeEventLoadContexts(api, entry.eventLoadContexts)
@@ -904,19 +970,22 @@ function EntryStore:LoadSelectedEntry(owner)
     state.voiceConditionOp = NormalizeConditionOp(entry.voiceConditionOp)
     state.voiceConditionTime = NormalizeConditionTime(entry.voiceConditionTime, legacyAlertTime)
     state.activeAlertTab = "settings"
-    state.imageEnabled = state.entryType ~= "event" and entry.imageEnabled == true
+    state.imageEnabled = entry.imageEnabled == true
     state.imageConditionOp = NormalizeConditionOp(entry.imageConditionOp)
     state.imageConditionTime = NormalizeConditionTime(entry.imageConditionTime, legacyAlertTime)
     state.imageSource = tostring(entry.imageSource or ((TrimText(entry.imagePath or "") ~= "") and "path" or "auto"))
-    if state.imageSource ~= "spell" and state.imageSource ~= "item" and state.imageSource ~= "icon" and state.imageSource ~= "path" then state.imageSource = "auto" end
+    if state.imageSource ~= "spell" and state.imageSource ~= "item" and state.imageSource ~= "icon" and state.imageSource ~= "path" and state.imageSource ~= "sharedmedia" then state.imageSource = "auto" end
     state.imageIconID = math.max(0, tonumber(entry.imageIconID) or 0)
     state.imagePath = TrimText(entry.imagePath or "")
+    state.imageSharedMedia = TrimText(entry.imageSharedMedia or "")
     state.imageSize = math.max(16, tonumber(entry.imageSize) or 96)
+    state.imageStrata = NormalizeVisualStrata(entry.imageStrata)
+    state.imageEndEvents = NormalizeEndEventMap(entry.imageEndEvents) or {}
     state.imageDurationEnabled = entry.imageDurationEnabled == true
     state.imageDuration = math.max(0.1, tonumber(entry.imageDuration) or 2)
     state.imageX = tonumber(entry.imageX) or 0
     state.imageY = tonumber(entry.imageY) or 120
-    state.textEnabled = state.entryType ~= "event" and entry.textEnabled == true
+    state.textEnabled = entry.textEnabled == true
     state.textCooldownCountdown = entry.textCooldownCountdown == true
     state.textConditionOp = NormalizeConditionOp(entry.textConditionOp)
     state.textConditionTime = NormalizeConditionTime(entry.textConditionTime, legacyAlertTime)
@@ -934,6 +1003,7 @@ function EntryStore:LoadSelectedEntry(owner)
     if state.textHAlign ~= "left" and state.textHAlign ~= "right" then state.textHAlign = "center" end
     state.textOffsetX = tonumber(entry.textOffsetX) or 0
     state.textOffsetY = tonumber(entry.textOffsetY) or 0
+    state.textEndEvents = NormalizeEndEventMap(entry.textEndEvents) or {}
 
     state.customName = nil
     state.customCode = nil
@@ -1066,10 +1136,15 @@ function EntryStore:SaveEntry(owner)
     local imageConditionOp = NormalizeConditionOp(state.imageConditionOp)
     local imageConditionTime = NormalizeConditionTime(state.imageConditionTime, cooldownAlertTime)
     local imageSource = tostring(state.imageSource or "auto")
-    if imageSource ~= "spell" and imageSource ~= "item" and imageSource ~= "icon" and imageSource ~= "path" then imageSource = "auto" end
+    if imageSource ~= "spell" and imageSource ~= "item" and imageSource ~= "icon" and imageSource ~= "path" and imageSource ~= "sharedmedia" then imageSource = "auto" end
     local imageIconID = math.max(0, tonumber(state.imageIconID) or 0)
     local imagePath = TrimText(state.imagePath or "")
+    local imageSharedMedia = TrimText(state.imageSharedMedia or "")
     local imageSize = math.max(16, tonumber(state.imageSize) or 96)
+    local imageStrata = NormalizeVisualStrata(state.imageStrata)
+    local imageEndEvents = NormalizeEndEventMap(state.imageEndEvents)
+    state.imageStrata = imageStrata
+    state.imageEndEvents = imageEndEvents or {}
     local imageDurationEnabled = state.imageDurationEnabled == true
     local imageDuration = math.max(0.1, tonumber(state.imageDuration) or 2)
     local imageX = math.floor((tonumber(state.imageX) or 0) + 0.5)
@@ -1096,6 +1171,8 @@ function EntryStore:SaveEntry(owner)
     if textHAlign ~= "left" and textHAlign ~= "right" then textHAlign = "center" end
     local textOffsetX = math.floor((tonumber(state.textOffsetX) or 0) + 0.5)
     local textOffsetY = math.floor((tonumber(state.textOffsetY) or 0) + 0.5)
+    local textEndEvents = NormalizeEndEventMap(state.textEndEvents)
+    state.textEndEvents = textEndEvents or {}
     local visualUID = tostring(state._qfxPendingVisualUID or state.visualUID or "")
     if visualUID == "" then
         visualUID = nil
@@ -1148,6 +1225,9 @@ function EntryStore:SaveEntry(owner)
     local isCooldownEntry = entryType == "cooldown"
     local isCastEntry = entryType == "cast"
     local isEventEntry = entryType == "event"
+    local isAuraEntry = entryType == "aura"
+    local auraTrigger = isAuraEntry and NormalizeAuraTrigger(state.auraTrigger) or nil
+    local auraUnit = isAuraEntry and NormalizeAuraUnit(state.auraUnit) or nil
     -- The CD-change talent only changes the fixed timer; readiness-edge entries
     -- must not keep stale talent data (the separate load-talent filter stays).
     if isCooldownEntry and cdMode ~= "fixed" then
@@ -1229,7 +1309,51 @@ function EntryStore:SaveEntry(owner)
         print("[QFX-SA] " .. L("MSG_INVALID_FIXED_CD"))
         return
     end
-    if not isCooldownEntry and not isCastEntry then
+    if isAuraEntry and not auraTrigger then
+        print("[QFX-SA] " .. L("MSG_INVALID_AURA_TRIGGER"))
+        return
+    end
+    if isAuraEntry and not voiceEnabled then
+        print("[QFX-SA] " .. L("MSG_AURA_VOICE_ONLY"))
+        return
+    end
+    if isAuraEntry and notifyMode == modeTts then
+        -- The client-side aura sound registration has no TTS support.
+        print("[QFX-SA] " .. L("MSG_AURA_VOICE_ONLY"))
+        return
+    end
+    if isAuraEntry then
+        -- Auras are registered through AddAuraSound: voice only, no timer,
+        -- talent or item handling.
+        baseCD = 0
+        checkTalent = false
+        talentId = 0
+        talentName = ""
+        talentCD = 0
+        loadTalentEnabled = false
+        loadTalentId = 0
+        loadTalentName = ""
+        delayEnabled = false
+        delaySeconds = 0
+        castDelayMode = "show"
+        imageEnabled = false
+        textEnabled = false
+    elseif isEventEntry then
+        spellId = 0
+        objectType = OBJECT_TYPE_SPELL
+        baseCD = 0
+        checkTalent = false
+        talentId = 0
+        talentName = ""
+        talentCD = 0
+        loadTalentEnabled = false
+        loadTalentId = 0
+        loadTalentName = ""
+        delayEnabled = false
+        delaySeconds = 0
+        -- Event alerts support voice and/or image/text channels now, so the
+        -- visual configuration must be preserved instead of being cleared.
+    elseif not isCooldownEntry and not isCastEntry then
         spellId = 0
         objectType = OBJECT_TYPE_SPELL
         baseCD = 0
@@ -1277,10 +1401,6 @@ function EntryStore:SaveEntry(owner)
         loadTalentName = api.ResolveTalentName(loadTalentId)
         state.loadTalentName = loadTalentName
     end
-    if isEventEntry and not voiceEnabled then
-        print("[QFX-SA] " .. L("MSG_EVENT_VOICE_REQUIRED"))
-        return
-    end
     if not voiceEnabled and not imageEnabled and not textEnabled then
         print("[QFX-SA] " .. L("MSG_NEED_ALERT_ACTIONS"))
         return
@@ -1317,6 +1437,12 @@ function EntryStore:SaveEntry(owner)
             and (tonumber(entry.spellId) or 0) == spellId
             and NormalizeEntryTypeValue(entry.entryType) == entryType
             and tostring(existingType) == tostring(objectType)
+            -- Ready and cooldown are separate records for the same spell, so
+            -- the duplicate check must not collapse them.
+            and NormalizeCdMode(entry.cdMode, entry.gameStateCD == true) == cdMode
+            -- Aura triggers are separate records too (applied / removed /
+            -- applications).
+            and (entryType ~= "aura" or NormalizeAuraTrigger(entry.auraTrigger) == auraTrigger)
             and (objectType ~= OBJECT_TYPE_ITEM or ItemLoadModesOverlap(entry.itemLoadMode, itemLoadMode))
         if entry
             and index ~= targetIndex
@@ -1335,6 +1461,8 @@ function EntryStore:SaveEntry(owner)
     local oldEntry = api.GetEntry(map, targetIndex)
     local savedEntry = {
         entryType = entryType,
+        auraTrigger = isAuraEntry and auraTrigger or nil,
+        auraUnit = isAuraEntry and auraUnit or nil,
         eventKey = isEventEntry and eventKey or nil,
         eventThrottle = isEventEntry and eventThrottle or nil,
         eventLoadContexts = isEventEntry and eventLoadContexts or nil,
@@ -1381,18 +1509,21 @@ function EntryStore:SaveEntry(owner)
         voiceEnabled = voiceEnabled,
         voiceConditionOp = isCooldownEntry and voiceConditionOp or "<=",
         voiceConditionTime = isCooldownEntry and tonumber(string.format("%.2f", voiceConditionTime)) or 0,
-        imageEnabled = not isEventEntry and imageEnabled,
+        imageEnabled = not isAuraEntry and imageEnabled,
         imageConditionOp = isCooldownEntry and imageConditionOp or "<=",
         imageConditionTime = isCooldownEntry and tonumber(string.format("%.2f", imageConditionTime)) or 0,
         imageSource = imageSource,
         imageIconID = imageIconID,
         imagePath = imagePath,
+        imageSharedMedia = imageSharedMedia,
         imageSize = imageSize,
+        imageStrata = imageStrata,
+        imageEndEvents = imageEndEvents,
         imageDurationEnabled = imageDurationEnabled,
         imageDuration = imageDuration,
         imageX = imageX,
         imageY = imageY,
-        textEnabled = not isEventEntry and textEnabled,
+        textEnabled = not isAuraEntry and textEnabled,
         textCooldownCountdown = isCooldownEntry and textEnabled and textCooldownCountdown,
         textConditionOp = isCooldownEntry and textConditionOp or "<=",
         textConditionTime = isCooldownEntry and tonumber(string.format("%.2f", textConditionTime)) or 0,
@@ -1407,6 +1538,7 @@ function EntryStore:SaveEntry(owner)
         textHAlign = textHAlign,
         textOffsetX = textOffsetX,
         textOffsetY = textOffsetY,
+        textEndEvents = textEndEvents,
         visualUID = visualUID,
         alertRaceIDs = alertRaceIDs,
         alertClassIDs = alertClassIDs,
@@ -1480,6 +1612,7 @@ function EntryStore:SaveEntry(owner)
     end
     HideRuntimeVisualAlerts(true)
     api.RefreshRuntimeCooldowns()
+    SyncNativeRuntimes()
     state.selectedKey = BuildEntryKey(classID, specID, targetIndex)
     self:LoadSelectedEntry(options)
     if not RequestNativeUIRefresh("list") and type(api.RefreshPanel) == "function" then
@@ -1532,6 +1665,7 @@ function EntryStore:DeleteSelectedEntry(owner, suppressRefresh)
     end
     HideRuntimeVisualAlerts()
     api.RefreshRuntimeCooldowns()
+    SyncNativeRuntimes()
     if not suppressRefresh then
         if not RequestNativeUIRefresh("list") and type(api.RefreshPanel) == "function" then
             api.RefreshPanel()

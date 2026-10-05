@@ -617,13 +617,16 @@ local function GetScrollableDropdownPopup()
         end
         SelectByCursor(button)
     end)
-    popup:SetScript("OnUpdate", UpdatePopup)
+    -- The hover/auto-close poll only runs while the popup is visible; hiding
+    -- the popup unhooks it so no per-frame work remains after the UI closes.
     popup:SetScript("OnShow", function(self)
         self.autoCloseAt = nil
+        self:SetScript("OnUpdate", UpdatePopup)
         RaiseDropdownPopup(self, self.owner)
         RenderRows()
     end)
     popup:SetScript("OnHide", function(self)
+        self:SetScript("OnUpdate", nil)
         for i = 1, (self.visibleRows or 0) do
             local row = self.rows[i]
             if row then

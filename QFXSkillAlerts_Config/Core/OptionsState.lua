@@ -46,6 +46,30 @@ local function TrimText(value)
     return tostring(value or ""):match("^%s*(.-)%s*$")
 end
 
+local function NormalizeVisualStrata(value)
+    local options = CONST.VISUAL_STRATA_OPTIONS or { "FULLSCREEN_DIALOG" }
+    local strata = tostring(value or "")
+    for _, option in ipairs(options) do
+        if option == strata then
+            return strata
+        end
+    end
+    return CONST.VISUAL_STRATA_DEFAULT or "FULLSCREEN_DIALOG"
+end
+
+local function NormalizeEndEventMap(value)
+    if type(value) ~= "table" then
+        return {}
+    end
+    local normalized = {}
+    for key, enabled in pairs(value) do
+        if enabled == true and type(key) == "string" and key ~= "" then
+            normalized[key] = true
+        end
+    end
+    return normalized
+end
+
 local function GetApi()
     return NS.API
 end
@@ -98,11 +122,6 @@ end
 
 local function BuildSpecDisplayText(specName, specIcon)
     return BuildInlineTexture(specIcon, 14) .. tostring(specName or "-")
-end
-
-local function IsSoundSourceValue(value)
-    value = tostring(value or "")
-    return value == "builtin" or value == "sharedmedia" or value == "custom" or value == "tts"
 end
 
 local function NormalizeItemLoadMode(value)
@@ -206,12 +225,15 @@ function NS.OptionsState:GetState(owner)
     owner.state.imageConditionOp = NormalizeConditionOp(owner.state.imageConditionOp)
     owner.state.imageConditionTime = math.max(0, tonumber(owner.state.imageConditionTime) or legacyAlertTime)
     owner.state.imageSource = tostring(owner.state.imageSource or "auto")
-    if owner.state.imageSource ~= "spell" and owner.state.imageSource ~= "item" and owner.state.imageSource ~= "icon" and owner.state.imageSource ~= "path" then
+    if owner.state.imageSource ~= "spell" and owner.state.imageSource ~= "item" and owner.state.imageSource ~= "icon" and owner.state.imageSource ~= "path" and owner.state.imageSource ~= "sharedmedia" then
         owner.state.imageSource = "auto"
     end
     owner.state.imageIconID = math.max(0, tonumber(owner.state.imageIconID) or 0)
     owner.state.imagePath = TrimText(owner.state.imagePath or "")
+    owner.state.imageSharedMedia = TrimText(owner.state.imageSharedMedia or "")
     owner.state.imageSize = math.max(16, tonumber(owner.state.imageSize) or 96)
+    owner.state.imageStrata = NormalizeVisualStrata(owner.state.imageStrata)
+    owner.state.imageEndEvents = NormalizeEndEventMap(owner.state.imageEndEvents)
     owner.state.imageDurationEnabled = owner.state.imageDurationEnabled == true
     owner.state.imageDuration = math.max(0.1, tonumber(owner.state.imageDuration) or 2)
     owner.state.imageX = tonumber(owner.state.imageX) or 0
@@ -237,6 +259,7 @@ function NS.OptionsState:GetState(owner)
     if owner.state.textHAlign ~= "left" and owner.state.textHAlign ~= "right" then owner.state.textHAlign = "center" end
     owner.state.textOffsetX = tonumber(owner.state.textOffsetX) or 0
     owner.state.textOffsetY = tonumber(owner.state.textOffsetY) or 0
+    owner.state.textEndEvents = NormalizeEndEventMap(owner.state.textEndEvents)
 
     local defaultBuiltin = owner:GetDefaultBuiltinSoundPath()
     owner.state.builtinSoundPath = owner:NormalizeSoundPath(owner.state.builtinSoundPath or defaultBuiltin)
@@ -471,7 +494,10 @@ function NS.OptionsState:ClearEditorFields(owner)
     state.imageSource = "auto"
     state.imageIconID = 0
     state.imagePath = ""
+    state.imageSharedMedia = ""
     state.imageSize = 96
+    state.imageStrata = CONST.VISUAL_STRATA_DEFAULT or "FULLSCREEN_DIALOG"
+    state.imageEndEvents = {}
     state.imageDurationEnabled = false
     state.imageDuration = 2
     state.imageX = 0
@@ -491,5 +517,6 @@ function NS.OptionsState:ClearEditorFields(owner)
     state.textHAlign = "center"
     state.textOffsetX = 0
     state.textOffsetY = 0
+    state.textEndEvents = {}
 end
 

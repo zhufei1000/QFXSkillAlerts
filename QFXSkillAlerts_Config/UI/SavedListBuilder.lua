@@ -484,20 +484,25 @@ function Builder.BuildLayout(list, state)
     if api and type(api.GetCDMVoiceSavedEntries) == "function" then
         local cdmEntries = cdmSnapshot and cdmSnapshot.entries or api.GetCDMVoiceSavedEntries()
         for _, sourceEntry in ipairs(type(cdmEntries) == "table" and cdmEntries or {}) do
-            local entry = CopyTableShallow(sourceEntry)
-            local key = TrimText(entry and entry.key)
-            if key ~= "" and not entriesAlreadyShownWithLoaded[key] then
-                entry.depth = 0
-                entry.canDrag = true
-                entry.isVirtual = false
-                if entry.displaySection == "unloaded" or entry.isLoaded == false then
-                    entry.displaySection = "unloaded"
-                    unloadedEntries[#unloadedEntries + 1] = entry
-                else
-                    entry.displaySection = "loaded"
-                    loadedEntries[#loadedEntries + 1] = entry
+            -- Bridged ready / cooldown records are already listed as their
+            -- cooldown alert entries; skip the Cooldown Manager projection so
+            -- the same alert is not shown twice.
+            if type(sourceEntry) == "table" and sourceEntry.isCDAlert ~= true then
+                local entry = CopyTableShallow(sourceEntry)
+                local key = TrimText(entry and entry.key)
+                if key ~= "" and not entriesAlreadyShownWithLoaded[key] then
+                    entry.depth = 0
+                    entry.canDrag = true
+                    entry.isVirtual = false
+                    if entry.displaySection == "unloaded" or entry.isLoaded == false then
+                        entry.displaySection = "unloaded"
+                        unloadedEntries[#unloadedEntries + 1] = entry
+                    else
+                        entry.displaySection = "loaded"
+                        loadedEntries[#loadedEntries + 1] = entry
+                    end
+                    markShown(entry)
                 end
-                markShown(entry)
             end
         end
     end

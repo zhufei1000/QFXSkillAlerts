@@ -75,7 +75,10 @@ local function CopyConfigFromDB(cfg, normalizeSoundPath)
     runtimeConfig.imageSource = tostring(cfg.imageSource or "auto")
     runtimeConfig.imageIconID = math.max(0, tonumber(cfg.imageIconID) or 0)
     runtimeConfig.imagePath = Trim(cfg.imagePath or "")
+    runtimeConfig.imageSharedMedia = Trim(cfg.imageSharedMedia or "")
     runtimeConfig.imageSize = math.max(16, tonumber(cfg.imageSize) or 96)
+    runtimeConfig.imageStrata = tostring(cfg.imageStrata or "")
+    runtimeConfig.imageEndEvents = type(cfg.imageEndEvents) == "table" and cfg.imageEndEvents or nil
     runtimeConfig.imageDurationEnabled = cfg.imageDurationEnabled == true
     runtimeConfig.imageDuration = math.max(0.1, tonumber(cfg.imageDuration) or 2)
     runtimeConfig.imageX = tonumber(cfg.imageX) or 0
@@ -98,6 +101,7 @@ local function CopyConfigFromDB(cfg, normalizeSoundPath)
     runtimeConfig.textHAlign = tostring(cfg.textHAlign or "center")
     runtimeConfig.textOffsetX = tonumber(cfg.textOffsetX) or 0
     runtimeConfig.textOffsetY = tonumber(cfg.textOffsetY) or 0
+    runtimeConfig.textEndEvents = type(cfg.textEndEvents) == "table" and cfg.textEndEvents or nil
     runtimeConfig.spellName = tostring(cfg.spellName or "Bloodlust")
 end
 

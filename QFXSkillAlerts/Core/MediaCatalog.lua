@@ -13,6 +13,12 @@ local DEFAULT_BUILTIN_SOUND_FILE = C.DEFAULT_BUILTIN_SOUND_FILE or "AirHorn.ogg"
 local MODE_TTS = C.MODE_TTS or "tts"
 local MODE_SOUND = C.MODE_SOUND or "sound"
 
+-- The shared-image picker accepts every LSM media type that carries display
+-- textures: the non-standard "texture" type plus the official background /
+-- statusbar / border libraries, so media packs that register their artwork as
+-- background (or a bar texture) are selectable too.
+local SHARED_IMAGE_MEDIA_TYPES = { "texture", "background", "statusbar", "border" }
+
 local function TrimText(value)
     if Utils.TrimText then
         return Utils.TrimText(value)
@@ -302,6 +308,55 @@ function Catalog:ResolveSharedMediaSoundPath(name, fallbackPath)
     return self:NormalizeSoundPath(fallbackPath or "")
 end
 
+function Catalog:GetSharedMediaTextureList()
+    local values = {}
+    local LSM = self:GetSharedMediaLibrary()
+    if not LSM or type(LSM.List) ~= "function" then
+        return values
+    end
+
+    for _, mediaType in ipairs(SHARED_IMAGE_MEDIA_TYPES) do
+        local ok, names = pcall(LSM.List, LSM, mediaType)
+        if ok and type(names) == "table" then
+            for _, name in ipairs(names) do
+                name = TrimText(name)
+                if name ~= "" and values[name] == nil then
+                    values[name] = name
+                end
+            end
+        end
+    end
+    return values
+end
+
+function Catalog:FetchSharedMediaTexturePath(name)
+    name = TrimText(name)
+    if name == "" then
+        return ""
+    end
+
+    local LSM = self:GetSharedMediaLibrary()
+    if not LSM or type(LSM.Fetch) ~= "function" then
+        return ""
+    end
+
+    for _, mediaType in ipairs(SHARED_IMAGE_MEDIA_TYPES) do
+        local ok, path = pcall(LSM.Fetch, LSM, mediaType, name, true)
+        if ok and type(path) == "string" and TrimText(path) ~= "" then
+            return TrimText(path)
+        end
+    end
+    return ""
+end
+
+function Catalog:ResolveSharedMediaTexturePath(name, fallbackPath)
+    local path = self:FetchSharedMediaTexturePath(name)
+    if path ~= "" then
+        return path
+    end
+    return TrimText(fallbackPath or "")
+end
+
 function Catalog:ResolveSoundSourceFields(entry, modeTts, modeSound)
     entry = type(entry) == "table" and entry or {}
     modeTts = tostring(modeTts or MODE_TTS)
@@ -465,4 +520,7 @@ Bridge("GetSharedMediaSoundList")
 Bridge("FetchSharedMediaSoundPath")
 Bridge("FindSharedMediaSoundNameByPath")
 Bridge("ResolveSharedMediaSoundPath")
+Bridge("GetSharedMediaTextureList")
+Bridge("FetchSharedMediaTexturePath")
+Bridge("ResolveSharedMediaTexturePath")
 Bridge("ResolveSoundSourceFields")

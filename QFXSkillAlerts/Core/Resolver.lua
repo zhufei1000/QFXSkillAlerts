@@ -473,10 +473,22 @@ function Resolver:IsTalentSelectedCached(talentId)
     if not self.talentCacheValid then
         self:BuildSelectedTalentCache()
     end
+    if self.talentCacheReadable and self.selectedTalentIDs[talentId] == true then
+        return true
+    end
+    -- Fallback: a talent that grants a spell makes that spell known, so an ID
+    -- that stores the granted spell (common for hero talents) is treated as
+    -- selected while the spell is known.
+    if type(IsPlayerSpell) == "function" then
+        local ok, known = pcall(IsPlayerSpell, talentId)
+        if ok and known == true then
+            return true
+        end
+    end
     if not self.talentCacheReadable then
         return true
     end
-    return self.selectedTalentIDs[talentId] == true
+    return false
 end
 
 function Resolver:IsTalentSelected(talentId)

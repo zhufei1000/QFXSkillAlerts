@@ -14,7 +14,7 @@ local function NormalizeEntryType(value)
         return EditorDrafts:NormalizeEntryType(value)
     end
     value = tostring(value or "cooldown")
-    if value == "cast" or value == "event" or value == "bloodlust" then
+    if value == "cast" or value == "event" or value == "bloodlust" or value == "aura" then
         return value
     end
     return "cooldown"

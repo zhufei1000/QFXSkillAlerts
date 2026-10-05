@@ -191,11 +191,13 @@ local function MarkBagItemCacheDirty()
     bagCacheDirty = true
 end
 
+local BAG_IDS = { 0, 1, 2, 3, 4 }
+
 local function RebuildBagItemCache()
     ClearBagItemCache()
-    local bagIDs = { 0, 1, 2, 3, 4 }
+    local bagIDs = BAG_IDS
     if Enum and Enum.BagIndex and Enum.BagIndex.ReagentBag then
-        bagIDs[#bagIDs + 1] = Enum.BagIndex.ReagentBag
+        bagIDs = { 0, 1, 2, 3, 4, Enum.BagIndex.ReagentBag }
     end
     for _, bagID in ipairs(bagIDs) do
         local slots = 0
@@ -205,19 +207,13 @@ local function RebuildBagItemCache()
             slots = tonumber(GetContainerNumSlots(bagID)) or 0
         end
         for slot = 1, slots do
+            -- Only the item ID is needed here; the lightweight ID getter
+            -- avoids one info-table allocation per slot per rebuild.
             local currentID = nil
-            if C_Container and type(C_Container.GetContainerItemInfo) == "function" then
-                local info = C_Container.GetContainerItemInfo(bagID, slot)
-                if type(info) == "table" then
-                    currentID = info.itemID
-                end
-            end
-            if not currentID then
-                if C_Container and type(C_Container.GetContainerItemID) == "function" then
-                    currentID = C_Container.GetContainerItemID(bagID, slot)
-                elseif type(GetContainerItemID) == "function" then
-                    currentID = GetContainerItemID(bagID, slot)
-                end
+            if C_Container and type(C_Container.GetContainerItemID) == "function" then
+                currentID = C_Container.GetContainerItemID(bagID, slot)
+            elseif type(GetContainerItemID) == "function" then
+                currentID = GetContainerItemID(bagID, slot)
             end
             currentID = tonumber(currentID) or 0
             if currentID > 0 then

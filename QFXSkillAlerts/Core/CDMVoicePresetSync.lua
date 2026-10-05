@@ -5,6 +5,7 @@ NS.Core = NS.Core or {}
 NS.Core.CDMVoicePresetSync = NS.Core.CDMVoicePresetSync or {}
 
 local Sync = NS.Core.CDMVoicePresetSync
+local Native = NS.Core.CDMNativeEvents
 
 local function GetService()
     return NS.Core and NS.Core.CDMVoiceService
@@ -330,6 +331,19 @@ function Sync:EvaluateRecord(record, cooldownCatalog)
         targetCount = 0,
         equivalentSoundCount = 0,
     }
+    -- Ready / cooldown-start / aura records are handled by the addon runtimes
+    -- (CDMNativeWatch and CDMNativeAuraSounds); they never produce Cooldown
+    -- Manager layout work. They only count as applied while the spell is
+    -- present in the current Cooldown Manager data.
+    if Native and type(Native.IsNativeRecord) == "function" and Native:IsNativeRecord(record) then
+        evaluation.isNative = true
+        if type(Native.IsRecordAvailable) == "function" and not Native:IsRecordAvailable(record) then
+            evaluation.status = "skillMissing"
+        else
+            evaluation.status = "loaded"
+        end
+        return evaluation
+    end
     local service, store = GetService(), GetStore()
     if not service or not store or type(record) ~= "table" then
         return evaluation
@@ -462,71 +476,83 @@ function Sync:BuildPendingPlan(records, pendingRemovals)
     local cooldownCatalog = (next(records) ~= nil or next(pendingRemovals) ~= nil)
         and self:BuildCooldownCatalog() or nil
     for _, record in ipairs(records) do
-        local evaluation = self:EvaluateRecord(record, cooldownCatalog)
-        if evaluation.status == "loaded" then
+        if record.virtual == true then
+            -- Bridged ready / cooldown records never touch the Cooldown
+            -- Manager layout; the runtime picks them up from the cooldown
+            -- alert entries.
             summary.alreadyLoaded = summary.alreadyLoaded + 1
-        elseif evaluation.status == "pending" or evaluation.status == "applyFailed" then
-            local canConfigure, targetAlert = service:CanConfigureSound(
-                evaluation.cooldownID, evaluation.eventType, evaluation.targetPayload
-            )
-            if canConfigure and type(targetAlert) == "table" then
+        else
+            local evaluation = self:EvaluateRecord(record, cooldownCatalog)
+            if evaluation.status == "loaded" then
+                summary.alreadyLoaded = summary.alreadyLoaded + 1
+            elseif evaluation.status == "pending" or evaluation.status == "applyFailed" then
+                local canConfigure, targetAlert = service:CanConfigureSound(
+                    evaluation.cooldownID, evaluation.eventType, evaluation.targetPayload
+                )
+                if canConfigure and type(targetAlert) == "table" then
+                    operations[#operations + 1] = {
+                        kind = "set",
+                        action = evaluation.action,
+                        classID = tonumber(record.classID),
+                        specID = tonumber(record.specID),
+                        recordKey = record.recordKey,
+                        runtimeKey = RuntimeFailureKey(record),
+                        category = record.category,
+                        spellID = tonumber(record.spellID),
+                        eventKey = record.eventKey,
+                        cooldownID = evaluation.cooldownID,
+                        eventType = evaluation.eventType,
+                        payload = evaluation.targetPayload,
+                        equivalentCooldownIDs = evaluation.equivalentCooldownIDs,
+                        targetAlert = targetAlert,
+                    }
+                    summary.pending = summary.pending + 1
+                    if evaluation.status == "applyFailed" then
+                        summary.applyFailed = summary.applyFailed + 1
+                    end
+                else
+                    summary.failed = summary.failed + 1
+                end
+            elseif evaluation.status == "skillMissing" then
+                summary.missingSkill = summary.missingSkill + 1
+            elseif evaluation.status == "voiceMissing" then
+                summary.missingVoice = summary.missingVoice + 1
+            elseif evaluation.status == "eventUnsupported" then
+                summary.unsupportedEvent = summary.unsupportedEvent + 1
+            elseif evaluation.status == "ambiguousSkill" then
+                summary.ambiguousSkill = summary.ambiguousSkill + 1
+            else
+                summary.failed = summary.failed + 1
+            end
+        end
+    end
+    for recordKey, record in pairs(pendingRemovals) do
+        summary.pendingRemoval = summary.pendingRemoval + 1
+        if Native and type(Native.IsNativeRecord) == "function" and Native:IsNativeRecord(record) then
+            -- Native records are dropped from the addon runtimes; nothing is
+            -- written into the Cooldown Manager layout.
+        else
+            local evaluation = self:EvaluatePendingRemoval(record, cooldownCatalog)
+            if evaluation.action == "remove_all_sounds" or evaluation.action == "unchanged" then
                 operations[#operations + 1] = {
-                    kind = "set",
+                    kind = "remove",
                     action = evaluation.action,
                     classID = tonumber(record.classID),
                     specID = tonumber(record.specID),
-                    recordKey = record.recordKey,
+                    recordKey = record.recordKey or recordKey,
                     runtimeKey = RuntimeFailureKey(record),
                     category = record.category,
                     spellID = tonumber(record.spellID),
                     eventKey = record.eventKey,
                     cooldownID = evaluation.cooldownID,
                     eventType = evaluation.eventType,
-                    payload = evaluation.targetPayload,
                     equivalentCooldownIDs = evaluation.equivalentCooldownIDs,
-                    targetAlert = targetAlert,
                 }
-                summary.pending = summary.pending + 1
-                if evaluation.status == "applyFailed" then
-                    summary.applyFailed = summary.applyFailed + 1
-                end
+            elseif evaluation.status == "skillMissing" then
+                summary.missingSkill = summary.missingSkill + 1
             else
                 summary.failed = summary.failed + 1
             end
-        elseif evaluation.status == "skillMissing" then
-            summary.missingSkill = summary.missingSkill + 1
-        elseif evaluation.status == "voiceMissing" then
-            summary.missingVoice = summary.missingVoice + 1
-        elseif evaluation.status == "eventUnsupported" then
-            summary.unsupportedEvent = summary.unsupportedEvent + 1
-        elseif evaluation.status == "ambiguousSkill" then
-            summary.ambiguousSkill = summary.ambiguousSkill + 1
-        else
-            summary.failed = summary.failed + 1
-        end
-    end
-    for recordKey, record in pairs(pendingRemovals) do
-        local evaluation = self:EvaluatePendingRemoval(record, cooldownCatalog)
-        summary.pendingRemoval = summary.pendingRemoval + 1
-        if evaluation.action == "remove_all_sounds" or evaluation.action == "unchanged" then
-            operations[#operations + 1] = {
-                kind = "remove",
-                action = evaluation.action,
-                classID = tonumber(record.classID),
-                specID = tonumber(record.specID),
-                recordKey = record.recordKey or recordKey,
-                runtimeKey = RuntimeFailureKey(record),
-                category = record.category,
-                spellID = tonumber(record.spellID),
-                eventKey = record.eventKey,
-                cooldownID = evaluation.cooldownID,
-                eventType = evaluation.eventType,
-                equivalentCooldownIDs = evaluation.equivalentCooldownIDs,
-            }
-        elseif evaluation.status == "skillMissing" then
-            summary.missingSkill = summary.missingSkill + 1
-        else
-            summary.failed = summary.failed + 1
         end
     end
     summary.pendingCount = #operations
@@ -723,6 +749,11 @@ end
 
 function Sync:EvaluateCurrentSpec(reason, options)
     options = type(options) == "table" and options or {}
+    -- Keep the addon-side runtimes current even when the Cooldown Manager is
+    -- unavailable: they only need C_Spell / C_UnitAuras.
+    if Native and type(Native.SyncAll) == "function" then
+        Native:SyncAll()
+    end
     local service, store = GetService(), GetStore()
     if not service or not store then
         return false, NewSummary(), "not_available"
@@ -760,6 +791,7 @@ function Sync:ValidateAndSaveDrafts(drafts)
     if not service or not store then
         return nil, "not_available"
     end
+    local bridge = NS.Core and NS.Core.CDMAlertBridge
     local candidates, originalRecords = {}, {}
     for index, draft in ipairs(type(drafts) == "table" and drafts or {}) do
         local candidate, reason = service:ValidateCDMVoiceDraft(draft, { forApply = true })
@@ -777,21 +809,56 @@ function Sync:ValidateAndSaveDrafts(drafts)
     end
     local saved, changedKeys = {}, {}
     for index, candidate in ipairs(candidates) do
-        local recordKey, record = store:SaveAppliedRecord(candidate)
-        if not recordKey then
-            return nil, record or "save_failed"
-        end
-        saved[#saved + 1] = record
-        local original = originalRecords[index]
-        if original.recordKey and original.recordKey ~= recordKey and original.record then
-            local removed, removeReason = store:RemoveOrDisableRecord(
-                candidate.classID, candidate.specID, original.recordKey,
-                { createPendingRemoval = true }
+        local cdMode = bridge and type(bridge.GetModeForEventKey) == "function"
+            and bridge:GetModeForEventKey(candidate.eventKey) or nil
+        if cdMode then
+            -- Ready / cooldown records live as regular cooldown alert entries
+            -- so both editors share them and the main runtime plays them.
+            local voiceItem = store:ResolveVoice(candidate)
+            local ok, reason = bridge:SaveRecord(
+                candidate.classID,
+                candidate.specID,
+                candidate.spellID,
+                candidate.spellName,
+                cdMode,
+                voiceItem
             )
-            if not removed then
-                return nil, removeReason or "save_failed", index
+            if not ok then
+                return nil, reason or "save_failed", index
             end
-            changedKeys[#changedKeys + 1] = original.recordKey
+            saved[#saved + 1] = {
+                classID = candidate.classID,
+                specID = candidate.specID,
+                spellID = candidate.spellID,
+                recordKey = candidate.recordKey,
+                eventKey = candidate.eventKey,
+                virtual = true,
+            }
+        else
+            local recordKey, record = store:SaveAppliedRecord(candidate)
+            if not recordKey then
+                return nil, record or "save_failed"
+            end
+            saved[#saved + 1] = record
+        end
+        local original = originalRecords[index]
+        -- Legacy Cooldown Manager records (aura / charge / pandemic) are
+        -- removed when the draft moved to a bridged record or changed its key.
+        -- Bridged records themselves are not in the store, so nothing happens
+        -- for them here.
+        if original.recordKey and original.record then
+            local shouldRemove = cdMode ~= nil
+                or original.recordKey ~= saved[#saved].recordKey
+            if shouldRemove then
+                local removed, removeReason = store:RemoveOrDisableRecord(
+                    candidate.classID, candidate.specID, original.recordKey,
+                    { createPendingRemoval = true }
+                )
+                if not removed then
+                    return nil, removeReason or "save_failed", index
+                end
+                changedKeys[#changedKeys + 1] = original.recordKey
+            end
         end
     end
     return saved, changedKeys
@@ -817,6 +884,9 @@ function Sync:ApplyCurrentDraftAndReload(draft)
     if not saved then
         return false, nil, changedKeysOrReason, failedIndex
     end
+    if Native and type(Native.SyncAll) == "function" then
+        Native:SyncAll()
+    end
     local store = GetStore()
     local removals = {}
     for _, recordKey in ipairs(changedKeysOrReason or {}) do
@@ -827,6 +897,13 @@ function Sync:ApplyCurrentDraftAndReload(draft)
     end
     local plan, summary = self:BuildPendingPlan(saved, removals)
     if #plan == 0 then
+        -- Native tombstones produced while saving must be dropped too.
+        for removalKey, tombstone in pairs(removals) do
+            if Native and type(Native.IsNativeRecord) == "function" and Native:IsNativeRecord(tombstone)
+                and type(store.ClearPendingRemoval) == "function" then
+                store:ClearPendingRemoval(tombstone.classID, tombstone.specID, removalKey)
+            end
+        end
         local service = GetService()
         if service then
             service:RefreshRuntimeData("draft_saved_already_applied")
@@ -869,6 +946,17 @@ function Sync:ApplyPendingRemovalByKey(recordKey)
     end
     local plan, summary = self:BuildPendingPlan({}, { [recordKey] = tombstone })
     if #plan == 0 then
+        if Native and type(Native.IsNativeRecord) == "function" and Native:IsNativeRecord(tombstone) then
+            -- Native records only need the addon runtimes rebuilt; drop the
+            -- tombstone so it cannot resurface in the saved list.
+            if type(store.ClearPendingRemoval) == "function" then
+                store:ClearPendingRemoval(tombstone.classID, tombstone.specID, recordKey)
+            end
+            if type(Native.SyncAll) == "function" then
+                Native:SyncAll()
+            end
+            return true, summary, "native_removed"
+        end
         return false, summary, "delete_failed"
     end
     if type(service.ApplyCDMRemovalPlanAndReload) ~= "function" then
@@ -881,6 +969,44 @@ function Sync:ApplyPendingRemovalByKey(recordKey)
     })
 end
 
+-- Prompts for the legacy Cooldown Manager alert cleanup. The accept handler
+-- runs inside the button click (hardware event), so the cleanup's reload is
+-- allowed; event-handler reloads are blocked by the client.
+function Sync:PromptLegacyCleanup(count)
+    count = tonumber(count) or 0
+    if count <= 0 or self.legacyCleanupPrompted then
+        return false
+    end
+    if IsInCombat() then
+        return false
+    end
+    self.legacyCleanupPrompted = true
+    if type(StaticPopupDialogs) ~= "table" or type(StaticPopup_Show) ~= "function" then
+        return false
+    end
+    if not StaticPopupDialogs.QFXSKILLALERTS_LEGACY_CLEANUP then
+        StaticPopupDialogs.QFXSKILLALERTS_LEGACY_CLEANUP = {
+            text = "%s",
+            button1 = L("CDM_CLEANUP_APPLY"),
+            button2 = L("CDM_APPLY_LATER"),
+            timeout = 0,
+            whileDead = true,
+            hideOnEscape = true,
+            preferredIndex = 3,
+            OnAccept = function()
+                local service = GetService()
+                if service and type(service.CleanupNativeCDMAlerts) == "function" then
+                    service:CleanupNativeCDMAlerts()
+                end
+            end,
+        }
+    end
+    return StaticPopup_Show(
+        "QFXSKILLALERTS_LEGACY_CLEANUP",
+        L("CDM_CLEANUP_PROMPT", count)
+    ) ~= nil
+end
+
 function Sync:ApplyAllPendingCurrentSpecAndReload(reason, drafts)
     if IsInCombat() then
         return false, nil, "combat"
@@ -890,6 +1016,9 @@ function Sync:ApplyAllPendingCurrentSpecAndReload(reason, drafts)
         if not saved then
             return false, nil, saveReason, failedIndex
         end
+    end
+    if Native and type(Native.SyncAll) == "function" then
+        Native:SyncAll()
     end
     local summary, plan = self:GetCurrentSpecPendingSummary()
     if #plan == 0 then
@@ -1109,6 +1238,35 @@ function Sync:Initialize()
             or event == "PLAYER_LOGIN"
         if scopeEvent then
             Sync:AdvanceScope()
+            -- One-time migration of ready / cooldown records saved by earlier
+            -- versions into the shared cooldown alert entries.
+            local bridge = NS.Core and NS.Core.CDMAlertBridge
+            if bridge and type(bridge.MigrateLegacyRecords) == "function" then
+                local migrated = bridge:MigrateLegacyRecords()
+                if migrated and migrated > 0 then
+                    print("[QFX-SA] migrated " .. tostring(migrated)
+                        .. " Cooldown Manager voice(s) to cooldown alerts")
+                end
+            end
+            -- Ghost tombstones left by earlier versions are removed on every
+            -- scope change.
+            if bridge and type(bridge.CleanupStaleTombstones) == "function" then
+                bridge:CleanupStaleTombstones()
+            end
+        end
+        -- Legacy QFX alerts left in the Cooldown Manager layout: prompt for a
+        -- one-click cleanup. The cleanup writes the layout and must reload,
+        -- and C_UI.Reload only works from a hardware event, so it cannot run
+        -- from this event handler.
+        if scopeEvent or event == "COOLDOWN_VIEWER_DATA_LOADED"
+            or event == "COOLDOWN_VIEWER_TABLE_HOTFIXED" then
+            local cleanupService = GetService()
+            if cleanupService and type(cleanupService.CountNativeCDMAlerts) == "function" then
+                local pendingCount = cleanupService:CountNativeCDMAlerts()
+                if pendingCount > 0 then
+                    Sync:PromptLegacyCleanup(pendingCount)
+                end
+            end
         end
         -- Keep the cross-spec skill catalog current: Blizzard only exposes the
         -- active spec's Cooldown Manager data, so cache it whenever a spec's
@@ -1119,7 +1277,9 @@ function Sync:Initialize()
             or event == "PLAYER_REGEN_ENABLED" then
             local captureService = GetService()
             if captureService and type(captureService.CaptureCurrentSpecCatalog) == "function" then
-                captureService:CaptureCurrentSpecCatalog()
+                -- Combat-end is the hottest trigger here; share the capture
+                -- throttle while data-changing triggers always force a refresh.
+                captureService:CaptureCurrentSpecCatalog(event ~= "PLAYER_REGEN_ENABLED")
             end
         end
         if event == "PLAYER_SPECIALIZATION_CHANGED" then

@@ -46,11 +46,11 @@ local enUS = {
     BTN_ADD_VOICE = "Add Alert", BTN_ADD_COLLECTION = "Add Group", BTN_EDIT = "Edit", BTN_DELETE = "Delete", BTN_REFRESH = "Refresh", BTN_IMPORT = "Import", BTN_EXPORT_FULL = "Export All", BTN_SAVE = "Save", BTN_TEST = "Test", BTN_CLOSE = "Close", BTN_SELECT_ALL = "Select All",
     TITLE_NEW_CONFIG = "New Alert", TITLE_EDIT_CONFIG = "Edit Alert", TITLE_ADD_COLLECTION = "New Group", TITLE_RENAME_COLLECTION = "Rename Group", TITLE_IMPORT_EXPORT = "Import / Export", TITLE_EXPORT = "Export", TITLE_IMPORT_SETTINGS = "Import Settings", EXPORT_ENTRY = "Export Alert", EXPORT_COLLECTION = "Export Group", DELETE_ENTRY = "Delete Alert", EDIT_ENTRY = "Edit Alert", DELETE_COLLECTION_WITH_ITEMS = "Delete group and alerts", EXPAND_COLLECTION = "Expand Group", COLLAPSE_COLLECTION = "Collapse Group", RENAME_COLLECTION = "Rename Group", EXPORT_FULL_TITLE = "Export All",
 
-    TAB_COOLDOWN = "CD Alert", TAB_CAST = "Cast Success", TAB_BLOODLUST = "Bloodlust", SECTION_CLASS_SPEC = "Class / Spec", LABEL_CLASS = "Class", LABEL_SPEC = "Spec", SECTION_SPELL_PARAMS = "Spell Settings", LABEL_SPELL_NAME = "Spell Name", LABEL_FIXED_CD_SEC = "Fixed CD (sec)", LABEL_CHECK_TALENT = "Talent changes CD", LABEL_TALENT_ID = "Talent ID", LABEL_TALENT_NAME = "Talent Name", LABEL_TALENT_CD_SEC = "New CD (sec)", LABEL_TALENT_LOAD_FILTER = "Load if learned", SECTION_NOTIFY = "Notification", LABEL_BUILTIN_SOUND = "Built-in Sound", LABEL_TTS_RATE = "TTS Rate", LABEL_SOUND_PATH_N = "Sound Path %d", 
+    TAB_COOLDOWN = "Spell Alerts", TAB_CAST = "Cast Success", TAB_BLOODLUST = "Bloodlust", SECTION_CLASS_SPEC = "Class / Spec", LABEL_CLASS = "Class", LABEL_SPEC = "Spec", SECTION_SPELL_PARAMS = "Spell Settings", LABEL_SPELL_NAME = "Spell Name", LABEL_FIXED_CD_SEC = "Fixed CD (sec)", LABEL_CHECK_TALENT = "Talent changes CD", LABEL_TALENT_ID = "Talent ID", LABEL_TALENT_NAME = "Talent Name", LABEL_TALENT_CD_SEC = "New CD (sec)", LABEL_TALENT_LOAD_FILTER = "Load if learned", SECTION_NOTIFY = "Notification", LABEL_BUILTIN_SOUND = "Built-in Sound", LABEL_TTS_RATE = "TTS Rate", LABEL_SOUND_PATH_N = "Sound Path %d", 
 
     PLACEHOLDER_SELECT_CLASSES = "Select Classes", PLACEHOLDER_SELECT_SPECS = "Select Specs", PLACEHOLDER_SELECT_BUILTIN_SOUND = "Select built-in sound",
     COLLECTION_NAME = "Group Name", COLLECTION_ICON_ID = "Group Icon ID (optional)", COLLECTION_ICON_HINT = "Enter an in-game icon FileID, for example 134400. Leave it empty to use the default group icon.", COLLECTION_HINT = "After creation it appears in the Loaded area. Loaded and unloaded alerts can be dragged into groups; green/yellow/red dots show their status.", COLLECTION_UNNAMED = "Unnamed Group", COLLECTION_LABEL = "Group", COLLECTION_COUNT = "%d items", COLLECTION_EMPTY_COUNT = "(empty)", DRAG_INTO_COLLECTION = "Drag alerts into this group",
-    HEADER_LOADED = "Loaded", HEADER_UNLOADED = "Unloaded", EMPTY_CONFIG = "No alerts", ENTRY_TYPE_COOLDOWN = "CD Alert", ENTRY_TYPE_CAST = "Cast Success", ENTRY_TYPE_BLOODLUST = "Bloodlust", ENTRY_UNNAMED = "Unnamed", TALENT_ROW = "Talent:%s CD:%.2fs", TALENT_ROW_NO_CD = "Talent:%s", LOADED_TAG = " |cff00ff00Loaded|r", UNLOADED_TAG = " |cffff4040Unloaded|r",
+    HEADER_LOADED = "Loaded", HEADER_UNLOADED = "Unloaded", EMPTY_CONFIG = "No alerts", ENTRY_TYPE_COOLDOWN = "Spell Alert", ENTRY_TYPE_CAST = "Cast Success", ENTRY_TYPE_BLOODLUST = "Bloodlust", ENTRY_UNNAMED = "Unnamed", TALENT_ROW = "Talent:%s CD:%.2fs", TALENT_ROW_NO_CD = "Talent:%s", LOADED_TAG = " |cff00ff00Loaded|r", UNLOADED_TAG = " |cffff4040Unloaded|r",
     EXPORT_DESC = "Below is the compressed export string. Click \"Select All\" and press Ctrl+C to copy it. To import, paste this string into the same window.", IMPORT_DESC = "Paste a QFX Skill Alerts export string and click \"Import\". Supports single alerts, groups, and full imports. Full imports replace the current saved alerts, groups, sorting, Bloodlust, minimap, language, and UI skin settings.",
     MINIMAP_LEFT = "Left-click: open main settings", MINIMAP_RIGHT = "Right-click: open addon options", MINIMAP_DRAG = "Drag: move minimap icon", 
     MSG_MAIN_NOT_READY = "Main settings window is not ready yet.", MSG_MAIN_NOT_READY_LATER = "Main settings window is not ready yet. Please try again shortly.", MSG_NO_TTS = "No TTS voice is currently available.", MSG_TTS_FAILED = "TTS playback failed: %s", MSG_NO_CUSTOM_AUDIO = "This client cannot play custom audio.", MSG_SOUND_FAILED = "Voice file playback failed. Check path: %s", MSG_NO_CAST_SOUND_PATH = "Cast-success alert has no voice file path.", MSG_NO_BLOODLUST_SOUND_PATH = "Bloodlust alert has no voice path.", MSG_LOADED = "Loaded. Type /qfxsa or /qfxskillalerts to open settings.", MSG_SCOPE_COUNT = "%d spell alerts saved in the current scope.", MSG_CURRENT_EDIT_SCOPE = "Current class/spec: %s / %s", MSG_SELECTED_NOT_EXIST = "The selected alert no longer exists.", MSG_INVALID_CLASS_SPEC = "Class or spec is invalid.", MSG_INVALID_FIXED_CD = "Fixed CD is invalid.", MSG_NEED_TALENT_ID = "Talent check is enabled. Please enter a valid Talent ID.", MSG_NEED_TTS_TEXT = "TTS is enabled. Please enter announcement text.", MSG_NEED_SOUND_PATH = "Voice file is enabled. Please enter a sound path.", MSG_NEED_ALERT_ACTIONS = "Please select at least one alert action: Sound, Image, or Text.", MSG_SAVE_LIMIT = "Save limit reached.", MSG_CONFIG_SAVED = "Alert saved.", MSG_CHOOSE_CONFIG = "Please select an alert first.", MSG_CONFIG_DELETED = "Alert deleted.", MSG_IMPORT_FAILED = "Import failed: %s", MSG_IMPORT_UNKNOWN_TYPE = "Import failed: unknown import type.", MSG_IMPORT_DONE = "Import complete: %s, processed %d alerts.", MSG_IMPORT_EMPTY = "Import failed: no importable data.", MSG_DRAG_UNLOADED_TO_ROOT = "Unloaded alerts cannot be dragged to the loaded root area. Drag them into a loaded group instead.", MSG_DRAG_UNLOADED_TO_GROUP = "Unloaded alert added to this group. It will be shown with a red dot.",
@@ -62,10 +62,10 @@ local zhCN = setmetatable({
     OPTIONS_DESC = "固定CD技能语音提醒插件：通过 UNIT_SPELLCAST_SUCCEEDED 记录施法成功事件，按你填写的固定CD计时，并在冷却结束、施法成功或嗜血触发时播放TTS或语音文件。\n\n点击下方按钮可打开主设置界面；也可以使用 /qfxsa 或点击小地图图标打开。", OPEN_MAIN_SETTINGS = "打开主设置界面", COMMANDS = "命令：/qfxsa 或 /qfxskillalerts",
     BTN_ADD_VOICE = "新增", BTN_ADD_COLLECTION = "新增合集", BTN_EDIT = "编辑", BTN_DELETE = "删除", BTN_REFRESH = "刷新", BTN_IMPORT = "导入", BTN_EXPORT_FULL = "全量导出", BTN_SAVE = "保存", BTN_TEST = "试听", BTN_CLOSE = "关闭", BTN_SELECT_ALL = "全选",
     TITLE_NEW_CONFIG = "新增配置", TITLE_EDIT_CONFIG = "编辑配置", TITLE_ADD_COLLECTION = "新增合集", TITLE_RENAME_COLLECTION = "重命名合集", TITLE_IMPORT_EXPORT = "导入 / 导出", TITLE_EXPORT = "导出", TITLE_IMPORT_SETTINGS = "导入设置", EXPORT_ENTRY = "导出单条信息", EXPORT_COLLECTION = "导出合集", DELETE_ENTRY = "删除配置", EDIT_ENTRY = "编辑配置", DELETE_COLLECTION_WITH_ITEMS = "删除合集和其中语音", EXPAND_COLLECTION = "展开合集", COLLAPSE_COLLECTION = "收拢合集", RENAME_COLLECTION = "重命名合集", EXPORT_FULL_TITLE = "全量导出",
-    TAB_COOLDOWN = "CD提示", TAB_CAST = "施法成功", TAB_BLOODLUST = "嗜血提示", SECTION_CLASS_SPEC = "职业 / 专精", LABEL_CLASS = "职业", LABEL_SPEC = "专精", SECTION_SPELL_PARAMS = "技能参数", LABEL_SPELL_NAME = "技能名称", LABEL_FIXED_CD_SEC = "固定CD（秒）", LABEL_CHECK_TALENT = "检查天赋", LABEL_TALENT_ID = "天赋ID", LABEL_TALENT_NAME = "天赋名称", LABEL_TALENT_CD_SEC = "CD变为（秒）", LABEL_TALENT_LOAD_FILTER = "载入（仅点出时）", SECTION_NOTIFY = "通知方式", LABEL_BUILTIN_SOUND = "内置语音", LABEL_TTS_RATE = "TTS 语速", LABEL_SOUND_PATH_N = "语音路径 %d", 
+    TAB_COOLDOWN = "技能提醒", TAB_CAST = "施法成功", TAB_BLOODLUST = "嗜血提示", SECTION_CLASS_SPEC = "职业 / 专精", LABEL_CLASS = "职业", LABEL_SPEC = "专精", SECTION_SPELL_PARAMS = "技能参数", LABEL_SPELL_NAME = "技能名称", LABEL_FIXED_CD_SEC = "固定CD（秒）", LABEL_CHECK_TALENT = "检查天赋", LABEL_TALENT_ID = "天赋ID", LABEL_TALENT_NAME = "天赋名称", LABEL_TALENT_CD_SEC = "CD变为（秒）", LABEL_TALENT_LOAD_FILTER = "载入（仅点出时）", SECTION_NOTIFY = "通知方式", LABEL_BUILTIN_SOUND = "内置语音", LABEL_TTS_RATE = "TTS 语速", LABEL_SOUND_PATH_N = "语音路径 %d", 
     PLACEHOLDER_SELECT_CLASSES = "请选择职业", PLACEHOLDER_SELECT_SPECS = "请选择专精", PLACEHOLDER_SELECT_BUILTIN_SOUND = "请选择内置语音",
     COLLECTION_NAME = "合集名称", COLLECTION_ICON_ID = "合集图标ID（可选）", COLLECTION_ICON_HINT = "输入游戏内图标 FileID，例如 134400。留空时使用默认合集图标。", COLLECTION_HINT = "创建后显示在已载入区域；已载入/未载入语音都可以拖入合集，合集内用绿/黄/红圆点区分状态。", COLLECTION_UNNAMED = "未命名合集", COLLECTION_LABEL = "合集", COLLECTION_COUNT = "%d 条", COLLECTION_EMPTY_COUNT = "（空）", DRAG_INTO_COLLECTION = "拖拽语音到这个合集里",
-    HEADER_LOADED = "已载入", HEADER_UNLOADED = "未载入", EMPTY_CONFIG = "暂无配置", ENTRY_TYPE_COOLDOWN = "CD提示", ENTRY_TYPE_CAST = "施法成功", ENTRY_TYPE_BLOODLUST = "嗜血提示", ENTRY_UNNAMED = "未命名", TALENT_ROW = "天赋:%s CD:%.2fs", TALENT_ROW_NO_CD = "天赋:%s", LOADED_TAG = " |cff00ff00已载入|r", UNLOADED_TAG = " |cffff4040未载入|r",
+    HEADER_LOADED = "已载入", HEADER_UNLOADED = "未载入", EMPTY_CONFIG = "暂无配置", ENTRY_TYPE_COOLDOWN = "技能提醒", ENTRY_TYPE_CAST = "施法成功", ENTRY_TYPE_BLOODLUST = "嗜血提示", ENTRY_UNNAMED = "未命名", TALENT_ROW = "天赋:%s CD:%.2fs", TALENT_ROW_NO_CD = "天赋:%s", LOADED_TAG = " |cff00ff00已载入|r", UNLOADED_TAG = " |cffff4040未载入|r",
     EXPORT_DESC = "下面是压缩后的导出字符串。点击“全选”后用 Ctrl+C 复制；导入时把这段字符串粘贴到同一个窗口。", IMPORT_DESC = "粘贴 QFX 技能提醒导出字符串后点击“导入”。支持单条信息、合集和全量导入；全量导入会替换当前已保存提示、合集、排序、嗜血、小地图、语言和界面皮肤设置。",
     MINIMAP_LEFT = "左键：打开主设置界面", MINIMAP_RIGHT = "右键：打开系统选项页", MINIMAP_DRAG = "拖动：移动小地图图标", 
     MSG_MAIN_NOT_READY = "主设置界面尚未准备好。", MSG_MAIN_NOT_READY_LATER = "主界面尚未准备好，请稍后再试。", MSG_NO_TTS = "当前没有可用的TTS语音。", MSG_TTS_FAILED = "TTS播放失败: %s", MSG_NO_CUSTOM_AUDIO = "当前客户端无法播放自定义音频。", MSG_SOUND_FAILED = "语音文件播放失败，请检查路径: %s", MSG_NO_CAST_SOUND_PATH = "施法成功提示未填写语音文件路径。", MSG_NO_BLOODLUST_SOUND_PATH = "嗜血提示未填写语音路径。", MSG_LOADED = "已载入，输入 /qfxsa 或 /qfxskillalerts 打开配置。", MSG_SCOPE_COUNT = "当前保存作用域已保存 %d 条技能配置。", MSG_CURRENT_EDIT_SCOPE = "当前职业专精：%s / %s", MSG_SELECTED_NOT_EXIST = "选中的配置不存在。", MSG_INVALID_CLASS_SPEC = "职业或专精无效。", MSG_INVALID_FIXED_CD = "固定CD无效。", MSG_NEED_TALENT_ID = "已启用检查天赋，请填写有效的天赋ID。", MSG_NEED_TTS_TEXT = "已启用TTS，请填写播报文本。", MSG_NEED_SOUND_PATH = "已启用语音文件，请填写语音路径。", MSG_NEED_ALERT_ACTIONS = "请至少选择一种提示方式：声音、图片或文本。", MSG_SAVE_LIMIT = "已达到保存上限。", MSG_CONFIG_SAVED = "配置已保存。", MSG_CHOOSE_CONFIG = "请先选择一条配置。", MSG_CONFIG_DELETED = "配置已删除。", MSG_IMPORT_FAILED = "导入失败：%s", MSG_IMPORT_UNKNOWN_TYPE = "导入失败：未知导入类型。", MSG_IMPORT_DONE = "导入完成：%s，处理 %d 条语音配置。", MSG_IMPORT_EMPTY = "导入失败：没有可导入的数据。", MSG_DRAG_UNLOADED_TO_ROOT = "未载入条目不能单独拖到已载入区域，只能拖入已载入合集。", MSG_DRAG_UNLOADED_TO_GROUP = "已把未载入语音加入当前合集，状态会以红色圆点显示。",
@@ -77,10 +77,10 @@ local zhTW = setmetatable({
     OPTIONS_DESC = "固定冷卻技能語音提醒插件：透過 UNIT_SPELLCAST_SUCCEEDED 記錄施法成功事件，依照你填寫的固定冷卻計時，並在冷卻結束、施法成功或嗜血觸發時播放 TTS 或語音檔。\n\n點擊下方按鈕可開啟主設定介面；也可以使用 /qfxsa 或點擊小地圖圖示開啟。", OPEN_MAIN_SETTINGS = "開啟主設定介面", COMMANDS = "指令：/qfxsa 或 /qfxskillalerts",
     BTN_ADD_VOICE = "新增", BTN_ADD_COLLECTION = "新增合集", BTN_EDIT = "編輯", BTN_DELETE = "刪除", BTN_REFRESH = "重新整理", BTN_IMPORT = "匯入", BTN_EXPORT_FULL = "全量匯出", BTN_SAVE = "儲存", BTN_TEST = "試聽", BTN_CLOSE = "關閉", BTN_SELECT_ALL = "全選",
     TITLE_NEW_CONFIG = "新增設定", TITLE_EDIT_CONFIG = "編輯設定", TITLE_ADD_COLLECTION = "新增合集", TITLE_RENAME_COLLECTION = "重命名合集", TITLE_IMPORT_EXPORT = "匯入 / 匯出", TITLE_EXPORT = "匯出", TITLE_IMPORT_SETTINGS = "匯入設定", EXPORT_ENTRY = "匯出單條資訊", EXPORT_COLLECTION = "匯出合集", DELETE_ENTRY = "刪除設定", EDIT_ENTRY = "編輯設定", DELETE_COLLECTION_WITH_ITEMS = "刪除合集和其中語音", EXPAND_COLLECTION = "展開合集", COLLAPSE_COLLECTION = "收合合集", EXPORT_FULL_TITLE = "全量匯出",
-    TAB_COOLDOWN = "CD提示", TAB_CAST = "施法成功", TAB_BLOODLUST = "嗜血提示", SECTION_CLASS_SPEC = "職業 / 專精", LABEL_CLASS = "職業", LABEL_SPEC = "專精", SECTION_SPELL_PARAMS = "技能參數", LABEL_SPELL_NAME = "技能名稱", LABEL_FIXED_CD_SEC = "固定CD（秒）", LABEL_CHECK_TALENT = "檢查天賦", LABEL_TALENT_ID = "天賦ID", LABEL_TALENT_NAME = "天賦名稱", LABEL_TALENT_CD_SEC = "CD變為（秒）", LABEL_TALENT_LOAD_FILTER = "載入（僅點出時）", SECTION_NOTIFY = "通知方式", LABEL_BUILTIN_SOUND = "內建語音", LABEL_TTS_RATE = "TTS 語速", LABEL_SOUND_PATH_N = "語音路徑 %d", 
+    TAB_COOLDOWN = "技能提醒", TAB_CAST = "施法成功", TAB_BLOODLUST = "嗜血提示", SECTION_CLASS_SPEC = "職業 / 專精", LABEL_CLASS = "職業", LABEL_SPEC = "專精", SECTION_SPELL_PARAMS = "技能參數", LABEL_SPELL_NAME = "技能名稱", LABEL_FIXED_CD_SEC = "固定CD（秒）", LABEL_CHECK_TALENT = "檢查天賦", LABEL_TALENT_ID = "天賦ID", LABEL_TALENT_NAME = "天賦名稱", LABEL_TALENT_CD_SEC = "CD變為（秒）", LABEL_TALENT_LOAD_FILTER = "載入（僅點出時）", SECTION_NOTIFY = "通知方式", LABEL_BUILTIN_SOUND = "內建語音", LABEL_TTS_RATE = "TTS 語速", LABEL_SOUND_PATH_N = "語音路徑 %d", 
     PLACEHOLDER_SELECT_CLASSES = "請選擇職業", PLACEHOLDER_SELECT_SPECS = "請選擇專精", PLACEHOLDER_SELECT_BUILTIN_SOUND = "請選擇內建語音",
     COLLECTION_NAME = "合集名稱", COLLECTION_ICON_ID = "合集圖示ID（可選）", COLLECTION_ICON_HINT = "輸入遊戲內圖示 FileID，例如 134400。留空時使用預設合集圖示。", COLLECTION_HINT = "建立後顯示在已載入區域；已載入/未載入語音都可以拖入合集，合集內用綠/黃/紅圓點區分狀態。", COLLECTION_UNNAMED = "未命名合集", COLLECTION_LABEL = "合集", COLLECTION_COUNT = "%d 條", COLLECTION_EMPTY_COUNT = "（空）", DRAG_INTO_COLLECTION = "拖曳語音到這個合集裡",
-    HEADER_LOADED = "已載入", HEADER_UNLOADED = "未載入", EMPTY_CONFIG = "暫無設定", ENTRY_TYPE_COOLDOWN = "CD提示", ENTRY_TYPE_CAST = "施法成功", ENTRY_TYPE_BLOODLUST = "嗜血提示", ENTRY_UNNAMED = "未命名", TALENT_ROW = "天賦:%s CD:%.2fs", TALENT_ROW_NO_CD = "天賦:%s", LOADED_TAG = " |cff00ff00已載入|r", UNLOADED_TAG = " |cffff4040未載入|r",
+    HEADER_LOADED = "已載入", HEADER_UNLOADED = "未載入", EMPTY_CONFIG = "暫無設定", ENTRY_TYPE_COOLDOWN = "技能提醒", ENTRY_TYPE_CAST = "施法成功", ENTRY_TYPE_BLOODLUST = "嗜血提示", ENTRY_UNNAMED = "未命名", TALENT_ROW = "天賦:%s CD:%.2fs", TALENT_ROW_NO_CD = "天賦:%s", LOADED_TAG = " |cff00ff00已載入|r", UNLOADED_TAG = " |cffff4040未載入|r",
     MINIMAP_LEFT = "左鍵：開啟主設定介面", MINIMAP_RIGHT = "右鍵：開啟系統選項頁", MINIMAP_DRAG = "拖曳：移動小地圖圖示", 
     TTS_READY_DEFAULT = "好了", TTS_CAST_SUCCESS_DEFAULT = "施法成功", FALLBACK_CLASS = "職業%s", FALLBACK_SPEC = "專精%s",
 }, { __index = zhCN })
@@ -587,12 +587,9 @@ enUS.SELECT_ALERT_TYPE_DESC = "Choose the alert type to create. The editor will 
 zhCN.SELECT_ALERT_TYPE_DESC = "请选择要新增的提醒类型，选择后会自动打开对应编辑界面。"
 zhTW.SELECT_ALERT_TYPE_DESC = "請選擇要新增的提醒類型，選擇後會自動開啟對應編輯介面。"
 
-enUS.SELECT_ALERT_TYPE_COOLDOWN_DESC = "Fixed cooldown, cooldown-start or ready alerts for spells and items, with voice / icon / text, early warning and talent / equipment filters."
-zhCN.SELECT_ALERT_TYPE_COOLDOWN_DESC = "固定冷却、冷却开始或就绪提醒技能与物品，可配语音、图标、文字与提前提醒，支持天赋、装备过滤。"
-zhTW.SELECT_ALERT_TYPE_COOLDOWN_DESC = "固定冷卻、冷卻開始或就緒提醒技能與物品，可配語音、圖示、文字與提前提醒，支援天賦、裝備過濾。"
-enUS.SELECT_ALERT_TYPE_CAST_DESC = "Alert immediately after a successful cast."
-zhCN.SELECT_ALERT_TYPE_CAST_DESC = "技能施放成功后立即提示。"
-zhTW.SELECT_ALERT_TYPE_CAST_DESC = "技能施放成功後立即提示。"
+enUS.SELECT_ALERT_TYPE_COOLDOWN_DESC = "Spell cooldown, item cooldown and cast-success alerts with voice / icon / text, early warning and talent / equipment filters."
+zhCN.SELECT_ALERT_TYPE_COOLDOWN_DESC = "技能CD提醒、物品CD提醒，以及技能施法成功提醒；可配语音、图标、文字与提前提醒，支持天赋、装备过滤。"
+zhTW.SELECT_ALERT_TYPE_COOLDOWN_DESC = "技能CD提醒、物品CD提醒，以及技能施法成功提醒；可配語音、圖示、文字與提前提醒，支援天賦、裝備過濾。"
 enUS.SELECT_ALERT_TYPE_BLOODLUST_DESC = "Built-in Bloodlust / Heroism / Time Warp detection."
 zhCN.SELECT_ALERT_TYPE_BLOODLUST_DESC = "内置检测嗜血、英勇、时间扭曲等团队爆发。"
 zhTW.SELECT_ALERT_TYPE_BLOODLUST_DESC = "內建偵測嗜血、英勇、時間扭曲等團隊爆發。"
@@ -618,6 +615,9 @@ zhTW.TAB_SETTINGS = "設定"
 enUS.SECTION_NOTIFY_CONDITIONS = "Notification Conditions"
 zhCN.SECTION_NOTIFY_CONDITIONS = "通知条件"
 zhTW.SECTION_NOTIFY_CONDITIONS = "通知條件"
+enUS.SECTION_EVENT_NOTIFY = "Alert Actions"
+zhCN.SECTION_EVENT_NOTIFY = "执行通知"
+zhTW.SECTION_EVENT_NOTIFY = "執行通知"
 enUS.LABEL_CONDITION_WHEN = "When"
 zhCN.LABEL_CONDITION_WHEN = "当"
 zhTW.LABEL_CONDITION_WHEN = "當"
@@ -673,6 +673,87 @@ zhTW.LABEL_IMAGE_PATH = "圖片 / 圖示路徑"
 enUS.LABEL_IMAGE_SIZE = "Image Size"
 zhCN.LABEL_IMAGE_SIZE = "图片大小"
 zhTW.LABEL_IMAGE_SIZE = "圖片大小"
+enUS.LABEL_IMAGE_STRATA = "Display Layer"
+zhCN.LABEL_IMAGE_STRATA = "显示层级"
+zhTW.LABEL_IMAGE_STRATA = "顯示層級"
+enUS.LABEL_END_EVENTS = "End Display On"
+zhCN.LABEL_END_EVENTS = "结束显示事件"
+zhTW.LABEL_END_EVENTS = "結束顯示事件"
+enUS.PLACEHOLDER_SELECT_END_EVENTS = "Select end events"
+zhCN.PLACEHOLDER_SELECT_END_EVENTS = "选择结束事件"
+zhTW.PLACEHOLDER_SELECT_END_EVENTS = "選擇結束事件"
+enUS.STRATA_BACKGROUND = "Background"
+zhCN.STRATA_BACKGROUND = "背景层"
+zhTW.STRATA_BACKGROUND = "背景層"
+enUS.STRATA_LOW = "Low"
+zhCN.STRATA_LOW = "低"
+zhTW.STRATA_LOW = "低"
+enUS.STRATA_MEDIUM = "Medium"
+zhCN.STRATA_MEDIUM = "中"
+zhTW.STRATA_MEDIUM = "中"
+enUS.STRATA_HIGH = "High"
+zhCN.STRATA_HIGH = "高"
+zhTW.STRATA_HIGH = "高"
+enUS.STRATA_DIALOG = "Dialog"
+zhCN.STRATA_DIALOG = "对话框"
+zhTW.STRATA_DIALOG = "對話框"
+enUS.STRATA_FULLSCREEN = "Fullscreen"
+zhCN.STRATA_FULLSCREEN = "全屏"
+zhTW.STRATA_FULLSCREEN = "全螢幕"
+enUS.STRATA_FULLSCREEN_DIALOG = "Fullscreen Dialog (default)"
+zhCN.STRATA_FULLSCREEN_DIALOG = "全屏对话框（默认）"
+zhTW.STRATA_FULLSCREEN_DIALOG = "全螢幕對話框（預設）"
+enUS.STRATA_TOOLTIP = "Tooltip (topmost)"
+zhCN.STRATA_TOOLTIP = "提示层（最上层）"
+zhTW.STRATA_TOOLTIP = "提示層（最上層）"
+enUS.END_EVENT_PLAYER_DEAD = "Player dies"
+zhCN.END_EVENT_PLAYER_DEAD = "玩家死亡"
+zhTW.END_EVENT_PLAYER_DEAD = "玩家死亡"
+enUS.END_EVENT_PLAYER_ALIVE = "Player alive (accept rez)"
+zhCN.END_EVENT_PLAYER_ALIVE = "玩家复活（接受复活）"
+zhTW.END_EVENT_PLAYER_ALIVE = "玩家復活（接受復活）"
+enUS.END_EVENT_PLAYER_UNGHOST = "Player alive (corpse run)"
+zhCN.END_EVENT_PLAYER_UNGHOST = "玩家跑尸复活"
+zhTW.END_EVENT_PLAYER_UNGHOST = "玩家跑魂復活"
+enUS.END_EVENT_PLAYER_REGEN_DISABLED = "Enter combat"
+zhCN.END_EVENT_PLAYER_REGEN_DISABLED = "进入战斗"
+zhTW.END_EVENT_PLAYER_REGEN_DISABLED = "進入戰鬥"
+enUS.END_EVENT_PLAYER_REGEN_ENABLED = "Leave combat"
+zhCN.END_EVENT_PLAYER_REGEN_ENABLED = "离开战斗"
+zhTW.END_EVENT_PLAYER_REGEN_ENABLED = "離開戰鬥"
+enUS.END_EVENT_PLAYER_TARGET_CHANGED = "Change target"
+zhCN.END_EVENT_PLAYER_TARGET_CHANGED = "切换目标"
+zhTW.END_EVENT_PLAYER_TARGET_CHANGED = "切換目標"
+enUS.END_EVENT_PLAYER_FOCUS_CHANGED = "Change focus"
+zhCN.END_EVENT_PLAYER_FOCUS_CHANGED = "切换焦点"
+zhTW.END_EVENT_PLAYER_FOCUS_CHANGED = "切換焦點"
+enUS.END_EVENT_PLAYER_STARTED_MOVING = "Start moving"
+zhCN.END_EVENT_PLAYER_STARTED_MOVING = "开始移动"
+zhTW.END_EVENT_PLAYER_STARTED_MOVING = "開始移動"
+enUS.END_EVENT_PLAYER_STOPPED_MOVING = "Stop moving"
+zhCN.END_EVENT_PLAYER_STOPPED_MOVING = "停止移动"
+zhTW.END_EVENT_PLAYER_STOPPED_MOVING = "停止移動"
+enUS.END_EVENT_PLAYER_ENTERING_WORLD = "Entering world / loading"
+zhCN.END_EVENT_PLAYER_ENTERING_WORLD = "进入世界 / 过图"
+zhTW.END_EVENT_PLAYER_ENTERING_WORLD = "進入世界 / 過圖"
+enUS.END_EVENT_ZONE_CHANGED_NEW_AREA = "Change zone"
+zhCN.END_EVENT_ZONE_CHANGED_NEW_AREA = "切换区域"
+zhTW.END_EVENT_ZONE_CHANGED_NEW_AREA = "切換區域"
+enUS.END_EVENT_PLAYER_SPECIALIZATION_CHANGED = "Change specialization"
+zhCN.END_EVENT_PLAYER_SPECIALIZATION_CHANGED = "切换专精"
+zhTW.END_EVENT_PLAYER_SPECIALIZATION_CHANGED = "切換專精"
+enUS.END_EVENT_PLAYER_MOUNT_DISPLAY_CHANGED = "Mount changed"
+zhCN.END_EVENT_PLAYER_MOUNT_DISPLAY_CHANGED = "坐骑变化"
+zhTW.END_EVENT_PLAYER_MOUNT_DISPLAY_CHANGED = "坐騎變化"
+enUS.END_EVENT_ENCOUNTER_START = "Encounter start"
+zhCN.END_EVENT_ENCOUNTER_START = "首领战开始"
+zhTW.END_EVENT_ENCOUNTER_START = "首領戰開始"
+enUS.END_EVENT_ENCOUNTER_END = "Encounter end"
+zhCN.END_EVENT_ENCOUNTER_END = "首领战结束"
+zhTW.END_EVENT_ENCOUNTER_END = "首領戰結束"
+enUS.END_EVENT_PLAYER_LEVEL_UP = "Level up"
+zhCN.END_EVENT_PLAYER_LEVEL_UP = "升级"
+zhTW.END_EVENT_PLAYER_LEVEL_UP = "升級"
 
 
 
@@ -723,6 +804,15 @@ zhTW.IMAGE_SOURCE_ICON = "手動填寫圖示ID"
 enUS.IMAGE_SOURCE_PATH = "Custom path"
 zhCN.IMAGE_SOURCE_PATH = "自定义图片路径"
 zhTW.IMAGE_SOURCE_PATH = "自訂圖片路徑"
+enUS.IMAGE_SOURCE_SHAREDMEDIA = "Shared media image"
+zhCN.IMAGE_SOURCE_SHAREDMEDIA = "共享图片（SharedMedia）"
+zhTW.IMAGE_SOURCE_SHAREDMEDIA = "共享圖片（SharedMedia）"
+enUS.LABEL_IMAGE_SHAREDMEDIA = "Shared Image"
+zhCN.LABEL_IMAGE_SHAREDMEDIA = "共享图片"
+zhTW.LABEL_IMAGE_SHAREDMEDIA = "共享圖片"
+enUS.PLACEHOLDER_SELECT_SHAREDMEDIA_IMAGE = "Select a shared image"
+zhCN.PLACEHOLDER_SELECT_SHAREDMEDIA_IMAGE = "选择共享图片"
+zhTW.PLACEHOLDER_SELECT_SHAREDMEDIA_IMAGE = "選擇共享圖片"
 enUS.LABEL_IMAGE_ICON_ID = "Icon FileID"
 zhCN.LABEL_IMAGE_ICON_ID = "图标ID"
 zhTW.LABEL_IMAGE_ICON_ID = "圖示ID"
@@ -944,6 +1034,12 @@ enUS.CDM_CATEGORY_EMPTY = "No loaded abilities are shown in this category."
 enUS.CDM_EVENT_SOUND_UNSUPPORTED = "This action does not support a sound alert."
 enUS.CDM_SELECT_VOICE = "No voice selected"
 enUS.CDM_MISSING_VOICE = "Missing voice"
+enUS.CDM_PLAY_FAILED = "Could not play the Cooldown Manager voice: %s (check that the file exists and is a supported .ogg or .mp3)"
+enUS.CDM_CLEANUP_NONE = "No addon voices need to be removed from the Cooldown Manager."
+enUS.CDM_CLEANUP_DONE = "Removed %d addon voice alert(s) from the Cooldown Manager. The UI will reload; these events are played by the addon now."
+enUS.CDM_CLEANUP_FAILED = "Failed to clean up the Cooldown Manager voices."
+enUS.CDM_CLEANUP_PROMPT = "%d legacy Cooldown Manager voice alert(s) were found. Clean them up now? The UI will reload once."
+enUS.CDM_CLEANUP_APPLY = "Clean Up and Reload"
 enUS.CDM_NATIVE_SOUND_WILL_REPLACE = "Replaces existing sound"
 
 enUS.CDM_ALERT_LIMIT_REACHED = "This ability has reached the Cooldown Manager alert limit. Remove an unneeded alert first."
@@ -980,6 +1076,12 @@ zhCN.CDM_CATEGORY_EMPTY = "当前分类没有已载入的技能。"
 zhCN.CDM_EVENT_SOUND_UNSUPPORTED = "该操作不支持声音警报。"
 zhCN.CDM_SELECT_VOICE = "未选择自定义语音"
 zhCN.CDM_MISSING_VOICE = "缺失语音"
+zhCN.CDM_PLAY_FAILED = "无法播放冷却管理器语音：%s（请检查文件是否存在、是否为支持的 .ogg 或 .mp3）"
+zhCN.CDM_CLEANUP_NONE = "冷却管理器中没有需要清理的插件语音。"
+zhCN.CDM_CLEANUP_DONE = "已从冷却管理器移除 %d 条插件语音警报。界面即将重载；这些事件现在由插件播放。"
+zhCN.CDM_CLEANUP_FAILED = "清理冷却管理器语音失败。"
+zhCN.CDM_CLEANUP_PROMPT = "检测到 %d 条旧版冷却管理器语音残留，是否现在清理？清理后将重载一次界面。"
+zhCN.CDM_CLEANUP_APPLY = "清理并重载"
 zhCN.CDM_NATIVE_SOUND_WILL_REPLACE = "该操作已有系统声音，应用后将替换。"
 
 zhCN.CDM_ALERT_LIMIT_REACHED = "该技能的冷却管理器警报数量已达到上限，请先删除不需要的警报。"
@@ -1016,6 +1118,12 @@ zhTW.CDM_CATEGORY_EMPTY = "目前分類沒有已載入的技能。"
 zhTW.CDM_EVENT_SOUND_UNSUPPORTED = "此操作不支援聲音警報。"
 zhTW.CDM_SELECT_VOICE = "未選擇自訂語音"
 zhTW.CDM_MISSING_VOICE = "缺少語音"
+zhTW.CDM_PLAY_FAILED = "無法播放冷卻管理器語音：%s（請檢查檔案是否存在、是否為支援的 .ogg 或 .mp3）"
+zhTW.CDM_CLEANUP_NONE = "冷卻管理器中沒有需要清理的插件語音。"
+zhTW.CDM_CLEANUP_DONE = "已從冷卻管理器移除 %d 條插件語音警報。介面即將重新載入；這些事件現在由插件播放。"
+zhTW.CDM_CLEANUP_FAILED = "清理冷卻管理器語音失敗。"
+zhTW.CDM_CLEANUP_PROMPT = "偵測到 %d 條舊版冷卻管理器語音殘留，是否現在清理？清理後將重新載入一次介面。"
+zhTW.CDM_CLEANUP_APPLY = "清理並重新載入"
 zhTW.CDM_NATIVE_SOUND_WILL_REPLACE = "此操作已有系統聲音，套用後將取代。"
 
 zhTW.CDM_ALERT_LIMIT_REACHED = "此技能的冷卻管理器警報數量已達上限，請先刪除不需要的警報。"
@@ -1031,6 +1139,9 @@ zhTW.CDM_EVENT_FALLBACK = "事件 %d"
 enUS.SEARCH_SHAREDMEDIA_SOUND = "Search SharedMedia voices..."
 zhCN.SEARCH_SHAREDMEDIA_SOUND = "搜索共享语音……"
 zhTW.SEARCH_SHAREDMEDIA_SOUND = "搜尋共享語音……"
+enUS.SEARCH_SHAREDMEDIA_IMAGE = "Search shared images..."
+zhCN.SEARCH_SHAREDMEDIA_IMAGE = "搜索共享图片……"
+zhTW.SEARCH_SHAREDMEDIA_IMAGE = "搜尋共享圖片……"
 enUS.SEARCH_NO_RESULTS = "No matching voice found"
 zhCN.SEARCH_NO_RESULTS = "未找到匹配的语音"
 zhTW.SEARCH_NO_RESULTS = "找不到符合的語音"
@@ -1369,9 +1480,76 @@ zhTW.MSG_INVALID_EVENT_VOICE = "請選擇有效的觸發事件。"
 enUS.MSG_DUP_EVENT_VOICE = "An event voice with an overlapping scope already exists."
 zhCN.MSG_DUP_EVENT_VOICE = "相同事件语音已存在于重叠的作用域中。"
 zhTW.MSG_DUP_EVENT_VOICE = "相同事件語音已存在於重疊的作用域中。"
-enUS.MSG_EVENT_VOICE_REQUIRED = "Event alerts require voice playback."
-zhCN.MSG_EVENT_VOICE_REQUIRED = "事件提醒必须启用语音。"
-zhTW.MSG_EVENT_VOICE_REQUIRED = "事件提醒必須啟用語音。"
 enUS.MSG_NO_EVENT_SOUND_PATH = "This event alert has no voice file path."
 zhCN.MSG_NO_EVENT_SOUND_PATH = "这条事件提醒未填写语音文件路径。"
 zhTW.MSG_NO_EVENT_SOUND_PATH = "這條事件提醒未填寫語音檔路徑。"
+
+-- Cast-success and aura alerts share the alert editor; auras only support
+-- voice playback.
+enUS.OBJECT_TYPE_CAST = "Cast Success"
+zhCN.OBJECT_TYPE_CAST = "施法成功"
+zhTW.OBJECT_TYPE_CAST = "施法成功"
+
+enUS.OBJECT_TYPE_AURA = "Aura"
+zhCN.OBJECT_TYPE_AURA = "光环"
+zhTW.OBJECT_TYPE_AURA = "光環"
+
+enUS.ENTRY_TYPE_AURA = "Aura Alert"
+zhCN.ENTRY_TYPE_AURA = "光环提醒"
+zhTW.ENTRY_TYPE_AURA = "光環提醒"
+
+enUS.TAB_AURA = "Aura Alerts"
+zhCN.TAB_AURA = "光环提醒"
+zhTW.TAB_AURA = "光環提醒"
+
+enUS.SELECT_ALERT_TYPE_AURA_DESC = "Voice alert when an aura is applied, removed or gains an application (client-side, voice only)."
+zhCN.SELECT_ALERT_TYPE_AURA_DESC = "光环出现、消失或叠层增加时的语音提醒（客户端播放，仅支持语音）。"
+zhTW.SELECT_ALERT_TYPE_AURA_DESC = "光環出現、消失或疊層增加時的語音提醒（用戶端播放，僅支援語音）。"
+
+enUS.AURA_API_LIMIT_HINT = "Client API limitation: aura alerts only support voice playback. TTS, image and text are not available."
+zhCN.AURA_API_LIMIT_HINT = "API 限制：光环提醒目前仅支持语音播放，不支持 TTS、图片和文字。"
+zhTW.AURA_API_LIMIT_HINT = "API 限制：光環提醒目前僅支援語音播放，不支援 TTS、圖片和文字。"
+
+enUS.LABEL_AURA_TRIGGER = "Trigger"
+zhCN.LABEL_AURA_TRIGGER = "触发"
+zhTW.LABEL_AURA_TRIGGER = "觸發"
+
+enUS.LABEL_AURA_UNIT = "Unit"
+zhCN.LABEL_AURA_UNIT = "单位"
+zhTW.LABEL_AURA_UNIT = "單位"
+
+enUS.AURA_UNIT_PLAYER = "Player"
+zhCN.AURA_UNIT_PLAYER = "玩家"
+zhTW.AURA_UNIT_PLAYER = "玩家"
+
+enUS.AURA_UNIT_TARGET = "Target"
+zhCN.AURA_UNIT_TARGET = "目标"
+zhTW.AURA_UNIT_TARGET = "目標"
+
+enUS.AURA_UNIT_FOCUS = "Focus"
+zhCN.AURA_UNIT_FOCUS = "焦点"
+zhTW.AURA_UNIT_FOCUS = "焦點"
+
+enUS.AURA_TRIGGER_APPLIED = "Applied"
+zhCN.AURA_TRIGGER_APPLIED = "出现"
+zhTW.AURA_TRIGGER_APPLIED = "出現"
+
+enUS.AURA_TRIGGER_REMOVED = "Removed"
+zhCN.AURA_TRIGGER_REMOVED = "消失"
+zhTW.AURA_TRIGGER_REMOVED = "消失"
+
+enUS.AURA_TRIGGER_APPLICATIONS = "Applications increased"
+zhCN.AURA_TRIGGER_APPLICATIONS = "叠层增加"
+zhTW.AURA_TRIGGER_APPLICATIONS = "疊層增加"
+
+enUS.MSG_AURA_VOICE_ONLY = "Aura alerts only support voice playback."
+zhCN.MSG_AURA_VOICE_ONLY = "光环提醒仅支持语音播放。"
+zhTW.MSG_AURA_VOICE_ONLY = "光環提醒僅支援語音播放。"
+
+enUS.MSG_INVALID_AURA_TRIGGER = "Choose when the aura alert should play."
+zhCN.MSG_INVALID_AURA_TRIGGER = "请选择光环提醒的触发时机。"
+zhTW.MSG_INVALID_AURA_TRIGGER = "請選擇光環提醒的觸發時機。"
+
+enUS.MSG_AURA_REGISTER_FAILED = "Aura alert registration failed (the client refused it); it will retry after combat or a zone change."
+zhCN.MSG_AURA_REGISTER_FAILED = "光环提醒注册失败（客户端拒绝了该注册），将在脱战或切换区域后重试。"
+zhTW.MSG_AURA_REGISTER_FAILED = "光環提醒註冊失敗（用戶端拒絕了該註冊），將在脫戰或切換區域後重試。"

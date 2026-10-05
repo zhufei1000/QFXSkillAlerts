@@ -30,6 +30,50 @@ local function TrimText(value)
     return tostring(value or ""):match("^%s*(.-)%s*$")
 end
 
+local STRATA_OPTIONS = CONST.VISUAL_STRATA_OPTIONS or { "FULLSCREEN_DIALOG" }
+local STRATA_DEFAULT = CONST.VISUAL_STRATA_DEFAULT or "FULLSCREEN_DIALOG"
+local END_EVENT_DEFS = CONST.VISUAL_END_EVENTS or {}
+local END_EVENT_UNIT_FILTER = nil
+
+local function NormalizeVisualStrata(value)
+    local strata = tostring(value or "")
+    for _, option in ipairs(STRATA_OPTIONS) do
+        if option == strata then
+            return strata
+        end
+    end
+    return STRATA_DEFAULT
+end
+
+local function NormalizeEndEventSet(value)
+    if type(value) ~= "table" then
+        return nil
+    end
+    local normalized = nil
+    for key, enabled in pairs(value) do
+        if enabled == true and type(key) == "string" and key ~= "" then
+            normalized = normalized or {}
+            normalized[key] = true
+        end
+    end
+    return normalized
+end
+
+-- Maps a supported end-display event to its unit-filter flag (nil when the
+-- event is not a supported end event).
+local function GetEndEventUnitFilter(event)
+    if END_EVENT_UNIT_FILTER == nil then
+        END_EVENT_UNIT_FILTER = {}
+        for _, def in ipairs(END_EVENT_DEFS) do
+            local eventName = type(def) == "table" and def.event or def
+            if type(eventName) == "string" and eventName ~= "" then
+                END_EVENT_UNIT_FILTER[eventName] = (type(def) == "table" and def.unit == true) or false
+            end
+        end
+    end
+    return END_EVENT_UNIT_FILTER[event]
+end
+
 function Notifier:GetSelectedVoiceID()
     if C_TTSSettings and C_TTSSettings.GetVoiceOptionID then
         local ok, voiceID = pcall(C_TTSSettings.GetVoiceOptionID)
@@ -279,6 +323,15 @@ function Notifier:ResolveImageTexture(cfgOrValue)
     elseif source == "icon" then
         local iconID = tonumber(cfgOrValue.imageIconID) or 0
         return iconID > 0 and math.floor(iconID) or nil
+    elseif source == "sharedmedia" then
+        local name = TrimText(cfgOrValue.imageSharedMedia or cfgOrValue.sharedMediaImage or "")
+        if name ~= "" and NS.AceOptions and type(NS.AceOptions.FetchSharedMediaTexturePath) == "function" then
+            local ok, path = pcall(NS.AceOptions.FetchSharedMediaTexturePath, NS.AceOptions, name)
+            if ok and type(path) == "string" and path ~= "" then
+                return path
+            end
+        end
+        return nil
     elseif source == "path" then
         local value = TrimText(cfgOrValue.imagePath or "")
         return value ~= "" and (tonumber(value) or value) or nil
@@ -335,6 +388,21 @@ local function CancelVisualTimer(frame)
     end
 end
 
+-- Spell / item / icon textures are cropped by 8% per side so Blizzard's
+-- built-in icon border never shows. Free-form artwork (custom paths and
+-- SharedMedia images) must keep the full texture or the picture looks cut off.
+local function ApplyVisualTextureCoords(texture, cfg)
+    if not (texture and texture.SetTexCoord) then
+        return
+    end
+    local source = tostring((type(cfg) == "table" and cfg.imageSource) or "auto")
+    if source == "path" or source == "sharedmedia" then
+        texture:SetTexCoord(0, 1, 0, 1)
+    else
+        texture:SetTexCoord(0.08, 0.92, 0.08, 0.92)
+    end
+end
+
 local function PrepareVisualFrame(frame)
     if not frame then
         return
@@ -367,6 +435,8 @@ local function ClearVisualFrame(frame)
     frame.qfxsaHasImage = nil
     frame.qfxsaHasText = nil
     frame.qfxsaChannel = nil
+    frame.qfxsaImageEndEvents = nil
+    frame.qfxsaTextEndEvents = nil
     frame.qfxsaBaseX = nil
     frame.qfxsaBaseY = nil
     frame.qfxsaLayoutHeight = nil
@@ -389,6 +459,76 @@ local function ClearVisualFrame(frame)
             frame.text:Hide()
         end
     end
+end
+
+-- One shared watcher frame registers every supported end-display event; only
+-- visual slots that actually selected an event react. All of these events are
+-- low-frequency player state changes, so the handler stays cheap.
+function Notifier:EnsureEndEventWatcher()
+    if self.endEventWatcher then
+        return self.endEventWatcher
+    end
+    local frame = CreateFrame("Frame")
+    local registered = {}
+    for _, def in ipairs(END_EVENT_DEFS) do
+        local eventName = type(def) == "table" and def.event or def
+        if type(eventName) == "string" and eventName ~= "" and not registered[eventName] then
+            registered[eventName] = true
+            pcall(frame.RegisterEvent, frame, eventName)
+        end
+    end
+    frame:SetScript("OnEvent", function(_, event, ...)
+        if GetEndEventUnitFilter(event) then
+            local unit = ...
+            if type(unit) == "string" and unit ~= "" and unit ~= "player" then
+                return
+            end
+        end
+        Notifier:OnVisualEndEvent(event)
+    end)
+    self.endEventWatcher = frame
+    return frame
+end
+
+-- Hide the image and/or text part of running visual alerts whose selected
+-- end-display event just fired. When both parts are gone the whole slot is
+-- released (and its duration timer cancelled).
+function Notifier:OnVisualEndEvent(event)
+    event = tostring(event or "")
+    if event == "" or type(self.visualSlots) ~= "table" then
+        return false
+    end
+    local finishedKeys = nil
+    for primaryKey, slot in pairs(self.visualSlots) do
+        local frame = slot and slot.frame
+        if frame and frame.qfxsaVisible == true and frame.IsShown and frame:IsShown() then
+            local changed = false
+            if frame.qfxsaImageEndEvents and frame.qfxsaImageEndEvents[event] == true
+                and frame.texture and frame.texture.IsShown and frame.texture:IsShown() then
+                frame.texture:Hide()
+                changed = true
+            end
+            if frame.qfxsaTextEndEvents and frame.qfxsaTextEndEvents[event] == true
+                and frame.text and frame.text.IsShown and frame.text:IsShown() then
+                frame.text:Hide()
+                changed = true
+            end
+            if changed then
+                local imageShown = frame.texture and frame.texture.IsShown and frame.texture:IsShown()
+                local textShown = frame.text and frame.text.IsShown and frame.text:IsShown()
+                if not imageShown and not textShown then
+                    finishedKeys = finishedKeys or {}
+                    finishedKeys[#finishedKeys + 1] = primaryKey
+                end
+            end
+        end
+    end
+    if finishedKeys then
+        for _, primaryKey in ipairs(finishedKeys) do
+            self:HideVisualAlertForKey(primaryKey)
+        end
+    end
+    return finishedKeys ~= nil
 end
 
 local function StartVisualTimer(frame, duration)
@@ -674,6 +814,7 @@ function Notifier:ApplyImageTextLayout(frame, texture, text, imageSize, textSize
     frame.texture:ClearAllPoints()
     frame.texture:SetSize(imageSize, imageSize)
     frame.texture:SetTexture(texture)
+    ApplyVisualTextureCoords(frame.texture, cfg)
     if texture then
         frame.texture:SetPoint("CENTER", frame, "CENTER", 0, 0)
         frame.texture:Show()
@@ -766,6 +907,18 @@ function Notifier:ShowVisualSlot(primaryKey, kind, cfg, fallbackText, duration)
     frame.qfxsaLayoutHeight = 100
     frame.qfxsaChannel = kind
 
+    -- Display layer (frame strata) and end-display events for this alert.
+    -- The image layer setting applies to the shared visual frame, so a linked
+    -- image + text alert moves together.
+    if frame.SetFrameStrata then
+        frame:SetFrameStrata(NormalizeVisualStrata(cfg.imageStrata))
+    end
+    frame.qfxsaImageEndEvents = (kind ~= "text") and NormalizeEndEventSet(cfg.imageEndEvents) or nil
+    frame.qfxsaTextEndEvents = (kind ~= "image") and NormalizeEndEventSet(cfg.textEndEvents) or nil
+    if frame.qfxsaImageEndEvents or frame.qfxsaTextEndEvents then
+        self:EnsureEndEventWatcher()
+    end
+
     if kind == "image" then
         local texture = self:ResolveImageTexture(cfg)
         if not texture then
@@ -778,6 +931,7 @@ function Notifier:ShowVisualSlot(primaryKey, kind, cfg, fallbackText, duration)
         frame.texture:ClearAllPoints()
         frame.texture:SetAllPoints(frame)
         frame.texture:SetTexture(texture)
+        ApplyVisualTextureCoords(frame.texture, cfg)
         frame.texture:Show()
         frame.text:SetText("")
         frame.text:Hide()
@@ -1005,7 +1159,7 @@ function Notifier:PlayCastSuccessNotification(cfg, triggerSpellID, castGUID)
 end
 
 function Notifier:PlayEventNotification(cfg)
-    if type(cfg) ~= "table" or cfg.voiceEnabled == false then
+    if type(cfg) ~= "table" then
         return false
     end
 
@@ -1013,13 +1167,17 @@ function Notifier:PlayEventNotification(cfg)
     if fallbackText == "" then
         fallbackText = L("ENTRY_TYPE_EVENT")
     end
+    local visualShown = self:ShowVisualAlerts(cfg, fallbackText, cfg.alertChannel, cfg.primaryKey)
+    if cfg.voiceEnabled == false then
+        return visualShown
+    end
     local mode = tostring(cfg.notifyMode or MODE_SOUND)
     if mode == MODE_TTS or tostring(cfg.soundSource or "") == "tts" then
         local text = TrimText(cfg.ttsText or "")
         if text == "" then
             text = fallbackText
         end
-        return self:SpeakTextTTS(text, cfg.ttsRate)
+        return self:SpeakTextTTS(text, cfg.ttsRate) or visualShown
     end
 
     local path = self:ResolveEntrySoundPath(cfg)
@@ -1027,9 +1185,9 @@ function Notifier:PlayEventNotification(cfg)
         if DEFAULT_CHAT_FRAME then
             DEFAULT_CHAT_FRAME:AddMessage((NS.ADDON_CHAT_PREFIX or "") .. " " .. L("MSG_NO_EVENT_SOUND_PATH"))
         end
-        return false
+        return visualShown
     end
-    return self:PlayVoiceFile(path, cfg.resolvedSoundPath ~= nil)
+    return self:PlayVoiceFile(path, cfg.resolvedSoundPath ~= nil) or visualShown
 end
 
 function Notifier:PlayBloodlustNotification(cfg, fallbackPaths)

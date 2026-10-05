@@ -2,7 +2,7 @@
 ## Title: QFX Skill Alerts Config
 ## Notes: Load-on-demand configuration UI for QFX Skill Alerts.
 ## Author: zhufei1000
-## Version: 1.0.229
+## Version: 1.0.236
 ## Dependencies: QFXSkillAlerts
 ## X-Curse-Project-ID: 1524594
 ## LoadOnDemand: 1

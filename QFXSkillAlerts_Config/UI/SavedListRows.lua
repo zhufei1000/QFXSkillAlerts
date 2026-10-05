@@ -142,6 +142,22 @@ local function GetEntryTypeText(entry)
     local entryType = tostring((entry and entry.entryType) or "cooldown")
     if entryType == "cast" then
         return L("ENTRY_TYPE_CAST")
+    elseif entryType == "aura" then
+        local trigger = tostring(entry and entry.auraTrigger or "")
+        local triggerText = L("AURA_TRIGGER_APPLIED")
+        if trigger == "removed" then
+            triggerText = L("AURA_TRIGGER_REMOVED")
+        elseif trigger == "applications" then
+            triggerText = L("AURA_TRIGGER_APPLICATIONS")
+        end
+        local unit = tostring(entry and entry.auraUnit or "player")
+        local unitText = L("AURA_UNIT_PLAYER")
+        if unit == "target" then
+            unitText = L("AURA_UNIT_TARGET")
+        elseif unit == "focus" then
+            unitText = L("AURA_UNIT_FOCUS")
+        end
+        return L("ENTRY_TYPE_AURA") .. " · " .. triggerText .. " · " .. unitText
     elseif entryType == "event" then
         return L("ENTRY_TYPE_EVENT")
     elseif entryType == "custom" then
