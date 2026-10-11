@@ -18,7 +18,7 @@ local function GetEntryMap()
 end
 
 local function GetCollectionStore()
-    return NS.Core and NS.Core.CollectionStore
+    return NS.CollectionStore
 end
 
 local function NormalizeCdMode(entry)
@@ -50,6 +50,19 @@ local function NormalizeAuraUnit(value)
         return value
     end
     return "player"
+end
+
+local function ScopeMatches(selection, currentID)
+    if type(selection) ~= "table" or next(selection) == nil then
+        return true
+    end
+    return selection[0] == true or selection[currentID] == true
+        or selection[tostring(currentID)] == true
+end
+
+local function EntryMatchesScope(entry, classID, specID)
+    return ScopeMatches(entry.alertClassIDs or entry.customClassIDs, classID)
+        and ScopeMatches(entry.alertSpecIDs or entry.customSpecIDs, specID)
 end
 
 local function ResolveSpellName(spellID)
@@ -107,6 +120,7 @@ function Bridge:FindEntry(classID, specID, spellID, cdMode)
         if entry
             and tostring(entry.entryType or "cooldown") == "cooldown"
             and tonumber(entry.spellId) == spellID
+            and EntryMatchesScope(entry, classID, specID)
             and NormalizeCdMode(entry) == cdMode then
             return index, entry
         end
@@ -232,7 +246,7 @@ function Bridge:DeleteRecord(classID, specID, spellID, cdMode)
     if collectionStore
         and type(collectionStore.BuildEntryKey) == "function"
         and type(collectionStore.RemoveEntryKeyFromAllCollectionScopes) == "function" then
-        local entryKey = collectionStore.BuildEntryKey(classID, specID, index)
+        local entryKey = collectionStore.BuildEntryKey(0, 0, index)
         pcall(collectionStore.RemoveEntryKeyFromAllCollectionScopes, entryKey)
     end
     return true
@@ -254,6 +268,7 @@ function Bridge:FindAuraEntry(classID, specID, spellID, trigger, unit)
         if entry
             and tostring(entry.entryType or "cooldown") == "aura"
             and tonumber(entry.spellId) == spellID
+            and EntryMatchesScope(entry, classID, specID)
             and NormalizeAuraTrigger(entry.auraTrigger) == trigger
             and NormalizeAuraUnit(entry.auraUnit) == unit then
             return index, entry
@@ -309,11 +324,19 @@ function Bridge:BuildAuraEntries(classID, specID)
     end
     for _, index in ipairs(entryMap:GetOrderedEntryIndices(map)) do
         local entry = entryMap:GetEntry(map, index)
-        if entry and tostring(entry.entryType or "cooldown") == "aura" then
+        if entry and tostring(entry.entryType or "cooldown") == "aura"
+            and entry.voiceEnabled ~= false and EntryMatchesScope(entry, classID, specID) then
             local spellID = tonumber(entry.spellId)
             local trigger = NormalizeAuraTrigger(entry.auraTrigger)
             local unit = NormalizeAuraUnit(entry.auraUnit)
-            if spellID and trigger then
+            local raceID = 0
+            if type(UnitRace) == "function" then
+                raceID = select(3, UnitRace("player"))
+            end
+            if spellID and trigger and ScopeMatches(entry.alertRaceIDs, tonumber(raceID) or 0) then
+                local notifier = NS.Core and NS.Core.NotifierBridge
+                local path = notifier and type(notifier.ResolveEntrySoundPath) == "function"
+                    and notifier:ResolveEntrySoundPath(entry) or entry.soundPath or entry.customSoundPath or ""
                 result[#result + 1] = {
                     classID = tonumber(classID),
                     specID = tonumber(specID),
@@ -323,7 +346,7 @@ function Bridge:BuildAuraEntries(classID, specID)
                     entryIndex = index,
                     recordKey = string.format("aura:%s:%d:%s", unit, spellID, trigger),
                     voiceName = tostring(entry.sharedMediaSound or ""),
-                    voicePath = tostring(entry.soundPath or entry.customSoundPath or ""),
+                    voicePath = tostring(path),
                 }
             end
         end
@@ -342,7 +365,8 @@ function Bridge:BuildVirtualRecords(classID, specID)
     end
     for _, index in ipairs(entryMap:GetOrderedEntryIndices(map)) do
         local entry = entryMap:GetEntry(map, index)
-        if entry and tostring(entry.entryType or "cooldown") == "cooldown" then
+        if entry and tostring(entry.entryType or "cooldown") == "cooldown"
+            and EntryMatchesScope(entry, classID, specID) then
             local cdMode = NormalizeCdMode(entry)
             local eventKey = cdMode and self:GetEventKeyForMode(cdMode)
             local spellID = tonumber(entry.spellId)
@@ -375,11 +399,12 @@ function Bridge:MigrateLegacyRecords()
     QFXSkillAlertsDB = db
     local state = type(db.cdmVoiceSyncState) == "table" and db.cdmVoiceSyncState or {}
     db.cdmVoiceSyncState = state
-    if state.alertBridgeMigrationDone == true then
+    if state.alertBridgeMigrationDone == true and state.alertBridgeMigrationSafeDone == true then
         return 0
     end
 
     local migrated = 0
+    local pending = false
     local profiles = type(db.cdmVoiceProfiles) == "table" and db.cdmVoiceProfiles or {}
     for classIDKey, classMap in pairs(profiles) do
         local classID = tonumber(classIDKey)
@@ -389,15 +414,20 @@ function Bridge:MigrateLegacyRecords()
                 if specID and type(specMap) == "table" then
                     local removeKeys = {}
                     for recordKey, data in pairs(specMap) do
-                        local record = store:SanitizeRecord(data, data.source or "user")
-                        if record then
+                        local record = type(data) == "table" and store:SanitizeRecord(data, data.source or "user") or nil
+                        -- A disabled user record also masks the built-in preset.
+                        -- Keep it in place instead of recreating an enabled alert.
+                        if record and record.enabled ~= false then
                             local cdMode = self:GetModeForEventKey(record.eventKey)
                             local auraTrigger = self:GetAuraTriggerForEventKey(record.eventKey)
                             if cdMode or auraTrigger then
                                 local voiceItem = store:ResolveVoice(record)
+                                if not voiceItem and type(record.voicePath) == "string" and record.voicePath ~= "" then
+                                    voiceItem = { name = record.voiceName, path = record.voicePath }
+                                end
                                 local spellID = tonumber(record.spellID)
+                                local ok
                                 if voiceItem and spellID then
-                                    local ok
                                     if cdMode then
                                         ok = self:SaveRecord(
                                             record.classID or classID,
@@ -422,9 +452,13 @@ function Bridge:MigrateLegacyRecords()
                                         migrated = migrated + 1
                                     end
                                 end
-                                -- Drop the legacy record either way so the CDM
-                                -- editor shows the bridged entry instead.
-                                removeKeys[#removeKeys + 1] = recordKey
+                                -- Keep unresolved or failed records so a later
+                                -- media load can retry without losing the voice.
+                                if ok then
+                                    removeKeys[#removeKeys + 1] = recordKey
+                                else
+                                    pending = true
+                                end
                             end
                         end
                     end
@@ -441,7 +475,8 @@ function Bridge:MigrateLegacyRecords()
     -- list as ghost entries.
     self:CleanupStaleTombstones()
 
-    state.alertBridgeMigrationDone = true
+    state.alertBridgeMigrationDone = not pending
+    state.alertBridgeMigrationSafeDone = not pending
     return migrated
 end
 

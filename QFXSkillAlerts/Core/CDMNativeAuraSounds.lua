@@ -12,10 +12,8 @@ local Native = NS.Core.CDMNativeEvents
 -- detection and plays the file, so the addon never reads secret aura data and
 -- nothing is written into the Cooldown Manager layout.
 --
--- Registrations are in-memory: they are rebuilt after loading screens, zone
--- changes and spec changes. AddAuraSound is restricted during encounters and
--- M+/PvP matches, so a failed sync is retried when combat ends or the player
--- zones.
+-- Keep accepted registrations through loading screens. A refused replacement
+-- must not discard the working sound; retry after combat or a zone change.
 local UNIT_TOKEN = "player"
 
 AuraSounds.registered = AuraSounds.registered or {}
@@ -46,11 +44,29 @@ local function GetTrigger(auraTrigger)
     return (enumTable and enumTable.Added) or 0
 end
 
+local function IsCombatLocked()
+    return type(InCombatLockdown) == "function" and InCombatLockdown() == true
+end
+
+local function SameRegistration(left, right)
+    return left and right and left.spellID == right.spellID
+        and left.trigger == right.trigger and left.unit == right.unit and left.path == right.path
+end
+
 -- Aura alerts come from the aura entries saved by the alert editor (the old
 -- CDM records are migrated into them). They are not limited to the Cooldown
 -- Manager skill list, so no availability check is applied.
 function AuraSounds:BuildDesired()
     local desired = {}
+    local function AddDesired(spellID, trigger, unit, path)
+        for _, auraID in ipairs(Native:GetAuraSoundSpellIDs(spellID)) do
+            local key = string.format("aura:%s:%d:%s", unit, auraID, trigger)
+            desired[key] = {
+                recordKey = key, sourceSpellID = spellID, spellID = auraID,
+                trigger = GetTrigger(trigger), unit = unit, path = path,
+            }
+        end
+    end
     local bridge = NS.Core and NS.Core.CDMAlertBridge
     if not bridge or type(bridge.BuildAuraEntries) ~= "function" then
         return desired
@@ -59,6 +75,20 @@ function AuraSounds:BuildDesired()
     if not classID or not specID then
         return desired
     end
+    -- CDM editor saves and imports can still produce legacy aura records after
+    -- the one-time migration. They must participate in native registration.
+    local store = NS.Core and NS.Core.CDMVoicePresetStore
+    if store and type(store.GetEffectiveRecords) == "function" then
+        for _, record in ipairs(store:GetEffectiveRecords(classID, specID)) do
+            local trigger = bridge:GetAuraTriggerForEventKey(record.eventKey)
+            local spellID = tonumber(record.spellID)
+            local path = Native:ResolveRecordPath(record)
+            if trigger and record.enabled ~= false and spellID and spellID > 0
+                and type(path) == "string" and path ~= "" then
+                AddDesired(spellID, trigger, UNIT_TOKEN, path)
+            end
+        end
+    end
     for _, entry in ipairs(bridge:BuildAuraEntries(classID, specID)) do
         local spellID = tonumber(entry.spellID)
         local path = entry.voicePath
@@ -66,53 +96,49 @@ function AuraSounds:BuildDesired()
             path = Native:ResolveRecordPath({ voiceName = entry.voiceName })
         end
         if spellID and spellID > 0 and type(path) == "string" and path ~= "" then
-            desired[entry.recordKey] = {
-                recordKey = entry.recordKey,
-                spellID = spellID,
-                trigger = GetTrigger(entry.trigger),
-                unit = entry.auraUnit or UNIT_TOKEN,
-                path = path,
-            }
+            AddDesired(spellID, entry.trigger, entry.auraUnit or UNIT_TOKEN, path)
         end
     end
     return desired
 end
 
--- Removes every known registration. Used on loading screens, where the client
--- may reset the registrations before the next sync.
-function AuraSounds:Teardown()
-    local remove = GetRemoveAuraSound()
-    if remove then
-        for _, entry in pairs(self.registered) do
-            pcall(remove, entry.id)
+function AuraSounds:PrintDiagnostics(spellID)
+    spellID = tonumber(spellID) or 0
+    local L = NS.L or function(key, ...) return key end
+    print("[QFX-SA] " .. L("AURA_DIAG_HEADER", spellID,
+        tostring(GetAddAuraSound() ~= nil), tostring(IsCombatLocked()), tostring(self.pendingSync == true)))
+    local found = false
+    for key, wanted in pairs(self:BuildDesired()) do
+        if spellID == 0 or wanted.sourceSpellID == spellID or wanted.spellID == spellID then
+            found = true
+            local active = self.registered[key]
+            local registered = SameRegistration(active, wanted) and tostring(active.id) or "-"
+            print("[QFX-SA] " .. L("AURA_DIAG_ENTRY", wanted.sourceSpellID, wanted.spellID,
+                wanted.unit, wanted.trigger, registered, wanted.path))
         end
     end
-    self.registered = {}
+    if not found then
+        print("[QFX-SA] " .. L("AURA_DIAG_EMPTY"))
+    end
 end
 
 function AuraSounds:Sync()
     local add, remove = GetAddAuraSound(), GetRemoveAuraSound()
     if not add or not remove then
+        self.pendingSync = true
         return false, "api_unavailable"
+    end
+    if IsCombatLocked() then
+        self.pendingSync = true
+        return false, "restricted"
     end
 
     local desired = self:BuildDesired()
 
-    for recordKey, entry in pairs(self.registered) do
-        local wanted = desired[recordKey]
-        if not wanted
-            or wanted.spellID ~= entry.spellID
-            or wanted.trigger ~= entry.trigger
-            or wanted.unit ~= entry.unit
-            or wanted.path ~= entry.path then
-            pcall(remove, entry.id)
-            self.registered[recordKey] = nil
-        end
-    end
-
     local failed = false
     for recordKey, wanted in pairs(desired) do
-        if not self.registered[recordKey] then
+        local previous = self.registered[recordKey]
+        if not SameRegistration(previous, wanted) then
             local ok, id = pcall(add, wanted.trigger, {
                 unitToken = wanted.unit or UNIT_TOKEN,
                 spellID = wanted.spellID,
@@ -120,18 +146,33 @@ function AuraSounds:Sync()
                 outputChannel = "Master",
             })
             if ok and tonumber(id) then
-                self.registered[recordKey] = {
-                    id = tonumber(id),
-                    spellID = wanted.spellID,
-                    trigger = wanted.trigger,
-                    unit = wanted.unit,
-                    path = wanted.path,
-                }
+                if previous and not pcall(remove, previous.id) then
+                    pcall(remove, tonumber(id))
+                    failed = true
+                else
+                    self.registered[recordKey] = {
+                        id = tonumber(id),
+                        spellID = wanted.spellID,
+                        trigger = wanted.trigger,
+                        unit = wanted.unit,
+                        path = wanted.path,
+                    }
+                end
             else
                 failed = true
             end
         end
     end
+    for recordKey, entry in pairs(self.registered) do
+        if not desired[recordKey] then
+            if pcall(remove, entry.id) then
+                self.registered[recordKey] = nil
+            else
+                failed = true
+            end
+        end
+    end
+    self.pendingSync = failed
 
     if failed and not self.failureNotified then
         self.failureNotified = true
@@ -155,22 +196,13 @@ function AuraSounds:Initialize()
         "PLAYER_ENTERING_WORLD",
         "PLAYER_REGEN_ENABLED",
         "PLAYER_SPECIALIZATION_CHANGED",
-        "LOADING_SCREEN_ENABLED",
+        "ADDON_LOADED",
     }) do
         pcall(frame.RegisterEvent, frame, event)
     end
     frame:SetScript("OnEvent", function(_, event)
-        if event == "LOADING_SCREEN_ENABLED" then
-            AuraSounds:Teardown()
+        if event == "PLAYER_REGEN_ENABLED" and not AuraSounds.pendingSync then
             return
-        end
-        if event == "PLAYER_REGEN_ENABLED" and not next(AuraSounds.registered) then
-            -- Only worth retrying when a previous sync failed; skip the common
-            -- case where nothing is registered because nothing is configured.
-            local desired = AuraSounds:BuildDesired()
-            if not next(desired) then
-                return
-            end
         end
         AuraSounds:Sync()
     end)

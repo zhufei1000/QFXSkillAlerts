@@ -167,8 +167,9 @@ function Notifier:ResolveEntrySoundPath(entry)
         -- resolver used by the editor/exporter.  This preserves builtin,
         -- SharedMedia and custom paths even if a save/import only populated
         -- builtinSoundPath/customSoundPath instead of soundPath.
-        if NS.AceOptions and type(NS.AceOptions.ResolveSoundSourceFields) == "function" then
-            local fields = NS.AceOptions:ResolveSoundSourceFields(entry, MODE_TTS, MODE_SOUND)
+        local catalog = NS.MediaCatalog or NS.AceOptions
+        if catalog and type(catalog.ResolveSoundSourceFields) == "function" then
+            local fields = catalog:ResolveSoundSourceFields(entry, MODE_TTS, MODE_SOUND)
             if type(fields) == "table" and tostring(fields.soundSource or "") ~= "tts" then
                 local resolved = self:NormalizeSoundPath(fields.soundPath or "")
                 if resolved ~= "" then
@@ -247,7 +248,6 @@ end
 
 local visualFrameSerial = 0
 local visualAnonymousSerial = 0
-local VISUAL_STACK_GAP = 10
 
 local function GetScreenParent()
     return rawget(_G, "UIParent")
@@ -1216,7 +1216,7 @@ function Notifier:PlayBloodlustNotification(cfg, fallbackPaths)
     if source == "custom" then
         path = self:GetRandomNonEmptyPath(type(cfg.customSoundPaths) == "table" and cfg.customSoundPaths or fallbackPaths) or ""
         if path == "" then
-            path = self:NormalizeSoundPath(cfg.customSoundPath or cfg.soundPath or "")
+            path = self:NormalizeSoundPath(TrimText(cfg.customSoundPath or "") ~= "" and cfg.customSoundPath or cfg.soundPath or "")
         end
     elseif source == "sharedmedia" or source == "builtin" then
         path = self:ResolveEntrySoundPath(cfg)

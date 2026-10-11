@@ -307,7 +307,7 @@ function Runtime:ArmGameCooldown(spellID, primaryKey, cfg)
     return true
 end
 
-function Runtime:QueueGameCooldown(spellID, mapSpellToPrimary, mapRuntimeCfg)
+function Runtime:QueueGameCooldown(spellID, mapSpellToPrimary, mapRuntimeCfg, keepReadyWatch)
     spellID = tonumber(spellID)
     if not spellID or spellID <= 0
         or type(mapSpellToPrimary) ~= "table" or type(mapRuntimeCfg) ~= "table" then
@@ -318,25 +318,36 @@ function Runtime:QueueGameCooldown(spellID, mapSpellToPrimary, mapRuntimeCfg)
         return false
     end
     local cfg = mapRuntimeCfg[primaryKey]
-    if type(cfg) ~= "table" or cfg.gameStateCD ~= true or not ConfigHasAlertWork(cfg) then
+    if type(cfg) ~= "table" or cfg.gameStateCD ~= true then
         return false
+    end
+    local companionQueued = false
+    if cfg.onCooldownCfg then
+        companionQueued = self:QueueGameCooldown(spellID, { [spellID] = primaryKey },
+            { [primaryKey] = cfg.onCooldownCfg }, true)
+    end
+    if not ConfigHasAlertWork(cfg) then
+        return companionQueued
     end
     if gameWatch[spellID] then
         if cfg.cdMode == "cooldown" then
             -- Mode changed from Ready to Cooldown while a watch was armed.
-            gameWatch[spellID] = nil
+            if not keepReadyWatch then
+                gameWatch[spellID] = nil
+            end
         else
             self:ArmGameCooldown(spellID, primaryKey, cfg)
             return true
         end
     end
-    local pending = gamePending[spellID]
+    local pendingKey = cfg.cdMode == "cooldown" and (tostring(spellID) .. ":cooldown") or spellID
+    local pending = gamePending[pendingKey]
     if pending then
         pending.primaryKey = primaryKey
         pending.cfg = cfg
         pending.at = GetTime()
     else
-        gamePending[spellID] = { primaryKey = primaryKey, cfg = cfg, at = GetTime() }
+        gamePending[pendingKey] = { primaryKey = primaryKey, cfg = cfg, at = GetTime() }
     end
     self:StartUpdate()
     return true
@@ -348,24 +359,25 @@ function Runtime:EvaluateGameCooldowns(now)
 
     -- Cast-success queue: wait for the client to report the real cooldown, then
     -- move the spell into the armed watch.
-    for spellID, pending in pairs(gamePending) do
+    for pendingKey, pending in pairs(gamePending) do
+        local spellID = tonumber(pending.cfg.triggerSpellID) or tonumber(pending.cfg.spellId)
         local mode = pending.cfg and pending.cfg.cdMode
         local state = ReadGameSpellState(spellID, mode == "charge")
         if not state or state.isEnabled == false
             or (now - (pending.at or now)) > GAME_PENDING_TIMEOUT then
-            gamePending[spellID] = nil
+            gamePending[pendingKey] = nil
         elseif mode == "cooldown" then
             if state.active == true and state.isOnGCD ~= true then
                 -- "cooldown" mode announces at the real cooldown start and
                 -- stops watching: the ready edge is a separate mode.
                 local record = BuildGameWatchRecord(pending.primaryKey, pending.cfg, state)
                 SafeCall("playReady", record.cd, "voice", 0, record.primaryKey)
-                gamePending[spellID] = nil
+                gamePending[pendingKey] = nil
             else
                 active = true
             end
         elseif state.active == true then
-            gamePending[spellID] = nil
+            gamePending[pendingKey] = nil
             if not gameWatch[spellID] then
                 gameWatch[spellID] = BuildGameWatchRecord(pending.primaryKey, pending.cfg, state)
             end
@@ -416,21 +428,32 @@ end
 
 function Runtime:PrimeGameCooldowns(mappedRuntimeCfg)
     local keep = {}
+    local keepPending = {}
     for primaryKey, cfg in pairs(type(mappedRuntimeCfg) == "table" and mappedRuntimeCfg or {}) do
-        if type(cfg) == "table" and cfg.gameStateCD == true and ConfigHasAlertWork(cfg) then
+        if type(cfg) == "table" and cfg.gameStateCD == true
+            and (ConfigHasAlertWork(cfg) or (cfg.onCooldownCfg and ConfigHasAlertWork(cfg.onCooldownCfg))) then
             local spellID = tonumber(cfg.triggerSpellID) or tonumber(cfg.spellId) or 0
             if spellID > 0 then
-                keep[spellID] = true
+                keep[spellID] = ConfigHasAlertWork(cfg) and cfg.cdMode ~= "cooldown"
+                local pendingCfg = cfg.onCooldownCfg or (cfg.cdMode == "cooldown" and cfg)
+                local pendingKey = tostring(spellID) .. ":cooldown"
+                if pendingCfg and ConfigHasAlertWork(pendingCfg) then
+                    keepPending[pendingKey] = true
+                    if gamePending[pendingKey] then
+                        gamePending[pendingKey].cfg = pendingCfg
+                        gamePending[pendingKey].primaryKey = primaryKey
+                    end
+                end
                 if cfg.cdMode == "cooldown" then
                     -- Cast-driven only: never arm from a refresh, and drop any
                     -- stale Ready watch left over from a mode change.
                     gameWatch[spellID] = nil
-                    local pending = gamePending[spellID]
+                    local pending = gamePending[pendingKey]
                     if pending then
                         pending.cfg = cfg
                         pending.primaryKey = primaryKey
                     end
-                else
+                elseif ConfigHasAlertWork(cfg) then
                     self:ArmGameCooldown(spellID, primaryKey, cfg)
                 end
             end
@@ -442,7 +465,7 @@ function Runtime:PrimeGameCooldowns(mappedRuntimeCfg)
         end
     end
     for spellID in pairs(gamePending) do
-        if not keep[spellID] then
+        if not keep[spellID] and not keepPending[spellID] then
             gamePending[spellID] = nil
         end
     end

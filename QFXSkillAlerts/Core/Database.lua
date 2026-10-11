@@ -70,6 +70,7 @@ local defaults = {
             importedVersion = 0,
             pendingRuntimeReload = false,
         },
+        cdmSkillCatalog = {},
         languageMode = "auto",
         uiSkinMode = "auto",
     },
@@ -245,6 +246,21 @@ local function CopyKnownSavedFields(target, source)
     end
 end
 
+local function RecoverBloodlustSoundSource(db)
+    local cfg = type(db) == "table" and db.bloodlustConfig or nil
+    if type(cfg) ~= "table" or (type(cfg.soundSource) == "string" and cfg.soundSource ~= "") then
+        return
+    end
+    -- Earlier logins could replace the saved source with the custom default.
+    -- AceDB strips that default at logout; the saved media name still identifies
+    -- the selection even before its media addon has registered the sound.
+    if cfg.notifyMode == "tts" then
+        cfg.soundSource = "tts"
+    elseif tostring(cfg.sharedMediaSound or cfg.sharedMediaName or ""):match("%S") then
+        cfg.soundSource = "sharedmedia"
+    end
+end
+
 function Database:Initialize()
     if self.initialized then
         return self.db
@@ -257,12 +273,17 @@ function Database:Initialize()
     if type(LibStubGlobal) == "table" then
         local AceDB = LibStubGlobal:GetLibrary("AceDB-3.0", true)
         if AceDB then
-            aceDB = AceDB:New("QFXSkillAlertsDB", defaults, true)
+            -- Import explicit saved values before defaults populate the profile.
+            -- Otherwise CopyMissingTables sees the default as a saved value and
+            -- drops choices such as Bloodlust's SharedMedia source on every login.
+            aceDB = AceDB:New("QFXSkillAlertsDB", nil, true)
         end
     end
 
     if aceDB and type(aceDB.profile) == "table" then
         CopyKnownSavedFields(aceDB.profile, legacy)
+        RecoverBloodlustSoundSource(aceDB.profile)
+        aceDB:RegisterDefaults(defaults)
         QFXSkillAlertsDB = aceDB.profile
         MigrateLegacyCastSuccessConfigs(aceDB.profile)
         ApplyKnownSpecScopeMigration(aceDB.profile)
@@ -275,72 +296,8 @@ function Database:Initialize()
         return aceDB
     end
 
-    CopyMissingTables(legacy, {
-        specConfigs = {},
-        castSuccessConfigs = {},
-        bloodlustConfig = {
-            customSoundPaths = { "", "", "", "", "" },
-            voiceEnabled = true,
-            voiceConditionOp = "<=",
-            voiceConditionTime = 0,
-            soundSource = "custom",
-            imageEnabled = false,
-            imageConditionOp = "<=",
-            imageConditionTime = 0,
-            imageSource = "auto",
-            imageIconID = 0,
-            imageSize = 96,
-            imageStrata = "FULLSCREEN_DIALOG",
-            imageEndEvents = {},
-            imageDurationEnabled = false,
-            imageDuration = 2,
-            imageX = 0,
-            imageY = 120,
-            textEnabled = false,
-            textConditionOp = "<=",
-            textConditionTime = 0,
-            textSize = 24,
-            textDurationEnabled = false,
-            textDuration = 2,
-            textX = 0,
-            textY = 120,
-            textAttachMode = "outside",
-            textVAlign = "bottom",
-            textHAlign = "center",
-            textOffsetX = 0,
-            textOffsetY = 0,
-            textEndEvents = {},
-        },
-        minimap = {
-            angle = 225,
-            radius = 80,
-            hide = false,
-        },
-        collectionData = {},
-        collectionSerial = 0,
-        deletedEntries = {},
-        cdmVoiceRegistry = {
-            byIdentity = {},
-            byPayload = {},
-            collisionMap = {},
-        },
-        cdmVoiceUI = {
-            lastCategory = nil,
-        },
-        cdmVoiceProfiles = {},
-        cdmVoiceDisabledPresets = {},
-        cdmVoicePendingRemovals = {},
-        cdmVoiceApplyState = {
-            applyInProgress = false,
-        },
-        cdmVoiceSyncState = {
-            importedVersion = 0,
-            pendingRuntimeReload = false,
-        },
-        cdmSkillCatalog = {},
-        languageMode = "auto",
-        uiSkinMode = "auto",
-    })
+    RecoverBloodlustSoundSource(legacy)
+    CopyMissingTables(legacy, defaults.profile)
     QFXSkillAlertsDB = legacy
     MigrateLegacyCastSuccessConfigs(legacy)
     ApplyKnownSpecScopeMigration(legacy)

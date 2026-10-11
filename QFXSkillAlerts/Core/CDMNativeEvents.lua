@@ -95,6 +95,68 @@ end
 -- cached per cooldown-cache generation.
 local CATEGORY_ENUM_KEYS = { "Essential", "Utility", "TrackedBuff", "TrackedBar" }
 
+-- Opportunist's talent/passive ID is exposed by the CDM picker, while the
+-- proc buff uses a different spell. Register the buff rather than the passive.
+-- SimulationCraft's warrior buff definition uses 456120 for Opportunist.
+local PROC_AURA_IDS = { [444774] = { 456120 } }
+
+function Native:GetAuraSoundSpellIDs(spellID)
+    spellID = tonumber(spellID)
+    if not spellID or spellID <= 0 then
+        return {}
+    end
+    if PROC_AURA_IDS[spellID] then
+        return PROC_AURA_IDS[spellID]
+    end
+    local service = NS.Core and NS.Core.CDMVoiceService
+    local generation = service and type(service.GetCooldownCacheGeneration) == "function"
+        and tonumber(service:GetCooldownCacheGeneration()) or 0
+    local classID, specID = self:GetCurrentClassSpec()
+    if not self.auraSpellAliases or self.auraAliasGeneration ~= generation
+        or self.auraAliasClassID ~= classID or self.auraAliasSpecID ~= specID then
+        local aliases = {}
+        local api = C_CooldownViewer
+        local categories = Enum and Enum.CooldownViewerCategory
+        if type(api) == "table" and type(categories) == "table"
+            and type(api.GetCooldownViewerCategorySet) == "function"
+            and type(api.GetCooldownViewerCooldownInfo) == "function" then
+            for _, enumKey in ipairs(CATEGORY_ENUM_KEYS) do
+                if categories[enumKey] ~= nil then
+                    local ok, ids = pcall(api.GetCooldownViewerCategorySet, categories[enumKey], false)
+                    if ok and type(ids) == "table" then
+                        for _, cooldownID in ipairs(ids) do
+                            local infoOK, info = pcall(api.GetCooldownViewerCooldownInfo, cooldownID)
+                            if infoOK and type(info) == "table" and type(info.linkedSpellIDs) == "table" then
+                                local linked, seen = {}, {}
+                                for _, value in ipairs(info.linkedSpellIDs) do
+                                    local id = tonumber(value)
+                                    if id and id > 0 and not seen[id] then
+                                        seen[id] = true
+                                        linked[#linked + 1] = id
+                                    end
+                                end
+                                if #linked > 0 then
+                                    for _, field in ipairs({ "spellID", "overrideSpellID" }) do
+                                        local id = tonumber(info[field])
+                                        if id and id > 0 and not seen[id] then
+                                            aliases[id] = linked
+                                        end
+                                    end
+                                end
+                            end
+                        end
+                    end
+                end
+            end
+        end
+        self.auraSpellAliases = aliases
+        self.auraAliasGeneration = generation
+        self.auraAliasClassID, self.auraAliasSpecID = classID, specID
+    end
+    -- A directly entered buff ID keeps working without any CDM item.
+    return self.auraSpellAliases[spellID] or { spellID }
+end
+
 local function AddSpellID(set, value)
     value = tonumber(value)
     if value and value > 0 then

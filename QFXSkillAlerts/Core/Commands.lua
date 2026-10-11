@@ -52,6 +52,14 @@ function Commands:Initialize()
         local cmd, arg = msg:match("^(%S+)%s*(.-)$")
         cmd = cmd and string.lower(cmd) or ""
 
+        if cmd == "aura" then
+            local auraSounds = NS.Core and NS.Core.CDMNativeAuraSounds
+            if auraSounds and type(auraSounds.PrintDiagnostics) == "function" then
+                auraSounds:PrintDiagnostics(tonumber(arg) or 0)
+            end
+            return
+        end
+
         if cmd == "test" then
             local api = NS.API
             if not api then

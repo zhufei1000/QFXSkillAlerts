@@ -338,7 +338,23 @@ function Builder:Rebuild(spellToPrimary, runtimeCfg)
                     if Utils.SyncLinkedVisualDurations then
                         Utils.SyncLinkedVisualDurations(builtCfg)
                     end
-                    runtimeCfg[objectKey] = builtCfg
+                    local previous = runtimeCfg[objectKey]
+                    -- CDM can configure both edges of one spell. Keep Ready
+                    -- as the primary watch and carry On Cooldown alongside it.
+                    if previous and previous.gameStateCD and builtCfg.gameStateCD
+                        and previous.cdMode ~= builtCfg.cdMode then
+                        if builtCfg.cdMode == "cooldown" then
+                            previous.onCooldownCfg = builtCfg
+                        else
+                            builtCfg.onCooldownCfg = previous
+                            runtimeCfg[objectKey] = builtCfg
+                        end
+                    else
+                        if previous and previous.cdMode == builtCfg.cdMode then
+                            builtCfg.onCooldownCfg = previous.onCooldownCfg
+                        end
+                        runtimeCfg[objectKey] = builtCfg
+                    end
                 end
             end
         end

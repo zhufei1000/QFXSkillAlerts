@@ -1,5 +1,18 @@
 # Changelog
 
+## 1.0.238 - 2026-10-12
+
+- Release audit: preserve disabled legacy CDM records so migration cannot re-enable muted voices, tolerate malformed legacy values, and clear the correct global-storage collection references when deleting a bridged cooldown alert.
+- Removed the unused aura teardown and texture-resolution wrapper, four unused layout constants and the duplicate fallback database defaults. All 106 own Lua files are reachable through the two addon TOCs/XML; third-party library APIs and test accessors are retained.
+- Fixed Bloodlust's SharedMedia source and other saved settings being masked by AceDB defaults during login. Import explicit saved values before applying defaults, recover a missing Bloodlust source from its retained media name, and use the saved sound path when the custom slot is blank. Verified real AceDB logout cleanup, serialization, next-login editor state, delayed SharedMedia registration and playback-path resolution; no manual SavedVariables edits are required.
+- Fixed the skill picker saving Opportunist's hidden passive/talent ID 444774 as an aura monitor: native sounds now register its triggered buff ID 456120 while preserving the saved entry. Other CDM base/override spells use static linked-spell metadata for aura registration; explicit buff IDs stay explicit. Added `/qfxsa aura [spellID]` to report configured/resolved IDs, registration state and the sound path without reading live or secret aura data.
+- Fixed post-migration Cooldown Manager aura voices being saved but never registered. Both effective CDM presets and regular aura entries now feed the native sound registrations, including applied / removed / applications-increased triggers.
+- Keep accepted aura registrations across loading screens and failed replacements; defer registration changes during combat and retry pending work after combat, world entry, specialization changes or addon/media loading.
+- Resolve runtime audio through the core media catalog before the load-on-demand settings UI opens; respect aura class, specialization and race scope and avoid overwriting another specialization's bridged records.
+- Legacy voice migration removes a source record only after the replacement entry was saved successfully. Unresolved media and failed saves remain available for a later retry.
+- Ready and On Cooldown voices for the same spell retain separate runtime configurations and pending triggers instead of overwriting each other.
+- Validation: all 33 `tests/test_*.lua` scripts pass, with Bloodlust login/source persistence, the user's actual saved warrior entry (444774 resolving to 456120), CDM linked spell aliases, stack trigger, registration retention/retry, combat deferral, scope, pending migration, lazy media resolution and dual cooldown-edge coverage. API contract checked against Retail Live 12.1.0.69933 and the proc ID against SimulationCraft's warrior buff definition. Actual combat/audio playback still requires in-game verification.
+
 ## 1.0.237 - 2026-10-11
 
 - Fixed Bloodlust alert editing and saving failing with `attempt to index a nil value (local 'cfg')`: the configuration initializer now returns its normalized configuration table. Added real controller load/save regression coverage in `tests/test_bloodlust_editor.lua`.

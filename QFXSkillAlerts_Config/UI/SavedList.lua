@@ -17,9 +17,6 @@ local SavedListRenderer = NS.UI.SavedListRenderer or {}
 local SavedListRefresh = NS.UI.SavedListRefresh or {}
 
 local ROW_HEIGHT = 28
-local GROUP_ROW_HEIGHT = 30
-local EMPTY_ROW_HEIGHT = 24
-local HEADER_HEIGHT = 32
 
 local function CallSoon(callback, delay)
     if type(callback) ~= "function" then

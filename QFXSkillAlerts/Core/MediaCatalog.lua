@@ -349,14 +349,6 @@ function Catalog:FetchSharedMediaTexturePath(name)
     return ""
 end
 
-function Catalog:ResolveSharedMediaTexturePath(name, fallbackPath)
-    local path = self:FetchSharedMediaTexturePath(name)
-    if path ~= "" then
-        return path
-    end
-    return TrimText(fallbackPath or "")
-end
-
 function Catalog:ResolveSoundSourceFields(entry, modeTts, modeSound)
     entry = type(entry) == "table" and entry or {}
     modeTts = tostring(modeTts or MODE_TTS)
@@ -522,5 +514,4 @@ Bridge("FindSharedMediaSoundNameByPath")
 Bridge("ResolveSharedMediaSoundPath")
 Bridge("GetSharedMediaTextureList")
 Bridge("FetchSharedMediaTexturePath")
-Bridge("ResolveSharedMediaTexturePath")
 Bridge("ResolveSoundSourceFields")

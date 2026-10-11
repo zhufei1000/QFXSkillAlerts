@@ -79,7 +79,7 @@ local function GetAlertEvent(alert)
 end
 
 -- Ready / cooldown-start / aura events are played by the addon's own runtimes
--- (CDMNativeWatch and CDMNativeAuraSounds). Alerts left in the Cooldown
+-- (the main Runtime and CDMNativeAuraSounds). Alerts left in the Cooldown
 -- Manager layout from earlier versions must stay silent so a voice is never
 -- played twice; the shared check lives in CDMNativeEvents.
 

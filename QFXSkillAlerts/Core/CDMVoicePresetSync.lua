@@ -332,7 +332,7 @@ function Sync:EvaluateRecord(record, cooldownCatalog)
         equivalentSoundCount = 0,
     }
     -- Ready / cooldown-start / aura records are handled by the addon runtimes
-    -- (CDMNativeWatch and CDMNativeAuraSounds); they never produce Cooldown
+    -- (the main Runtime and CDMNativeAuraSounds); they never produce Cooldown
     -- Manager layout work. They only count as applied while the spell is
     -- present in the current Cooldown Manager data.
     if Native and type(Native.IsNativeRecord) == "function" and Native:IsNativeRecord(record) then

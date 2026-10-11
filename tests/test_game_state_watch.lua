@@ -259,4 +259,50 @@ Runtime:PrimeGameCooldowns(cfgMapPrime)
 Equal(#played, playedBase + 1, "priming a mid-cooldown 'cooldown' entry must not announce")
 Equal(Runtime:EvaluateGameCooldowns(now), false, "priming must not leave a watch behind")
 
+-- 12) Real builder output must keep both CDM edges regardless of save order.
+dofile("QFXSkillAlerts/Core/RuntimeConfigBuilder.lua")
+local Builder = QFXSkillAlertsNS.Core.RuntimeConfigBuilder
+for _, reverse in ipairs({ false, true }) do
+    Reset()
+    now = now + 10
+    local ready = { spellId = 3010, cdMode = "ready", voiceEnabled = true, spellName = "Ready" }
+    local started = { spellId = 3010, cdMode = "cooldown", voiceEnabled = true, spellName = "Started" }
+    local entries = reverse and { started, ready } or { ready, started }
+    Builder:Configure({
+        getCurrentClassSpec = function() return 1, 71 end,
+        getStoredEntryMap = function(classID) return classID == 0 and entries or {} end,
+        getOrderedEntryIndices = function(map) return #map > 0 and { 1, 2 } or {} end,
+        getEntry = function(map, index) return map[index] end,
+    })
+    local spellMap, cfgMap = {}, {}
+    Assert(Builder:Rebuild(spellMap, cfgMap))
+    local cfg = cfgMap[spellMap[3010]]
+    Equal(cfg.cdMode, "ready", "Ready keeps its watch")
+    Equal(cfg.onCooldownCfg.cdMode, "cooldown", "On Cooldown keeps a separate config")
+    local before = #played
+    cooldownState[3010] = { isActive = true, isEnabled = true, isOnGCD = false }
+    Assert(Runtime:QueueGameCooldown(3010, spellMap, cfgMap))
+    Runtime:PrimeGameCooldowns(cfgMap)
+    Runtime:EvaluateGameCooldowns(now)
+    Equal(#played, before + 1, "cooldown-start voice fires")
+    Equal(played[#played].cd.spellName, "Started", "cooldown-start uses its own voice config")
+    now = now + 5
+    cooldownState[3010] = { isActive = false, isEnabled = true, isOnGCD = false }
+    Runtime:EvaluateGameCooldowns(now)
+    Runtime:EvaluateGameCooldowns(now)
+    Equal(#played, before + 2, "ready voice also fires")
+    Equal(played[#played].cd.spellName, "Ready", "ready uses its own voice config")
+
+    -- An output-disabled Ready entry must not disable its enabled companion.
+    Reset()
+    cfg.voiceEnabled = false
+    before = #played
+    now = now + 10
+    cooldownState[3010] = { isActive = true, isEnabled = true, isOnGCD = false }
+    Assert(Runtime:QueueGameCooldown(3010, spellMap, cfgMap))
+    Runtime:PrimeGameCooldowns(cfgMap)
+    Runtime:EvaluateGameCooldowns(now)
+    Equal(#played, before + 1, "enabled cooldown edge survives a refresh with disabled Ready")
+end
+
 print("PASS: game cooldown state watch")

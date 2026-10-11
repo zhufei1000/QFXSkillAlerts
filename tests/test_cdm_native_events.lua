@@ -104,6 +104,7 @@ QFXSkillAlertsNS.Core.CDMVoicePresetStore = {
             eventKey = tostring(data.eventKey or ""),
             voiceName = tostring(data.voiceName or ""),
             voicePath = tostring(data.voicePath or ""),
+            enabled = data.enabled ~= false,
         }
     end,
 }
@@ -170,7 +171,15 @@ Assert(byEvent.ON_COOLDOWN, "cooldown virtual record expected")
 Equal(byEvent.AVAILABLE.voiceName, "Voice B", "virtual record should carry the current voice")
 
 -- Delete removes the bridged entry.
+dofile("QFXSkillAlerts/Core/CollectionStore.lua")
+local deleteIndex = Bridge:FindEntry(8, 62, 100, "cooldown")
+local deleteKey = string.format("0:0:%d", deleteIndex)
+QFXSkillAlertsDB.collectionData = { [8] = { [62] = {
+    root = {}, groups = { test = { entries = { deleteKey, "0:0:999" } } },
+} } }
 Assert(Bridge:DeleteRecord(8, 62, 100, "cooldown"), "bridge delete should succeed")
+Equal(#QFXSkillAlertsDB.collectionData[8][62].groups.test.entries, 1, "delete clears the real global-storage collection key")
+Equal(QFXSkillAlertsDB.collectionData[8][62].groups.test.entries[1], "0:0:999", "delete keeps unrelated collection references")
 Assert(Bridge:FindEntry(8, 62, 100, "cooldown") == nil, "deleted entry should be gone")
 Equal(#Bridge:BuildVirtualRecords(8, 62), 1, "only the ready record should remain")
 
@@ -299,5 +308,142 @@ Assert(not Native:IsRecordAvailable({ spellID = 400 }), "missing spell should fa
 C_CooldownViewer = nil
 cdmGeneration = cdmGeneration + 1
 Assert(Native:IsRecordAvailable({ spellID = 400 }), "unreadable CDM data should fail open")
+
+-- A CDM aura saved after migration must register, including the warrior proc
+-- from the user report. A regular aura entry overrides the same legacy edge.
+QFXSkillAlertsDB.specConfigs = {}
+records = { { spellID = 456120, eventKey = "AURA_APPLIED", voiceName = "Proc", voicePath = "proc.ogg" } }
+Assert(AuraSounds:Sync(), "post-migration CDM aura should register")
+Equal(AuraSounds.registered["aura:player:456120:applied"].path, "proc.ogg", "CDM proc path")
+Assert(Bridge:SaveAuraRecord(8, 62, 456120, "Proc", "applications", "player", auraVoice))
+Assert(AuraSounds:Sync(), "applications should register alongside applied")
+Equal(AuraSounds.registered["aura:player:456120:applications"].trigger, 1, "stack increase enum")
+local countBeforeZone = #addCalls
+Assert(not AuraSounds.eventFrame.events.LOADING_SCREEN_ENABLED, "loading screen must not tear down sounds")
+AuraSounds.eventFrame.scripts.OnEvent(nil, "PLAYER_ENTERING_WORLD")
+Equal(#addCalls, countBeforeZone, "zone entry should retain accepted registrations")
+
+-- Refused voice edits keep the last working registration and retry on regen.
+local old = AuraSounds.registered["aura:player:456120:applications"]
+Assert(Bridge:SaveAuraRecord(8, 62, 456120, "Proc", "applications", "player", voiceB))
+addResult = false
+Assert(not AuraSounds:Sync(), "refused replacement should fail")
+Equal(AuraSounds.registered["aura:player:456120:applications"].id, old.id, "working registration retained")
+addResult = true
+AuraSounds.eventFrame.scripts.OnEvent(nil, "PLAYER_REGEN_ENABLED")
+Equal(AuraSounds.registered["aura:player:456120:applications"].path, "B.ogg", "replacement retried")
+
+-- Combat must not attempt protected registration or forget accepted IDs.
+local combatLocked = true
+function InCombatLockdown() return combatLocked end
+local callsBeforeCombat = #addCalls + #removeCalls
+Assert(Bridge:DeleteRecord(8, 62, 100, "ready") == false)
+records = {}
+Assert(not AuraSounds:Sync(), "combat sync should defer")
+Equal(#addCalls + #removeCalls, callsBeforeCombat, "no protected calls during combat")
+Assert(AuraSounds.registered["aura:player:456120:applied"], "old IDs retained until safe removal")
+combatLocked = false
+AuraSounds.eventFrame.scripts.OnEvent(nil, "PLAYER_REGEN_ENABLED")
+Assert(not AuraSounds.registered["aura:player:456120:applied"], "deleted CDM record removed after combat")
+
+-- Global storage must not let another spec overwrite or register this spec's voice.
+Assert(Bridge:SaveAuraRecord(8, 63, 456120, "Proc", "applications", "player", voiceA))
+Equal(#Bridge:BuildAuraEntries(8, 62), 1, "only the current spec's aura is returned")
+Assert(AuraSounds:Sync())
+Equal(AuraSounds.registered["aura:player:456120:applications"].path, "B.ogg", "other spec must not overwrite")
+
+-- Pending media or a failed entry write cannot delete the legacy record.
+QFXSkillAlertsDB.cdmVoiceSyncState = { alertBridgeMigrationDone = true }
+local pendingRecord = { classID = 8, specID = 62, spellID = 900, eventKey = "AVAILABLE", voiceName = "", voicePath = "" }
+QFXSkillAlertsDB.cdmVoiceProfiles = { [8] = { [62] = { pending = pendingRecord } } }
+Equal(Bridge:MigrateLegacyRecords(), 0, "unresolved record should not migrate")
+Assert(QFXSkillAlertsDB.cdmVoiceProfiles[8][62].pending, "unresolved legacy voice retained")
+Assert(not QFXSkillAlertsDB.cdmVoiceSyncState.alertBridgeMigrationDone, "unresolved migration should retry")
+pendingRecord.voiceName = "Recovered"
+pendingRecord.voicePath = "recovered.ogg"
+local saveRecord = Bridge.SaveRecord
+Bridge.SaveRecord = function() return false, "save_failed" end
+Equal(Bridge:MigrateLegacyRecords(), 0, "failed save should not migrate")
+Assert(QFXSkillAlertsDB.cdmVoiceProfiles[8][62].pending, "failed save retains old voice")
+Bridge.SaveRecord = saveRecord
+Equal(Bridge:MigrateLegacyRecords(), 1, "later successful migration should recover")
+Assert(not QFXSkillAlertsDB.cdmVoiceProfiles[8][62].pending, "only successful migration removes old voice")
+
+-- A disabled legacy record is also the override that mutes a built-in preset.
+-- Migration must leave it disabled and must tolerate malformed old values.
+QFXSkillAlertsDB.cdmVoiceSyncState = {}
+QFXSkillAlertsDB.cdmVoiceProfiles = { [8] = { [62] = {
+    disabled = { spellID = 901, eventKey = "AURA_APPLIED", voiceName = "Muted", voicePath = "muted.ogg", enabled = false },
+    malformed = false,
+} } }
+Equal(Bridge:MigrateLegacyRecords(), 0, "disabled and malformed records do not migrate")
+Equal(QFXSkillAlertsDB.cdmVoiceProfiles[8][62].disabled.enabled, false, "disabled preset override retained")
+Assert(not Bridge:FindAuraEntry(8, 62, 901, "applied", "player"), "migration must not re-enable a muted aura")
+
+-- Runtime sound lookup works before the load-on-demand settings addon opens.
+QFXSkillAlertsNS.AceOptions = nil
+dofile("QFXSkillAlerts/Core/MediaCatalog.lua")
+QFXSkillAlertsNS.MediaCatalog.FetchSharedMediaSoundPath = function(_, name)
+    return name == "Runtime media" and "live.ogg" or ""
+end
+dofile("QFXSkillAlerts/Core/Notifier.lua")
+dofile("QFXSkillAlerts/Core/NotifierBridge.lua")
+local entryIndex = Bridge:FindAuraEntry(8, 62, 456120, "applications", "player")
+local entry = QFXSkillAlertsDB.specConfigs[0][0][entryIndex]
+entry.sharedMediaSound = "Runtime media"
+entry.soundPath = "stale.ogg"
+Assert(AuraSounds:Sync())
+Equal(AuraSounds.registered["aura:player:456120:applications"].path, "live.ogg", "runtime resolves latest SharedMedia path")
+
+-- Reproduce the user's real saved entry: the picker stores the hidden talent
+-- ID 444774. The client must receive the triggered buff ID 456120 instead.
+local getCurrentClassSpec = QFXSkillAlertsNS.Core.CDMVoiceService.GetCurrentClassSpec
+QFXSkillAlertsNS.Core.CDMVoiceService.GetCurrentClassSpec = function() return 1, 71 end
+QFXSkillAlertsDB.specConfigs = { [0] = { [0] = { {
+    entryType = "aura", spellId = 444774, spellName = "Opportunist", auraTrigger = "applied",
+    auraUnit = "player", voiceEnabled = true, notifyMode = "sound", soundSource = "sharedmedia",
+    sharedMediaSound = "QFX Alert", soundPath = "proc.ogg",
+    alertClassIDs = { true }, alertSpecIDs = { [71] = true }, alertRaceIDs = { [0] = true },
+} } } }
+records = { { spellID = 444774, eventKey = "AURA_APPLIED", voiceName = "Proc", voicePath = "legacy.ogg" } }
+local desired = AuraSounds:BuildDesired()
+Assert(desired["aura:player:456120:applied"], "picker talent ID resolves to its actual proc buff")
+Assert(not desired["aura:player:444774:applied"], "hidden passive must not be registered")
+Equal(desired["aura:player:456120:applied"].sourceSpellID, 444774, "diagnostics retain configured ID")
+Equal(desired["aura:player:456120:applied"].path, "proc.ogg", "regular entry overrides legacy alias")
+Assert(AuraSounds:Sync())
+Equal(AuraSounds.registered["aura:player:456120:applied"].spellID, 456120, "native registration uses buff ID")
+local realEntry = QFXSkillAlertsDB.specConfigs[0][0][1]
+Equal(realEntry.spellId, 444774, "resolution never rewrites the user's saved ID")
+realEntry.auraTrigger = "applications"
+Assert(AuraSounds:Sync())
+Equal(AuraSounds.registered["aura:player:456120:applications"].trigger, 1, "stack trigger uses buff ID too")
+
+-- Other CDM base/override IDs resolve through static linkedSpellIDs. Explicit
+-- linked IDs stay explicit; no live aura reads or Blizzard item hooks occur.
+local aliasCategoryReads = 0
+C_CooldownViewer = {
+    GetCooldownViewerCategorySet = function(category)
+        aliasCategoryReads = aliasCategoryReads + 1
+        return category == 3 and { 9001 } or {}
+    end,
+    GetCooldownViewerCooldownInfo = function()
+        return { spellID = 9100, overrideSpellID = 9101, linkedSpellIDs = { 9200, 9201, 9200 } }
+    end,
+}
+cdmGeneration = cdmGeneration + 1
+local resolved = Native:GetAuraSoundSpellIDs(9100)
+Equal(#resolved, 2, "CDM linked aura IDs are deduplicated")
+Equal(resolved[1], 9200, "first linked aura")
+local readsBeforeCache = aliasCategoryReads
+Equal(Native:GetAuraSoundSpellIDs(9101)[2], 9201, "override ID resolves to linked auras")
+Equal(aliasCategoryReads, readsBeforeCache, "alias catalog reused across entries")
+Equal(#Native:GetAuraSoundSpellIDs(9200), 1, "explicit buff ID keeps its identity")
+Equal(Native:GetAuraSoundSpellIDs(9200)[1], 9200, "explicit buff is not expanded")
+C_CooldownViewer = nil
+cdmGeneration = cdmGeneration + 1
+Equal(Native:GetAuraSoundSpellIDs(9100)[1], 9100, "unlisted manual buff ID still works")
+Equal(Native:GetAuraSoundSpellIDs(444774)[1], 456120, "known proc resolves without CDM data")
+QFXSkillAlertsNS.Core.CDMVoiceService.GetCurrentClassSpec = getCurrentClassSpec
 
 print("CDM native events regression tests passed")
