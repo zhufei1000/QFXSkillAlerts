@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.0.237 - 2026-10-11
+
+- Fixed Bloodlust alert editing and saving failing with `attempt to index a nil value (local 'cfg')`: the configuration initializer now returns its normalized configuration table. Added real controller load/save regression coverage in `tests/test_bloodlust_editor.lua`.
+
 ## 1.0.236 - 2026-10-04
 
 - Performance pass: cooldown completion now polls every 0.05s during the final second (alerts land within ~50ms instead of ~100ms) while idle polling is unchanged; the cross-spec skill catalog no longer re-walks every Cooldown Manager category after each fight (5-minute throttle per spec, forced refresh on login / spec change / data load); the catalog no longer builds or stores a long signature string per spec; per-cooldown info no longer retains Blizzard's full raw table; bag rescans use the lightweight item-ID getter instead of allocating an info table per slot.

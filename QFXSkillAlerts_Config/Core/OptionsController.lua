@@ -126,6 +126,7 @@ local function EnsureBloodlustConfigTable()
     cfg.textOffsetX = tonumber(cfg.textOffsetX) or 0
     cfg.textOffsetY = tonumber(cfg.textOffsetY) or 0
     cfg.textEndEvents = NormalizeEndEventMap(cfg.textEndEvents)
+    return cfg
 end
 
 local function FirstNonEmptyCustomPath(cfg)
