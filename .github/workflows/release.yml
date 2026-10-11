@@ -17,6 +17,12 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Prepare release notes outside the addon package
+        run: |
+          mkdir -p .release
+          awk '/^## / { if (found) exit; found=1 } found { print }' CHANGELOG.md > .release/release-notes.md
+          test -s .release/release-notes.md
+
       - name: Package and release
         uses: BigWigsMods/packager@v2
         env:

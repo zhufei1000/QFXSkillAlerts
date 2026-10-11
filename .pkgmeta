@@ -1,5 +1,8 @@
 package-as: QFXSkillAlerts
 enable-nolib-creation: no
+manual-changelog:
+  filename: .release/release-notes.md
+  markup-type: markdown
 
 ignore:
   - tests
