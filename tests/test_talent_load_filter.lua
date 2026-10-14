@@ -290,7 +290,8 @@ Assert(savedMap[2] and savedMap[2].eventLoadContexts.delve,
 saveState.selectedKey = nil
 saveState.eventLoadContexts = { dungeon = true }
 saveState.eventDungeonMode = "any"
-Assert(QFXSkillAlertsNS.EntryStore:SaveEntry(owner) == nil,
+local overlapSaved, overlapKey = QFXSkillAlertsNS.EntryStore:SaveEntry(owner)
+Assert(overlapSaved == false and overlapKey == "MSG_DUP_EVENT_VOICE",
     "same event with an overlapping dungeon condition should be rejected")
 Assert(savedMap[3] == nil, "rejected event overlap must not create a saved entry")
 
@@ -338,5 +339,35 @@ local legacyImported = QFXSkillAlertsNS.ImportExportUtil:SanitizeEntryForImport(
 })
 Assert(legacyImported.loadTalentEnabled == true and legacyImported.loadTalentId == 300,
     "legacy import must migrate the combined load talent")
+
+-- Save validation failures return the locale key so the editor can show the
+-- reason inline next to the Save button.
+saveState.entryType = "cast"
+saveState.selectedKey = nil
+saveState.spellId = 55555
+saveState.spellName = "No Action Cast"
+saveState.voiceEnabled = false
+saveState.imageEnabled = false
+saveState.textEnabled = false
+local noActionSaved, noActionKey = QFXSkillAlertsNS.EntryStore:SaveEntry(owner)
+Assert(noActionSaved == false and noActionKey == "MSG_NEED_ALERT_ACTIONS",
+    "a save without any alert action must report the inline error key")
+Assert(saveState.qfxsaSaveError == "MSG_NEED_ALERT_ACTIONS",
+    "the failure key must be recorded on the editor state")
+
+saveState.voiceEnabled = true
+saveState.soundPath = ""
+saveState.customSoundPath = ""
+saveState.customSoundPaths = { "", "", "", "", "" }
+local noSoundSaved, noSoundKey = QFXSkillAlertsNS.EntryStore:SaveEntry(owner)
+Assert(noSoundSaved == false and noSoundKey == "MSG_NEED_SOUND_PATH",
+    "a voice alert without a sound path must report the inline error key")
+
+saveState.soundPath = "Interface\\AddOns\\Test\\cast.ogg"
+saveState.customSoundPath = "Interface\\AddOns\\Test\\cast.ogg"
+saveState.customSoundPaths = { "Interface\\AddOns\\Test\\cast.ogg", "", "", "", "" }
+Assert(QFXSkillAlertsNS.EntryStore:SaveEntry(owner) == true,
+    "a successful save must clear the inline error state")
+Assert(saveState.qfxsaSaveError == nil, "successful save must clear the recorded failure key")
 
 print("test_talent_load_filter: runtime, save, and import cases passed")

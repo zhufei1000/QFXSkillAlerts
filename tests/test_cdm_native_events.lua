@@ -100,8 +100,10 @@ QFXSkillAlertsNS.Core.CDMVoicePresetStore = {
         return {
             classID = tonumber(data.classID),
             specID = tonumber(data.specID),
+            category = tostring(data.category or ""),
             spellID = tonumber(data.spellID),
             eventKey = tostring(data.eventKey or ""),
+            auraUnit = data.auraUnit and tostring(data.auraUnit):lower() or nil,
             voiceName = tostring(data.voiceName or ""),
             voicePath = tostring(data.voicePath or ""),
             enabled = data.enabled ~= false,
@@ -132,6 +134,19 @@ Equal(Bridge:GetModeForEventKey("AVAILABLE"), "ready", "AVAILABLE maps to ready"
 Equal(Bridge:GetModeForEventKey("ON_COOLDOWN"), "cooldown", "ON_COOLDOWN maps to cooldown")
 Equal(Bridge:GetEventKeyForMode("ready"), "AVAILABLE", "ready maps back to AVAILABLE")
 Equal(Bridge:GetEventKeyForMode("cooldown"), "ON_COOLDOWN", "cooldown maps back to ON_COOLDOWN")
+
+-- Aura units: tracked bars watch the target, everything else the player.
+Equal(Bridge:ResolveRecordAuraUnit({ category = "trackedBar" }), "target",
+    "tracked bar records watch the target")
+Equal(Bridge:ResolveRecordAuraUnit({ category = "trackedBuff" }), "player",
+    "tracked buff records watch the player")
+Equal(Bridge:ResolveRecordAuraUnit({ category = "essential" }), "player",
+    "cooldown records watch the player")
+Equal(Bridge:ResolveRecordAuraUnit({ category = "trackedBar", auraUnit = "focus" }), "focus",
+    "an explicit unit wins over the category default")
+Equal(Bridge:ResolveRecordAuraUnit({ category = "trackedBuff", auraUnit = "TARGET" }), "target",
+    "an explicit unit is normalized")
+Equal(Bridge:ResolveRecordAuraUnit(nil), "player", "missing records watch the player")
 
 -- Bridge save / update / lookup.
 local voiceA = { name = "Voice A", path = "A.ogg" }
@@ -315,6 +330,24 @@ QFXSkillAlertsDB.specConfigs = {}
 records = { { spellID = 456120, eventKey = "AURA_APPLIED", voiceName = "Proc", voicePath = "proc.ogg" } }
 Assert(AuraSounds:Sync(), "post-migration CDM aura should register")
 Equal(AuraSounds.registered["aura:player:456120:applied"].path, "proc.ogg", "CDM proc path")
+
+-- CDM aura records without a saved unit register on both the player and the
+-- target (Blizzard's CooldownViewer aura tracking scans both units), so enemy
+-- debuffs like Garrote and Rupture fire as well. An explicit unit always wins.
+records = {
+    { spellID = 1943, eventKey = "AURA_APPLIED", category = "trackedBar", voiceName = "Rupture", voicePath = "rupture.ogg" },
+    { spellID = 703, eventKey = "AURA_REMOVED", category = "essential", voiceName = "Garrote", voicePath = "garrote.ogg" },
+    { spellID = 53, eventKey = "AURA_APPLIED", auraUnit = "focus", voiceName = "Stun", voicePath = "stun.ogg" },
+}
+Assert(AuraSounds:Sync(), "player and target CDM auras should register")
+Equal(AuraSounds.registered["aura:target:1943:applied"].path, "rupture.ogg", "tracked bar debuff registers on the target")
+Equal(AuraSounds.registered["aura:player:1943:applied"].path, "rupture.ogg", "tracked bar record also registers on the player")
+Equal(AuraSounds.registered["aura:player:703:removed"].path, "garrote.ogg", "player registration for a removed trigger")
+Equal(AuraSounds.registered["aura:target:703:removed"].path, "garrote.ogg", "target registration for a removed trigger")
+Equal(AuraSounds.registered["aura:focus:53:applied"].path, "stun.ogg", "an explicit unit is kept")
+Assert(AuraSounds.registered["aura:player:53:applied"] == nil, "an explicit unit does not double-register")
+records = { { spellID = 456120, eventKey = "AURA_APPLIED", voiceName = "Proc", voicePath = "proc.ogg" } }
+Assert(AuraSounds:Sync(), "restoring the proc record should re-register it")
 Assert(Bridge:SaveAuraRecord(8, 62, 456120, "Proc", "applications", "player", auraVoice))
 Assert(AuraSounds:Sync(), "applications should register alongside applied")
 Equal(AuraSounds.registered["aura:player:456120:applications"].trigger, 1, "stack increase enum")
@@ -444,6 +477,24 @@ C_CooldownViewer = nil
 cdmGeneration = cdmGeneration + 1
 Equal(Native:GetAuraSoundSpellIDs(9100)[1], 9100, "unlisted manual buff ID still works")
 Equal(Native:GetAuraSoundSpellIDs(444774)[1], 456120, "known proc resolves without CDM data")
+-- Tracked-bar legacy aura records migrate to a target-watching entry so
+-- target debuffs (Garrote, Rupture, ...) keep firing after the move.
+QFXSkillAlertsDB.cdmVoiceSyncState = {}
+QFXSkillAlertsDB.cdmVoiceProfiles = { [8] = { [64] = {
+    ["trackedBar:1943:AURA_APPLIED"] = {
+        classID = 8,
+        specID = 64,
+        category = "trackedBar",
+        spellID = 1943,
+        eventKey = "AURA_APPLIED",
+        voiceName = "Rupture",
+        voicePath = "rupture.ogg",
+    },
+} } }
+Equal(Bridge:MigrateLegacyRecords(), 1, "tracked bar aura record migrates")
+Assert(Bridge:FindAuraEntry(8, 64, 1943, "applied", "target"), "tracked bar aura entry watches the target")
+Assert(not Bridge:FindAuraEntry(8, 64, 1943, "applied", "player"), "no player entry for a tracked bar")
+
 QFXSkillAlertsNS.Core.CDMVoiceService.GetCurrentClassSpec = getCurrentClassSpec
 
 print("CDM native events regression tests passed")

@@ -2,6 +2,12 @@ local NS = rawget(_G, "QFXSkillAlertsNS") or {}
 _G.QFXSkillAlertsNS = NS
 
 NS.UI = NS.UI or {}
+local NativeCreateFrame = CreateFrame
+local function CreateFrame(kind, name, parent, template)
+    local bridge = NS.UI.FactoryBridge
+    if bridge then return bridge.CreateFrame(kind, name, parent, template) end
+    return NativeCreateFrame(kind, name, parent, template)
+end
 NS.UI.SavedListRowFactory = NS.UI.SavedListRowFactory or {}
 
 local RowFactory = NS.UI.SavedListRowFactory
@@ -168,13 +174,15 @@ function RowFactory:EnsureRow(list, index)
         return list.rows[index]
     end
 
-    local row = CreateFrame("Button", nil, list.content)
+    local row = NS.UI.FactoryBridge and NS.UI.FactoryBridge.CreateListRow(list.content, ROW_HEIGHT)
+        or CreateFrame("Button", nil, list.content)
     row:SetHeight(ROW_HEIGHT)
     row:SetPoint("LEFT", list.content, "LEFT", 0, 0)
     row:SetPoint("RIGHT", list.content, "RIGHT", -4, 0)
     row:RegisterForClicks("LeftButtonUp", "RightButtonUp")
     row:RegisterForDrag("LeftButton")
 
+    if not NS.UI.FactoryBridge then
     local bg = row:CreateTexture(nil, "BACKGROUND")
     bg:SetPoint("TOPLEFT", row, "TOPLEFT", 1, -1)
     bg:SetPoint("BOTTOMRIGHT", row, "BOTTOMRIGHT", -1, 1)
@@ -245,6 +253,8 @@ function RowFactory:EnsureRow(list, index)
     row.main = main
     row.text = main
 
+    end
+
     row:SetScript("OnClick", function(_, button)
         if row.isPlaceholder then
             return
@@ -307,7 +317,11 @@ function RowFactory:EnsureRow(list, index)
         end
         list.dragKey = row.key
         list.dragRow = row
-        row.bg:SetColorTexture(0.24, 0.48, 1.00, 0.24)
+        if bridge and bridge.SetRowDragging then
+            bridge.SetRowDragging(row, true)
+        else
+            row.bg:SetColorTexture(0.24, 0.48, 1.00, 0.24)
+        end
         StartDragVisual(list, row)
     end)
 
@@ -328,7 +342,11 @@ function RowFactory:EnsureRow(list, index)
         end
 
         if row.bg then
-            row.bg:SetColorTexture(0, 0, 0, 0)
+            if bridge and bridge.SetRowDragging then
+                bridge.SetRowDragging(row, false)
+            else
+                row.bg:SetColorTexture(0, 0, 0, 0)
+            end
         end
         StopDragVisual(list)
         list.dragKey = nil

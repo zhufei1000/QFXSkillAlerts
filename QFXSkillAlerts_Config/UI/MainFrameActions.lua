@@ -2,6 +2,18 @@ local NS = rawget(_G, "QFXSkillAlertsNS") or {}
 _G.QFXSkillAlertsNS = NS
 
 NS.UI = NS.UI or {}
+local NativeCreateFrame = CreateFrame
+local function CreateFrame(kind, name, parent, template)
+    local bridge = NS.UI.FactoryBridge
+    if bridge then return bridge.CreateFrame(kind, name, parent, template) end
+    return NativeCreateFrame(kind, name, parent, template)
+end
+local StaticPopup_Show = StaticPopup_Show
+if NS.UI.FactoryBridge then
+    StaticPopup_Show = function(key, text, _, data)
+        return NS.UI.FactoryBridge.ShowConfirmation(key, text, data)
+    end
+end
 NS.UI.MainFrame = NS.UI.MainFrame or {}
 NS.UI.MainFrameActions = NS.UI.MainFrameActions or {}
 

@@ -362,7 +362,7 @@ function SavedListLayout:GetSavedListLayoutForScope(owner, classID, specID, incl
         return ids
     end
 
-    local function buildEntryScopeText(entry, rowClassID, rowSpecID, loadedTag)
+    local function buildEntryScopeText(entry, rowClassID, rowSpecID)
         local classIDs = collectSelectedIDs(entry.alertClassIDs or entry.customClassIDs, ALL_CLASSES_ID, rowClassID)
         local specIDs = collectSelectedIDs(entry.alertSpecIDs or entry.customSpecIDs, ALL_SPECS_ID, rowSpecID)
 
@@ -392,7 +392,7 @@ function SavedListLayout:GetSavedListLayoutForScope(owner, classID, specID, incl
             specText = table.concat(names, "/")
         end
 
-        return string.format("%s / %s%s", classText, specText, loadedTag)
+        return string.format("%s / %s", classText, specText)
     end
 
     -- Full (uncapped) scope description for the row tooltip, so entries with
@@ -559,7 +559,6 @@ function SavedListLayout:GetSavedListLayoutForScope(owner, classID, specID, incl
         end
 
         local isLoaded = IsEntryLoadedForActiveScope(api, entry, rowClassID, rowSpecID, currentClassID, currentSpecID)
-        local loadedTag = isLoaded and L("LOADED_TAG") or L("UNLOADED_TAG")
 
         local row = {
             itemType = "entry",
@@ -601,7 +600,7 @@ function SavedListLayout:GetSavedListLayoutForScope(owner, classID, specID, incl
             auraTrigger = entryType == "aura" and tostring(entry.auraTrigger or "") or nil,
             auraUnit = entryType == "aura" and tostring(entry.auraUnit or "") or nil,
             icon = icon,
-            scopeText = includeScopeText and buildEntryScopeText(entry, rowClassID, rowSpecID, loadedTag) or "",
+            scopeText = includeScopeText and buildEntryScopeText(entry, rowClassID, rowSpecID) or "",
             scopeDetail = buildEntryScopeDetail(entry, rowClassID, rowSpecID),
             isLoaded = isLoaded,
         }

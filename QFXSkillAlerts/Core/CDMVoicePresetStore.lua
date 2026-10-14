@@ -165,6 +165,10 @@ function Store:SanitizeRecord(data, forcedSource)
     local eventTypeHint = self:EventKeyToType(eventKey, data.eventTypeHint)
     local voiceName = Trim(data.voiceName)
     local voicePath = CanonicalPath(data.voicePath)
+    local auraUnit = Trim(data.auraUnit):lower()
+    if auraUnit ~= "player" and auraUnit ~= "target" and auraUnit ~= "focus" then
+        auraUnit = nil
+    end
     local voiceIdentity = Trim(data.voiceIdentity):lower()
     if voiceIdentity == "" and Registry and type(Registry.BuildIdentity) == "function" then
         voiceIdentity = Registry:BuildIdentity(voiceName, voicePath) or ""
@@ -187,6 +191,7 @@ function Store:SanitizeRecord(data, forcedSource)
         voiceIdentity = voiceIdentity,
         voiceName = voiceName,
         voicePath = voicePath,
+        auraUnit = auraUnit,
         cooldownIDHint = tonumber(data.cooldownIDHint),
         payloadHint = tonumber(data.payloadHint),
         source = Trim(forcedSource or data.source or "user"),

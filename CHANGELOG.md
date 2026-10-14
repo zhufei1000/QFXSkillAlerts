@@ -1,5 +1,18 @@
 # Changelog
 
+## 1.0.240
+
+- Support WoW 12.1.5 and use the selected standard TTS voice with the required voice-type argument.
+- Remove redundant Loaded/Unloaded suffixes from alert rows; retain colored status dots and detailed CDM reasons.
+- Include the integrated settings bridge and all configuration files.
+
+## 1.0.239 - 2026-10-12
+
+- Editor settings page usability pass. The alert action configuration is now inline on the single settings page: selecting Sound / Image / Text in the execute row shows the matching configuration block (source and voice, image source and artwork, text content and size) directly below, plus the position / layout modules, so no tab switching is needed. Each block after the first carries its own title and a separator line so the groups stay visually distinct. Talent and item load conditions fold into an "Advanced Options" toggle that auto-opens while configured and shows a "configured" marker when closed; Save validation failures are shown inline next to the Save button instead of only in the chat frame; CD type, fixed CD, condition and type controls have hover help. The Class / Spec / Race selection stays fully visible (no collapsing).
+- Fixed Cooldown Manager aura voices for enemy debuffs (Garrote, Rupture, ...) being saved with "applied" but never playing. Blizzard's CooldownViewer aura tracking watches both units (`scanUnits = { "player", "target" }`); native aura registrations now do the same and register both units for records saved without an explicit unit, so debuffs on the player's target fire as well. A record with an explicitly saved unit (for example from the alert editor) still registers exactly that unit.
+- Tracked-bar legacy aura records migrate to a target-watching aura entry, and `auraUnit` survives saving, loading and import/export so later edits keep the correct unit.
+- Regression coverage: `tests/test_cdm_native_events.lua` (dual-unit registration, explicit-unit precedence, tracked-bar migration to the target, the unit resolver) and inline save-error contract cases in `tests/test_talent_load_filter.lua`.
+
 ## 1.0.238 - 2026-10-12
 
 - Release audit: preserve disabled legacy CDM records so migration cannot re-enable muted voices, tolerate malformed legacy values, and clear the correct global-storage collection references when deleting a bridged cooldown alert.

@@ -1,8 +1,8 @@
-﻿## Interface: 120005, 120007, 120100
+## Interface: 120005, 120007, 120100, 120105
 ## Title: QFX Skill Alerts Config
 ## Notes: Load-on-demand configuration UI for QFX Skill Alerts.
 ## Author: zhufei1000
-## Version: 1.0.238
+## Version: 1.0.240
 ## Dependencies: QFXSkillAlerts
 ## X-Curse-Project-ID: 1524594
 ## LoadOnDemand: 1
@@ -33,6 +33,7 @@ Core\EntryStore.lua
 Core\VisualGroupIdentity.lua
 Core\TestController.lua
 
+UI\FactoryBridge.lua
 UI\Skin.lua
 UI\ScrollBar.lua
 UI\WidgetUtils.lua

@@ -5,6 +5,14 @@ manual-changelog:
   markup-type: markdown
 
 ignore:
+  - .workbuddy
+  - CHANGELOG-qfx.txt
+  - README.md
+  - archive
+  - tools
+  - docs
+  - .github
+  - AGENTS.md
   - tests
   - CHANGELOG.md
   - "*.zip"

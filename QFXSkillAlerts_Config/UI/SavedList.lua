@@ -2,6 +2,12 @@ local NS = rawget(_G, "QFXSkillAlertsNS") or {}
 _G.QFXSkillAlertsNS = NS
 
 NS.UI = NS.UI or {}
+local NativeCreateFrame = CreateFrame
+local function CreateFrame(kind, name, parent, template)
+    local bridge = NS.UI.FactoryBridge
+    if bridge then return bridge.CreateFrame(kind, name, parent, template) end
+    return NativeCreateFrame(kind, name, parent, template)
+end
 NS.UI.SavedList = NS.UI.SavedList or {}
 
 local SavedList = NS.UI.SavedList
@@ -76,18 +82,24 @@ function SavedList:Create(parent)
     frame:SetPoint("TOPLEFT", parent, "TOPLEFT", 12, -12)
     frame:SetPoint("BOTTOMRIGHT", parent, "BOTTOMRIGHT", -12, 12)
 
-    local scrollFrame = CreateFrame("ScrollFrame", nil, frame)
+    local scrollFrame, content, slider
+    if NS.UI.FactoryBridge then
+        local host
+        host, content, scrollFrame, slider = NS.UI.Widgets:CreateScrollableContent(frame, {wheelStep = ROW_HEIGHT, bottomPadding = 0})
+        host:ClearAllPoints(); host:SetAllPoints(frame)
+    else
+    scrollFrame = CreateFrame("ScrollFrame", nil, frame)
     scrollFrame:SetPoint("TOPLEFT", frame, "TOPLEFT", 0, 0)
     scrollFrame:SetPoint("BOTTOMRIGHT", frame, "BOTTOMRIGHT", -24, 0)
     scrollFrame:EnableMouseWheel(true)
 
-    local content = CreateFrame("Frame", nil, scrollFrame)
+    content = CreateFrame("Frame", nil, scrollFrame)
     content:SetPoint("TOPLEFT", 0, 0)
     content:SetPoint("TOPRIGHT", 0, 0)
     content:SetHeight(1)
     scrollFrame:SetScrollChild(content)
 
-    local slider = ScrollBar and ScrollBar.Create and ScrollBar:Create(scrollFrame, "QFXSkillAlertsSavedListScrollBar", {
+    slider = ScrollBar and ScrollBar.Create and ScrollBar:Create(scrollFrame, "QFXSkillAlertsSavedListScrollBar", {
         orientation = "VERTICAL",
         width = 16,
         minValue = 0,
@@ -106,6 +118,8 @@ function SavedList:Create(parent)
     slider:SetPoint("TOPLEFT", scrollFrame, "TOPRIGHT", 6, -16)
     slider:SetPoint("BOTTOMLEFT", scrollFrame, "BOTTOMRIGHT", 6, 16)
     slider:Hide()
+
+    end
 
     local list = {
         frame = frame,

@@ -1562,3 +1562,33 @@ zhTW.AURA_DIAG_ENTRY = "設定 ID=%d，實際光環 ID=%d，單位=%s，觸發=%
 zhTW.AURA_DIAG_EMPTY = "沒有符合的已載入光環語音設定，請檢查已儲存的記錄、職業專精範圍和聲音選擇。"
 zhCN.MSG_AURA_REGISTER_FAILED = "光环提醒注册失败（客户端拒绝了该注册），将在脱战或切换区域后重试。"
 zhTW.MSG_AURA_REGISTER_FAILED = "光環提醒註冊失敗（用戶端拒絕了該註冊），將在脫戰或切換區域後重試。"
+
+-- Editor settings-page layout aids (advanced options, inline save errors and
+-- control tooltips).
+enUS.BTN_ADVANCED_OPTIONS = "Advanced Options"
+zhCN.BTN_ADVANCED_OPTIONS = "高级选项"
+zhTW.BTN_ADVANCED_OPTIONS = "進階選項"
+
+enUS.BTN_ADVANCED_COLLAPSE = "Hide Advanced"
+zhCN.BTN_ADVANCED_COLLAPSE = "收起高级"
+zhTW.BTN_ADVANCED_COLLAPSE = "收起進階"
+
+enUS.ADVANCED_CONFIGURED_TAG = "configured"
+zhCN.ADVANCED_CONFIGURED_TAG = "已配置"
+zhTW.ADVANCED_CONFIGURED_TAG = "已設定"
+
+enUS.TOOLTIP_OBJECT_TYPE = "What this alert watches: a spell, an item, a successful cast, or an aura on a unit."
+zhCN.TOOLTIP_OBJECT_TYPE = "选择提醒监视的对象：技能、物品、施法成功，或某个单位身上的光环。"
+zhTW.TOOLTIP_OBJECT_TYPE = "選擇提醒監視的對象：技能、物品、施法成功，或某個單位身上的光環。"
+
+enUS.TOOLTIP_CD_MODE = "How the countdown is timed.\nFixed CD: counts down the number you enter.\nReady: fires when the spell becomes usable again.\nOn Cooldown: fires when the real cooldown starts."
+zhCN.TOOLTIP_CD_MODE = "冷却计时方式。\n固定CD：按你填写的秒数倒数。\n就绪：技能可再次使用时提醒。\n冷却中：真实冷却开始时提醒。"
+zhTW.TOOLTIP_CD_MODE = "冷卻計時方式。\n固定CD：按你填寫的秒數倒數。\n就緒：技能可再次使用時提醒。\n冷卻中：真實冷卻開始時提醒。"
+
+enUS.TOOLTIP_FIXED_CD = "Manual countdown length in seconds (Fixed CD type)."
+zhCN.TOOLTIP_FIXED_CD = "手动填写的冷却秒数（固定CD类型使用）。"
+zhTW.TOOLTIP_FIXED_CD = "手動填寫的冷卻秒數（固定CD類型使用）。"
+
+enUS.TOOLTIP_CONDITION = "Fires when the remaining cooldown is at or below this value."
+zhCN.TOOLTIP_CONDITION = "剩余冷却小于或等于该秒数时触发。"
+zhTW.TOOLTIP_CONDITION = "剩餘冷卻小於或等於該秒數時觸發。"

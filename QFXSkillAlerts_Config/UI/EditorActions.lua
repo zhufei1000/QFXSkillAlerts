@@ -2,6 +2,12 @@ local NS = rawget(_G, "QFXSkillAlertsNS") or {}
 _G.QFXSkillAlertsNS = NS
 
 NS.UI = NS.UI or {}
+local NativeCreateFrame = CreateFrame
+local function CreateFrame(kind, name, parent, template)
+    local bridge = NS.UI.FactoryBridge
+    if bridge then return bridge.CreateFrame(kind, name, parent, template) end
+    return NativeCreateFrame(kind, name, parent, template)
+end
 NS.UI.EditorActions = NS.UI.EditorActions or {}
 
 local Actions = NS.UI.EditorActions
@@ -442,6 +448,22 @@ function Actions:Install(owner, frame)
     if tabText then
         tabText:SetScript("OnClick", function()
             SwitchAlertTab("text")
+        end)
+    end
+
+    -- Collapsible Advanced block: it starts open while it has configuration.
+    if widgets.advancedToggle then
+        widgets.advancedToggle:SetScript("OnClick", function()
+            local editorFrame = owner.frame
+            if not editorFrame then
+                return
+            end
+            local current = editorFrame.qfxsaAdvancedExpanded
+            if current == nil then
+                current = editorFrame.qfxsaAdvancedConfigured == true
+            end
+            editorFrame.qfxsaAdvancedExpanded = not current
+            Refresh(owner)
         end)
     end
 
@@ -975,6 +997,7 @@ function Actions:Install(owner, frame)
         actionSave:SetScript("OnClick", function()
             Pull(owner)
             local state = GetState()
+            state.qfxsaSaveError = nil
             if tostring(state.entryType or "") == "bloodlust" then
                 if NS.AceOptions and type(NS.AceOptions.SaveBloodlustConfig) == "function" and NS.AceOptions:SaveBloodlustConfig() then
                     if type(owner.Close) == "function" then
@@ -985,11 +1008,22 @@ function Actions:Install(owner, frame)
                 return
             end
 
-            if NS.AceOptions and type(NS.AceOptions.SaveEntry) == "function" and NS.AceOptions:SaveEntry() then
+            if not (NS.AceOptions and type(NS.AceOptions.SaveEntry) == "function") then
+                return
+            end
+            local saved, errorKey = NS.AceOptions:SaveEntry()
+            if saved then
                 if type(owner.Close) == "function" then
                     owner:Close()
-                        HidePreview()
+                    HidePreview()
                 end
+                return
+            end
+            -- Validation failure: show the reason inline instead of leaving it
+            -- in the chat frame only.
+            if type(errorKey) == "string" and errorKey ~= "" then
+                state.qfxsaSaveError = errorKey
+                Refresh(owner)
             end
         end)
     end

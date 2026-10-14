@@ -76,7 +76,8 @@ end
 
 function Notifier:GetSelectedVoiceID()
     if C_TTSSettings and C_TTSSettings.GetVoiceOptionID then
-        local ok, voiceID = pcall(C_TTSSettings.GetVoiceOptionID)
+        local voiceType = Enum and Enum.TtsVoiceType and Enum.TtsVoiceType.Standard or 0
+        local ok, voiceID = pcall(C_TTSSettings.GetVoiceOptionID, voiceType)
         if ok and tonumber(voiceID) and tonumber(voiceID) >= 0 then
             return tonumber(voiceID)
         end

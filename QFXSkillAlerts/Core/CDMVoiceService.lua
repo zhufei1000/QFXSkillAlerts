@@ -1536,13 +1536,13 @@ local CDM_SAVED_STATUS_DISPLAY = {
     scopeUnloaded = { loadState = "red", isLoaded = false, displaySection = "unloaded", localeKey = "CDM_STATUS_SCOPE_UNLOADED" },
 }
 
-local function ResolveCDMScopeText(classID, specID, isLoaded)
+local function ResolveCDMScopeText(classID, specID)
     local scope = NS.Core and NS.Core.Scope
     local className = type(scope) == "table" and type(scope.ResolveClassName) == "function"
         and scope:ResolveClassName(classID) or L("FALLBACK_CLASS", tostring(classID))
     local specName = type(scope) == "table" and type(scope.ResolveSpecName) == "function"
         and scope:ResolveSpecName(classID, specID) or L("FALLBACK_SPEC", tostring(specID))
-    return string.format("%s / %s%s", className, specName, isLoaded and L("LOADED_TAG") or L("UNLOADED_TAG"))
+    return string.format("%s / %s", className, specName)
 end
 
 local function BuildCDMSavedEntry(store, record, evaluation, display, includeScopeText)
@@ -1599,8 +1599,8 @@ local function BuildCDMSavedEntry(store, record, evaluation, display, includeSco
         eventText = eventText,
         statusText = L(display.localeKey),
         soundDetail = eventText .. " | " .. voiceName,
-        scopeText = includeScopeText and ResolveCDMScopeText(classID, specID, display.isLoaded) or "",
-        scopeDetail = includeScopeText and ResolveCDMScopeText(classID, specID, display.isLoaded) or nil,
+        scopeText = includeScopeText and ResolveCDMScopeText(classID, specID) or "",
+        scopeDetail = includeScopeText and ResolveCDMScopeText(classID, specID) or nil,
         runtimeStatus = runtimeStatus,
         runtimeReason = runtimeStatus,
         loadState = display.loadState,

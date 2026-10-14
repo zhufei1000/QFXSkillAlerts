@@ -11,6 +11,7 @@ local function ApplyRowVisual(row, selected)
         return
     end
 
+    if NS.UI.FactoryBridge then NS.UI.FactoryBridge.ApplyRowVisual(row, selected); return end
     local itemType = tostring(row.itemType or "entry")
     if itemType ~= "entry" and itemType ~= "group" then
         return

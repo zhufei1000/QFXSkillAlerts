@@ -258,8 +258,6 @@ function Rows.BuildEntryRowText(entry, includeScopeText)
     end
     if includeScopeText and TrimText(entry and entry.scopeText) ~= "" then
         parts[#parts + 1] = string.format("|cff808080%s|r", TrimText(entry and entry.scopeText))
-    elseif entry and entry.groupID and entry.isLoaded == false then
-        parts[#parts + 1] = TrimText(L("UNLOADED_TAG"))
     end
     local raceScopeText = BuildRaceScopeText(entry)
     if raceScopeText ~= "" then

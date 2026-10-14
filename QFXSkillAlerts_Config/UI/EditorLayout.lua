@@ -2,6 +2,12 @@ local NS = rawget(_G, "QFXSkillAlertsNS") or {}
 _G.QFXSkillAlertsNS = NS
 
 NS.UI = NS.UI or {}
+local NativeCreateFrame = CreateFrame
+local function CreateFrame(kind, name, parent, template)
+    local bridge = NS.UI.FactoryBridge
+    if bridge then return bridge.CreateFrame(kind, name, parent, template) end
+    return NativeCreateFrame(kind, name, parent, template)
+end
 NS.UI.EditorLayout = NS.UI.EditorLayout or {}
 
 local Layout = NS.UI.EditorLayout
@@ -13,6 +19,7 @@ function Layout.SetNativeLabelColor(label, enabled)
     if not label or not label.SetTextColor then
         return
     end
+    if NS.UI.FactoryBridge then NS.UI.FactoryBridge.StyleLabel(label, enabled); return end
     local color = enabled and rawget(_G, "NORMAL_FONT_COLOR") or rawget(_G, "GRAY_FONT_COLOR")
     if color and color.GetRGB then
         local r, g, b = color:GetRGB()
@@ -103,6 +110,33 @@ function Layout.SetManyShown(items, shown)
             item:SetShown(shown)
         end
     end
+end
+
+-- Hover help for editor controls. The text may be a plain string or a
+-- provider function so it can follow the current locale at hover time.
+function Layout.InstallTooltip(frame, textOrProvider)
+    if not frame or type(frame.HookScript) ~= "function" then
+        return
+    end
+    frame:HookScript("OnEnter", function(self)
+        local text = textOrProvider
+        if type(text) == "function" then
+            local ok, value = pcall(text, self)
+            text = ok and value or nil
+        end
+        text = tostring(text or "")
+        if text == "" or type(GameTooltip) ~= "table" then
+            return
+        end
+        GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+        GameTooltip:SetText(text, 1, 1, 1, 1, true)
+        GameTooltip:Show()
+    end)
+    frame:HookScript("OnLeave", function()
+        if type(GameTooltip) == "table" and GameTooltip.Hide then
+            GameTooltip:Hide()
+        end
+    end)
 end
 
 

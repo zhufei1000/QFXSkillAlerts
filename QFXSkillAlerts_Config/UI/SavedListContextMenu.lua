@@ -2,6 +2,12 @@ local NS = rawget(_G, "QFXSkillAlertsNS") or {}
 _G.QFXSkillAlertsNS = NS
 
 NS.UI = NS.UI or {}
+local NativeCreateFrame = CreateFrame
+local function CreateFrame(kind, name, parent, template)
+    local bridge = NS.UI.FactoryBridge
+    if bridge then return bridge.CreateFrame(kind, name, parent, template) end
+    return NativeCreateFrame(kind, name, parent, template)
+end
 NS.UI.SavedListContextMenu = NS.UI.SavedListContextMenu or {}
 
 local ContextMenu = NS.UI.SavedListContextMenu
@@ -212,10 +218,15 @@ function ContextMenu:Open(list, items, options)
             row:SetHeight(rowHeight)
             row:SetPoint("LEFT", menu, "LEFT", 4, 0)
             row:SetPoint("RIGHT", menu, "RIGHT", -4, 0)
-            local hover = row:CreateTexture(nil, "HIGHLIGHT")
-            hover:SetAllPoints(row)
-            hover:SetColorTexture(0.24, 0.48, 1.00, 0.18)
-            row.hover = hover
+            local bridge = NS.UI.FactoryBridge
+            if bridge and bridge.StyleMenuRow then
+                bridge.StyleMenuRow(row, i)
+            else
+                local hover = row:CreateTexture(nil, "HIGHLIGHT")
+                hover:SetAllPoints(row)
+                hover:SetColorTexture(0.24, 0.48, 1.00, 0.18)
+                row.hover = hover
+            end
             local text = row:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
             text:SetPoint("LEFT", row, "LEFT", 8, 0)
             text:SetPoint("RIGHT", row, "RIGHT", -8, 0)

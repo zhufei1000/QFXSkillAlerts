@@ -167,5 +167,6 @@ function RowRenderer:UpdateRow(row, entry, opts)
     local height = GetRowHeight(itemType)
     row.dragText = row.main and row.main:GetText() or row.plainText or ""
     row:SetHeight(height)
+    if NS.UI.FactoryBridge then NS.UI.FactoryBridge.ApplyRowVisual(row, selected) end
     return selected, height
 end

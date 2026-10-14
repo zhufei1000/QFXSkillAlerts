@@ -263,7 +263,10 @@ function SoundFields:PushToWidgets(widgets, state, soundFields, source, isTts)
     if widgets.soundPath then
         widgets.soundPath:SetText(tostring(customPaths[1] or state.customSoundPath or ""))
     end
-    local showBloodlustMultiCustom = tostring(state.entryType or "") == "bloodlust" and selectedSource == "custom" and tostring(state.activeAlertTab or "") == "voice"
+    -- Bloodlust keeps up to five custom paths; they are always visible while
+    -- the custom source is selected (the action configuration is inline on
+    -- the settings page now, there is no voice tab anymore).
+    local showBloodlustMultiCustom = tostring(state.entryType or "") == "bloodlust" and selectedSource == "custom"
     SetExtraBloodlustPathControls(widgets, showBloodlustMultiCustom, customSound, state)
 
     SetEnabled(widgets.ttsText, isTts == true)

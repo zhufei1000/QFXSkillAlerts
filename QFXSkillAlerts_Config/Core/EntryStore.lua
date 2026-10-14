@@ -39,6 +39,17 @@ local function SyncNativeRuntimes()
     end
 end
 
+-- Save validation failures are reported to the editor inline. The chat print
+-- is kept for compatibility; the returned locale key lets the editor show the
+-- reason next to the Save button.
+local function FailSave(state, key, ...)
+    if type(state) == "table" then
+        state.qfxsaSaveError = key
+    end
+    print("[QFX-SA] " .. L(key, ...))
+    return false, key
+end
+
 local function GetApi()
     return NS.API
 end
@@ -811,7 +822,6 @@ function EntryStore:GetAllSavedEntryList(owner)
                             end
 
                             local entryLoaded = scopeLoaded and EntryAlertScopeMatchesCurrent(entry, classID, specID, currentClassID, currentSpecID) and IsEntryItemLoadRequirementMet(api, entry, objectType) and IsEntryTalentLoadRequirementMet(api, entry)
-                            local loadedTag = entryLoaded and L("LOADED_TAG") or L("UNLOADED_TAG")
 
                             entries[#entries + 1] = {
                                 key = BuildEntryKey(classID, specID, index),
@@ -841,7 +851,7 @@ function EntryStore:GetAllSavedEntryList(owner)
                                 talentCD = tonumber(entry.talentCD) or 0,
                                 talentLoadFilter = entry.talentLoadFilter == true,
                                 icon = icon,
-                                scopeText = string.format("%s / %s%s", className, specName, loadedTag),
+                                scopeText = string.format("%s / %s", className, specName),
                                 isLoaded = entryLoaded,
                             }
                         end
@@ -1091,6 +1101,7 @@ function EntryStore:SaveEntry(owner)
     if not api then
         return
     end
+    state.qfxsaSaveError = nil
 
     local classID = tonumber(state.classID) or 0
     local specID = tonumber(state.specID) or 0
@@ -1279,48 +1290,38 @@ function EntryStore:SaveEntry(owner)
     state.alertClassIDs = alertClassIDs
     state.alertSpecIDs = alertSpecIDs
     if classID < 0 or specID < 0 then
-        print("[QFX-SA] " .. L("MSG_INVALID_CLASS_SPEC"))
-        return
+        return FailSave(state, "MSG_INVALID_CLASS_SPEC")
     end
     if isEventEntry and not eventKey then
-        print("[QFX-SA] " .. L("MSG_INVALID_EVENT_VOICE"))
-        return
+        return FailSave(state, "MSG_INVALID_EVENT_VOICE")
     end
     if isEventEntry and type(api.HasSelectedEventLoadContext) == "function"
         and not api.HasSelectedEventLoadContext(state.eventLoadContexts) then
-        print("[QFX-SA] " .. L("MSG_EVENT_LOAD_CONTEXT_REQUIRED"))
-        return
+        return FailSave(state, "MSG_EVENT_LOAD_CONTEXT_REQUIRED")
     end
     if isEventEntry and eventLoadContexts and eventLoadContexts.dungeon == true
         and eventDungeonMode == "specific" and next(eventDungeonSelectionIDs or {}) == nil then
-        print("[QFX-SA] " .. L("MSG_EVENT_DUNGEON_SPECIFIC_REQUIRED"))
-        return
+        return FailSave(state, "MSG_EVENT_DUNGEON_SPECIFIC_REQUIRED")
     end
     if isEventEntry and eventLoadContexts and eventLoadContexts.raid == true
         and eventRaidMode == "specific" and next(eventRaidSelectionIDs or {}) == nil then
-        print("[QFX-SA] " .. L("MSG_EVENT_RAID_SPECIFIC_REQUIRED"))
-        return
+        return FailSave(state, "MSG_EVENT_RAID_SPECIFIC_REQUIRED")
     end
     if not isEventEntry and spellId <= 0 then
-        print("[QFX-SA] " .. L("MSG_INVALID_SPELL_ID"))
-        return
+        return FailSave(state, "MSG_INVALID_SPELL_ID")
     end
     if isCooldownEntry and baseCD <= 0 and cdMode == "fixed" then
-        print("[QFX-SA] " .. L("MSG_INVALID_FIXED_CD"))
-        return
+        return FailSave(state, "MSG_INVALID_FIXED_CD")
     end
     if isAuraEntry and not auraTrigger then
-        print("[QFX-SA] " .. L("MSG_INVALID_AURA_TRIGGER"))
-        return
+        return FailSave(state, "MSG_INVALID_AURA_TRIGGER")
     end
     if isAuraEntry and not voiceEnabled then
-        print("[QFX-SA] " .. L("MSG_AURA_VOICE_ONLY"))
-        return
+        return FailSave(state, "MSG_AURA_VOICE_ONLY")
     end
     if isAuraEntry and notifyMode == modeTts then
         -- The client-side aura sound registration has no TTS support.
-        print("[QFX-SA] " .. L("MSG_AURA_VOICE_ONLY"))
-        return
+        return FailSave(state, "MSG_AURA_VOICE_ONLY")
     end
     if isAuraEntry then
         -- Auras are registered through AddAuraSound: voice only, no timer,
@@ -1380,16 +1381,13 @@ function EntryStore:SaveEntry(owner)
         castDelayMode = "show"
     end
     if isCastEntry and delayEnabled and delaySeconds <= 0 then
-        print("[QFX-SA] " .. L("MSG_INVALID_DELAY_SECONDS"))
-        return
+        return FailSave(state, "MSG_INVALID_DELAY_SECONDS")
     end
     if checkTalent and talentId <= 0 then
-        print("[QFX-SA] " .. L("MSG_NEED_TALENT_ID"))
-        return
+        return FailSave(state, "MSG_NEED_TALENT_ID")
     end
     if loadTalentEnabled and loadTalentId <= 0 then
-        print("[QFX-SA] " .. L("MSG_NEED_LOAD_TALENT_ID"))
-        return
+        return FailSave(state, "MSG_NEED_LOAD_TALENT_ID")
     end
     -- "CD Changes To" is optional: leave it empty to keep the fixed CD and
     -- only use the talent as a load condition.
@@ -1402,16 +1400,13 @@ function EntryStore:SaveEntry(owner)
         state.loadTalentName = loadTalentName
     end
     if not voiceEnabled and not imageEnabled and not textEnabled then
-        print("[QFX-SA] " .. L("MSG_NEED_ALERT_ACTIONS"))
-        return
+        return FailSave(state, "MSG_NEED_ALERT_ACTIONS")
     end
     if voiceEnabled and notifyMode == modeTts and TrimText(ttsText) == "" then
-        print("[QFX-SA] " .. L("MSG_NEED_TTS_TEXT"))
-        return
+        return FailSave(state, "MSG_NEED_TTS_TEXT")
     end
     if voiceEnabled and notifyMode == modeSound and TrimText(soundPath) == "" then
-        print("[QFX-SA] " .. L("MSG_NEED_SOUND_PATH"))
-        return
+        return FailSave(state, "MSG_NEED_SOUND_PATH")
     end
 
     local map = api.EnsureEntryMap(classID, specID)
@@ -1448,14 +1443,12 @@ function EntryStore:SaveEntry(owner)
             and index ~= targetIndex
             and (duplicateEvent or duplicateObject)
             and EntryAlertScopeOverlaps(entry, classID, specID, alertRaceIDs, alertClassIDs, alertSpecIDs) then
-            print("[QFX-SA] " .. L(isEventEntry and "MSG_DUP_EVENT_VOICE" or "MSG_DUP_SPELL"))
-            return
+            return FailSave(state, isEventEntry and "MSG_DUP_EVENT_VOICE" or "MSG_DUP_SPELL")
         end
     end
 
     if targetIndex <= 0 then
-        print("[QFX-SA] " .. L("MSG_SAVE_LIMIT"))
-        return
+        return FailSave(state, "MSG_SAVE_LIMIT")
     end
 
     local oldEntry = api.GetEntry(map, targetIndex)

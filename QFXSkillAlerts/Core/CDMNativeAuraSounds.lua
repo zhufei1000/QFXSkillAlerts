@@ -48,6 +48,19 @@ local function IsCombatLocked()
     return type(InCombatLockdown) == "function" and InCombatLockdown() == true
 end
 
+local AURA_UNIT_TOKENS = { player = true, target = true, focus = true }
+
+local function GetExplicitRecordUnit(record)
+    if type(record) ~= "table" then
+        return nil
+    end
+    local unit = tostring(record.auraUnit or ""):lower()
+    if AURA_UNIT_TOKENS[unit] then
+        return unit
+    end
+    return nil
+end
+
 local function SameRegistration(left, right)
     return left and right and left.spellID == right.spellID
         and left.trigger == right.trigger and left.unit == right.unit and left.path == right.path
@@ -77,6 +90,10 @@ function AuraSounds:BuildDesired()
     end
     -- CDM editor saves and imports can still produce legacy aura records after
     -- the one-time migration. They must participate in native registration.
+    -- Those records do not know whether their aura lands on the player or the
+    -- target (an enemy debuff like Garrote or Rupture), so both units are
+    -- registered, matching Blizzard's own CooldownViewer aura tracking which
+    -- scans player and target. An explicit unit, when present, wins.
     local store = NS.Core and NS.Core.CDMVoicePresetStore
     if store and type(store.GetEffectiveRecords) == "function" then
         for _, record in ipairs(store:GetEffectiveRecords(classID, specID)) do
@@ -85,7 +102,13 @@ function AuraSounds:BuildDesired()
             local path = Native:ResolveRecordPath(record)
             if trigger and record.enabled ~= false and spellID and spellID > 0
                 and type(path) == "string" and path ~= "" then
-                AddDesired(spellID, trigger, UNIT_TOKEN, path)
+                local unit = GetExplicitRecordUnit(record)
+                if unit then
+                    AddDesired(spellID, trigger, unit, path)
+                else
+                    AddDesired(spellID, trigger, "player", path)
+                    AddDesired(spellID, trigger, "target", path)
+                end
             end
         end
     end

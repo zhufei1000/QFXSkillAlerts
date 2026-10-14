@@ -124,6 +124,7 @@ function EditorFrame:OpenForNew(entryType, collectionKey)
     NS.AceOptions:ClearEditorFields()
     state._mcdCustomNotifyVisibleCount = nil
     state._mcdCustomNotifyManualCount = nil
+    state.qfxsaSaveError = nil
     state.entryType = NormalizeEntryType(entryType or "cooldown")
     if state.entryType == "event" then
         state.voiceEnabled = true
@@ -165,6 +166,7 @@ function EditorFrame:OpenForEdit()
     NS.AceOptions:LoadSelectedEntry()
     state._mcdCustomNotifyVisibleCount = nil
     state._mcdCustomNotifyManualCount = nil
+    state.qfxsaSaveError = nil
     local frame = self:EnsureFrame()
     self.mode = "edit"
     frame.title:SetText(L("TITLE_EDIT_CONFIG"))

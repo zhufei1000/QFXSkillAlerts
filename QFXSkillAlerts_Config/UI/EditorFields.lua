@@ -21,7 +21,6 @@ local OBJECT_TYPE_SPELL = CONST.OBJECT_TYPE_SPELL or "spell"
 
 local SetNativeLabelColor = Layout.SetNativeLabelColor
 local SetEnabled = Layout.SetEnabled
-local SetTabVisual = Layout.SetTabVisual
 local SetManyShown = Layout.SetManyShown
 
 local function CopyNumberBoolMap(source)
@@ -1025,14 +1024,22 @@ end
 -- Two layouts share the spell section: the redesigned four-row spell layout
 -- (picker on top, CD source + fixed CD on one row, one talent per row) and the
 -- original item layout (ID / name / fixed CD with the item load checkboxes).
-function Fields:ApplySpellSectionLayout(widgets, isItemObject, isAura)
+-- Low-frequency talent / item conditions collapse behind the Advanced toggle;
+-- this function positions every control for both states and returns the
+-- section height the caller should use for the module below.
+function Fields:ApplySpellSectionLayout(widgets, isItemObject, isAura, advancedExpanded)
     local section = widgets and widgets.spellSection
     if not section then
-        return false
+        return false, 312
     end
+    advancedExpanded = advancedExpanded == true
     -- Event-voice entries hide the type selector; switching back to a
     -- cooldown/cast entry in the same session must re-show it.
     SetManyShown({ widgets.objectTypeLabel, widgets.objectTypeDrop }, true)
+    if widgets.advancedToggle then
+        SetManyShown({ widgets.advancedToggle }, not isAura)
+        self:PlaceSectionWidget(section, widgets.advancedToggle, 16, isItemObject and -108 or -166)
+    end
     if isAura then
         -- Aura entries use the quick pick (aura categories included) plus the
         -- trigger and unit; the CD timer, talent and item controls stay hidden.
@@ -1069,7 +1076,7 @@ function Fields:ApplySpellSectionLayout(widgets, isItemObject, isAura)
         self:PlaceSectionWidget(section, widgets.auraUnitLabel, 504, -106)
         self:PlaceSectionWidget(section, widgets.auraUnitDrop, 504, -130)
         Widgets:SetDropdownWidth(widgets.auraUnitDrop, 100)
-        return true
+        return true, 190
     end
     SetManyShown({ widgets.auraTriggerLabel, widgets.auraTriggerDrop, widgets.auraUnitLabel, widgets.auraUnitDrop }, false)
     -- Keep the ID / name / CD fields on one shared width grid.
@@ -1091,7 +1098,7 @@ function Fields:ApplySpellSectionLayout(widgets, isItemObject, isAura)
         self:PlaceSectionWidget(section, widgets.itemLoadEquipped, 16, -145)
         self:PlaceSectionWidget(section, widgets.itemLoadBags, 148, -145)
         self:PlaceSectionWidget(section, widgets.itemLoadSameName, 280, -145)
-        return true
+        return true, advancedExpanded and 200 or 155
     end
     Widgets:SetDropdownWidth(widgets.objectTypeDrop, 100)
     self:PlaceSectionWidget(section, widgets.skillFilterLabel, 124, -44)
@@ -1108,19 +1115,139 @@ function Fields:ApplySpellSectionLayout(widgets, isItemObject, isAura)
     self:PlaceSectionWidget(section, widgets.cdModeDrop, 372, -130)
     self:PlaceSectionWidget(section, widgets.baseCDLabel, 496, -106)
     self:PlaceSectionWidget(section, widgets.baseCD, 496, -130)
-    self:PlaceSectionWidget(section, widgets.checkTalent, 16, -195)
-    self:PlaceSectionWidget(section, widgets.talentIdLabel, 176, -168)
-    self:PlaceSectionWidget(section, widgets.talentId, 176, -192)
-    self:PlaceSectionWidget(section, widgets.talentNameLabel, 300, -168)
-    self:PlaceSectionWidget(section, widgets.talentName, 300, -192)
-    self:PlaceSectionWidget(section, widgets.talentCDLabel, 532, -168)
-    self:PlaceSectionWidget(section, widgets.talentCD, 532, -192)
-    self:PlaceSectionWidget(section, widgets.loadTalentEnabled, 16, -257)
-    self:PlaceSectionWidget(section, widgets.loadTalentIdLabel, 176, -230)
-    self:PlaceSectionWidget(section, widgets.loadTalentId, 176, -254)
-    self:PlaceSectionWidget(section, widgets.loadTalentNameLabel, 300, -230)
-    self:PlaceSectionWidget(section, widgets.loadTalentName, 300, -254)
-    return true
+    -- Advanced block: one row per talent plus the independent load filter.
+    self:PlaceSectionWidget(section, widgets.talentIdLabel, 176, -210)
+    self:PlaceSectionWidget(section, widgets.talentId, 176, -234)
+    self:PlaceSectionWidget(section, widgets.talentNameLabel, 300, -210)
+    self:PlaceSectionWidget(section, widgets.talentName, 300, -234)
+    self:PlaceSectionWidget(section, widgets.talentCDLabel, 532, -210)
+    self:PlaceSectionWidget(section, widgets.talentCD, 532, -234)
+    self:PlaceSectionWidget(section, widgets.checkTalent, 16, -237)
+    self:PlaceSectionWidget(section, widgets.loadTalentEnabled, 16, -299)
+    self:PlaceSectionWidget(section, widgets.loadTalentIdLabel, 176, -272)
+    self:PlaceSectionWidget(section, widgets.loadTalentId, 176, -296)
+    self:PlaceSectionWidget(section, widgets.loadTalentNameLabel, 300, -272)
+    self:PlaceSectionWidget(section, widgets.loadTalentName, 300, -296)
+    return true, advancedExpanded and 350 or 215
+end
+
+-- The Voice / Image / Text controls used to live in their own tabs. They are
+-- laid out here as sequential blocks inside the Notification card, in the
+-- order sound, image, text. Every block after the first gets a title and a
+-- separator line so the groups read as distinct sections. Returns the total
+-- block height so the caller can size the card and the modules below it.
+local NOTIFY_BLOCK_GAP = 26
+
+local function LayoutNotifyBlocks(widgets, opts)
+    if not widgets then
+        return 0
+    end
+    opts = type(opts) == "table" and opts or {}
+    local showVoice = opts.showVoice == true
+    local showImage = opts.showImage == true
+    local showText = opts.showText == true
+    local isBloodlust = opts.isBloodlust == true
+    local source = tostring(opts.source or "builtin")
+
+    local function Place(control, x, y)
+        if control and control.ClearAllPoints and control.SetPoint then
+            control:ClearAllPoints()
+            control:SetPoint("TOPLEFT", control:GetParent(), "TOPLEFT", x, y)
+        end
+    end
+
+    -- Reset the group decorations; each block re-shows what it needs.
+    for _, decoration in ipairs({
+        widgets.blockTitleVoice, widgets.blockTitleImage, widgets.blockTitleText,
+        widgets.blockSep1, widgets.blockSep2,
+    }) do
+        if decoration and decoration.Hide then
+            decoration:Hide()
+        end
+    end
+
+    local y = 0
+    local blockIndex = 0
+    local function BeginBlock(title)
+        blockIndex = blockIndex + 1
+        if blockIndex == 1 then
+            -- The first block sits right below the card title, no header.
+            return
+        end
+        if title then
+            title:Show()
+            Place(title, 16, y - 8)
+        end
+        local separator = blockIndex == 2 and widgets.blockSep1 or widgets.blockSep2
+        if separator then
+            separator:Show()
+            Place(separator, 16, y + 12)
+        end
+    end
+
+    if showVoice then
+        BeginBlock(widgets.blockTitleVoice)
+        local voiceHeight = (isBloodlust and source == "custom") and 505 or 360
+        Place(widgets.sourceLabel, 16, y - 40)
+        Place(widgets.sourceDrop, 16, y - 64)
+        Place(widgets.builtinLabel, 16, y - 112)
+        Place(widgets.builtinDrop, 16, y - 136)
+        Place(widgets.sharedMediaLabel, 342, y - 112)
+        Place(widgets.sharedMediaDrop, 342, y - 136)
+        Place(widgets.customPathLabel, 16, y - 184)
+        Place(widgets.soundPath, 16, y - 208)
+        Place(widgets.ttsTextLabel, 16, y - 256)
+        Place(widgets.ttsText, 16, y - 280)
+        Place(widgets.rateLabel, 342, y - 256)
+        Place(widgets.ttsRateSlider, 342, y - 280)
+        for i = 2, 5 do
+            local rowY = y - 256 - ((i - 2) * 54)
+            local label = widgets.bloodlustCustomPathLabels and widgets.bloodlustCustomPathLabels[i]
+            local input = widgets.bloodlustCustomPaths and widgets.bloodlustCustomPaths[i]
+            Place(label, 16, rowY)
+            Place(input, 16, rowY - 24)
+        end
+        if widgets.editorHint and widgets.editorHint.ClearAllPoints and widgets.editorHint.SetPoint then
+            widgets.editorHint:ClearAllPoints()
+            widgets.editorHint:SetPoint("TOPLEFT", widgets.editorHint:GetParent(), "TOPLEFT", 16, y - 338)
+            widgets.editorHint:SetPoint("RIGHT", widgets.editorHint:GetParent(), "RIGHT", -16, 0)
+        end
+        y = y - voiceHeight - NOTIFY_BLOCK_GAP
+    end
+    if showImage then
+        BeginBlock(widgets.blockTitleImage)
+        Place(widgets.imageSourceLabel, 16, y - 40)
+        Place(widgets.imageSourceDrop, 16, y - 64)
+        Place(widgets.imageIconLabel, 342, y - 40)
+        Place(widgets.imageIconID, 342, y - 64)
+        Place(widgets.imagePathLabel, 16, y - 112)
+        Place(widgets.imagePath, 16, y - 136)
+        Place(widgets.imageSharedMediaLabel, 342, y - 112)
+        Place(widgets.imageSharedMediaDrop, 342, y - 136)
+        Place(widgets.imageSizeLabel, 16, y - 184)
+        Place(widgets.imageSize, 16, y - 208)
+        Place(widgets.imageDurationEnabled, 342, y - 211)
+        Place(widgets.imageDuration, 520, y - 208)
+        Place(widgets.imageStrataLabel, 16, y - 256)
+        Place(widgets.imageStrataDrop, 16, y - 280)
+        Place(widgets.imageEndEventsLabel, 342, y - 256)
+        Place(widgets.imageEndEventsDrop, 342, y - 280)
+        y = y - 345 - NOTIFY_BLOCK_GAP
+    end
+    if showText then
+        BeginBlock(widgets.blockTitleText)
+        Place(widgets.textAlertLabel, 16, y - 40)
+        Place(widgets.textAlert, 16, y - 64)
+        Place(widgets.textSizeLabel, 16, y - 112)
+        Place(widgets.textSize, 16, y - 136)
+        Place(widgets.textDurationEnabled, 342, y - 139)
+        Place(widgets.textDuration, 520, y - 136)
+        Place(widgets.textEndEventsLabel, 16, y - 184)
+        Place(widgets.textEndEventsDrop, 16, y - 208)
+        Place(widgets.textCooldownCountdown, 342, y - 211)
+        y = y - 275
+    end
+    return math.abs(y)
 end
 
 local function GetEventInstanceModeItems()
@@ -1371,7 +1498,7 @@ function Fields:UpdateImageIconPreview(editor)
         return
     end
     local state = NS.AceOptions and NS.AceOptions.GetState and NS.AceOptions:GetState() or {}
-    if tostring(state.activeAlertTab or "") ~= "image" or state.imageEnabled ~= true then
+    if state.imageEnabled ~= true then
         widgets.imageIconPreviewTexture:SetTexture(nil)
         widgets.imageIconPreview:Hide()
         return
@@ -1400,7 +1527,7 @@ function Fields:PullFromWidgets(editor)
     local isEventEntry = tostring(state.entryType or "") == "event"
     local isCustomEntry = tostring(state.entryType or "") == "custom"
 
-    state.activeAlertTab = NormalizeAlertTab(state.activeAlertTab)
+    state.activeAlertTab = "settings"
     if (isCooldownEntry or isEventEntry) and widgets.conditionActionsDrop and Widgets.GetMultiDropdownValues then
         local selectedActions = Widgets:GetMultiDropdownValues(widgets.conditionActionsDrop)
         if state.activeAlertTab == "voice" and widgets.voiceEnabled then
@@ -1769,13 +1896,49 @@ function Fields:PushToWidgets(editor)
     if frame.description then
         frame.description:SetText(isCooldown and L("EDITOR_DESC_COOLDOWN") or L("EDITOR_DESC"))
     end
-    local activeTab = state.activeAlertTab
-    -- Aura alerts are voice-only, so the image / text tabs have no content.
+    -- The Voice / Image / Text configuration is inline on this settings page
+    -- now: a single page, no tab switching.
+    state.activeAlertTab = "settings"
+    local activeTab = "settings"
+    -- Aura alerts are voice-only, so the image / text sections have no content.
     local isAuraEntry = tostring(state.entryType or "") == "aura"
-    local showSettings = activeTab == "settings"
-    local showVoice = activeTab == "voice"
-    local showImage = activeTab == "image" and not isAuraEntry
-    local showText = activeTab == "text" and not isAuraEntry
+    local showSettings = true
+    -- Inline action blocks: visible while the matching action is selected
+    -- (bloodlust and aura entries always configure their voice).
+    local showVoice = state.voiceEnabled == true or isAuraEntry or isBloodlust
+    local showImage = state.imageEnabled == true and not isAuraEntry
+    local showText = state.textEnabled == true and not isAuraEntry
+
+    -- Collapsible Advanced block: it auto-opens while any advanced option is
+    -- configured.
+    local advancedConfigured = state.checkTalent == true
+        or state.loadTalentEnabled == true
+        or (tostring(state.itemLoadMode or "none") ~= "none")
+        or state.itemLoadSameName == true
+    frame.qfxsaAdvancedConfigured = advancedConfigured
+    local advancedExpanded = frame.qfxsaAdvancedExpanded
+    if advancedExpanded == nil then
+        advancedExpanded = advancedConfigured
+    end
+
+    -- Module geometry: the collapsed Advanced block shifts the module below it
+    -- upwards.
+    local advancedDelta = 0
+    if showSettings and not isBloodlust and not isCustom and widgets.spellSection then
+        local spellHeight = 312
+        if not isEvent then
+            local layoutObjectType = tostring(state.objectType or "spell")
+            if layoutObjectType ~= "item" then
+                layoutObjectType = "spell"
+            end
+            local _, measuredHeight = self:ApplySpellSectionLayout(
+                widgets, layoutObjectType == "item", isAuraEntry, advancedExpanded
+            )
+            spellHeight = tonumber(measuredHeight) or 312
+        end
+        advancedDelta = math.max(0, 312 - spellHeight)
+        widgets.spellSection:SetHeight(spellHeight)
+    end
 
     local typeTitle = isBloodlust and L("TAB_BLOODLUST") or (isEvent and L("TAB_EVENT_VOICE") or (isCustom and L("TAB_CUSTOM") or (isCast and L("TAB_CAST") or L("TAB_COOLDOWN"))))
     frame.title:SetText((editor.mode == "new" and L("TITLE_NEW_CONFIG") or L("TITLE_EDIT_CONFIG")) .. " - " .. typeTitle)
@@ -1789,7 +1952,7 @@ function Fields:PushToWidgets(editor)
     SetManyShown({ widgets.customSection, widgets.customCodeSection }, showSettings and isCustom)
     SetManyShown({ widgets.conditionSection }, showSettings and (isCooldown or isCast or isCustom or isAuraEntry or isEvent))
     SetManyShown({ widgets.bloodlustInfoSection }, showSettings and isBloodlust)
-    SetManyShown({ widgets.notifySection }, not showSettings)
+    SetManyShown({ widgets.notifySection }, true)
     if showSettings then
         if widgets.classSection then widgets.classSection:SetShown(not isBloodlust) end
         if widgets.spellSection then widgets.spellSection:SetShown((not isBloodlust) and (not isCustom)) end
@@ -1798,13 +1961,23 @@ function Fields:PushToWidgets(editor)
         if widgets.conditionSection then widgets.conditionSection:SetShown(isCooldown or isCast or isCustom or isAuraEntry or isEvent) end
         if widgets.bloodlustInfoSection then widgets.bloodlustInfoSection:SetShown(isBloodlust) end
     end
+    local modules = (PopupLayout and PopupLayout.Editor and PopupLayout.Editor.Modules) or {}
+    local conditionShift = advancedDelta
+    local conditionHeight
+    if isCustom then
+        conditionHeight = GetCustomNotifySectionHeight(state)
+    elseif isEvent or isAuraEntry then
+        conditionHeight = 90
+    elseif isCast then
+        conditionHeight = 170
+    else
+        conditionHeight = 150
+    end
+    local conditionTop = (isCustom and (widgets.customConditionTop or -660) or (widgets.normalConditionTop or -382)) + conditionShift
     if widgets.conditionSection then
         widgets.conditionSection:ClearAllPoints()
-        widgets.conditionSection:SetPoint("TOPLEFT", widgets.conditionSection:GetParent(), "TOPLEFT", (PopupLayout and PopupLayout.Editor and PopupLayout.Editor.Modules.left) or 8, isCustom and (widgets.customConditionTop or -660) or (widgets.normalConditionTop or -382))
+        widgets.conditionSection:SetPoint("TOPLEFT", widgets.conditionSection:GetParent(), "TOPLEFT", modules.left or 8, conditionTop)
         if widgets.conditionSection.SetHeight then
-            local conditionHeight = isCustom and GetCustomNotifySectionHeight(state)
-                or (isEvent and 90)
-                or ((PopupLayout and PopupLayout.Editor and PopupLayout.Editor.Modules.conditionHeight) or 150)
             widgets.conditionSection:SetHeight(conditionHeight)
         end
         local title = isCustom and L("SECTION_CUSTOM_EXECUTE_NOTIFY")
@@ -1813,48 +1986,57 @@ function Fields:PushToWidgets(editor)
         if label and label.SetText then label:SetText(title) end
     end
 
+    -- Inline action configuration blocks right below the condition section
+    -- (or the bloodlust info section): sound, image and text in one column.
+    local notifyTop
+    if isBloodlust then
+        notifyTop = (modules.bloodlustTop or -8) - 134 - 18
+    else
+        notifyTop = conditionTop - conditionHeight - 18
+    end
+    local blocksHeight = LayoutNotifyBlocks(widgets, {
+        showVoice = showVoice,
+        showImage = showImage,
+        showText = showText,
+        isBloodlust = isBloodlust,
+        source = source,
+    })
     if widgets.notifySection then
         widgets.notifySection:ClearAllPoints()
-        widgets.notifySection:SetPoint("TOPLEFT", widgets.notifySection:GetParent(), "TOPLEFT", (PopupLayout and PopupLayout.Editor and PopupLayout.Editor.Modules.left) or 8, isBloodlust and (widgets.bloodlustNotifyTop or -8) or (widgets.normalNotifyTop or -8))
+        widgets.notifySection:SetPoint("TOPLEFT", widgets.notifySection:GetParent(), "TOPLEFT", modules.left or 8, notifyTop)
         if widgets.notifySection.SetHeight then
-            local customBloodlustVoice = isBloodlust and showVoice and tostring(source or state.soundSource or "") == "custom"
-            widgets.notifySection:SetHeight(customBloodlustVoice and (widgets.bloodlustCustomSoundNotifyHeight or 610) or (widgets.notifySectionHeight or 420))
+            widgets.notifySection:SetHeight(blocksHeight)
         end
     end
     local imageEnabledForLayout = state.imageEnabled == true
     local textEnabledForLayout = state.textEnabled == true
-    local linkedVisualLayout = showText and textEnabledForLayout and imageEnabledForLayout
-    local textOnlyPositionLayout = showText and textEnabledForLayout and (not imageEnabledForLayout)
-    local imagePositionLayout = showImage and imageEnabledForLayout
-    if frame.contentHost and frame.contentHost.SetContentHeight then
-        local contentHeight = widgets.normalNotifyContentHeight or 540
-        if showSettings then
-            if isBloodlust then
-                contentHeight = 180
-            elseif isCooldown then
-                contentHeight = widgets.normalSettingsContentHeight or 650
-            elseif isCast then
-                contentHeight = widgets.castSettingsContentHeight or widgets.normalSettingsContentHeight or 650
-            elseif isEvent then
-                contentHeight = 540
-            elseif isCustom then
-                contentHeight = math.max(widgets.customSettingsContentHeight or 760, math.abs(tonumber(widgets.customConditionTop) or 742) + GetCustomNotifySectionHeight(state) + 72)
-            else
-                contentHeight = 420
-            end
-        elseif isBloodlust then
-            if showVoice and tostring(source or state.soundSource or "") == "custom" then
-                contentHeight = widgets.bloodlustCustomSoundContentHeight or widgets.bloodlustContentHeight or 520
-            else
-                contentHeight = widgets.bloodlustContentHeight or 520
-            end
-        elseif linkedVisualLayout then
-            contentHeight = widgets.linkedVisualContentHeight or 820
-        elseif textOnlyPositionLayout then
-            contentHeight = widgets.textOnlyVisualContentHeight or 820
-        elseif imagePositionLayout then
-            contentHeight = widgets.imagePositionContentHeight or widgets.normalNotifyContentHeight or 540
+    local linkedVisualLayout = textEnabledForLayout and imageEnabledForLayout and not isAuraEntry
+    local textOnlyPositionLayout = textEnabledForLayout and (not imageEnabledForLayout) and not isAuraEntry
+    local imagePositionLayout = imageEnabledForLayout and not isAuraEntry
+    local lowestBottom = notifyTop - blocksHeight
+    local function PlacePositionModule(section, height)
+        if not section then
+            return
         end
+        local top = lowestBottom - 18
+        section:ClearAllPoints()
+        section:SetPoint("TOPLEFT", section:GetParent(), "TOPLEFT", modules.left or 8, top)
+        if section.SetHeight then
+            section:SetHeight(height)
+        end
+        lowestBottom = top - height
+    end
+    if imagePositionLayout then
+        PlacePositionModule(widgets.imagePositionSection, 156)
+    end
+    if textOnlyPositionLayout then
+        PlacePositionModule(widgets.textPositionSection, 156)
+    end
+    if linkedVisualLayout then
+        PlacePositionModule(widgets.visualLayoutSection, 220)
+    end
+    if frame.contentHost and frame.contentHost.SetContentHeight then
+        local contentHeight = math.max(420, math.abs(lowestBottom) + 30)
         local tabChanged = frame.qfxsaLastActiveAlertTab ~= activeTab
         frame.qfxsaLastActiveAlertTab = activeTab
         frame.contentHost:SetContentHeight(contentHeight)
@@ -1963,6 +2145,7 @@ function Fields:PushToWidgets(editor)
                 widgets.cdModeLabel, widgets.cdModeDrop,
                 widgets.auraTriggerLabel, widgets.auraTriggerDrop,
                 widgets.auraUnitLabel, widgets.auraUnitDrop,
+                widgets.advancedToggle,
             }, false)
             Widgets:SetDropdownEnabled(widgets.eventTypeDrop, true)
             SetEnabled(widgets.eventThrottle, true)
@@ -2000,7 +2183,7 @@ function Fields:PushToWidgets(editor)
             end
             -- A layout problem must never abort the rest of the refresh.
             local isAura = tostring(state.entryType or "") == "aura"
-            self:ApplySpellSectionLayout(widgets, isItemObject, isAura)
+            self:ApplySpellSectionLayout(widgets, isItemObject, isAura, advancedExpanded)
             if isAura and widgets.auraTriggerDrop then
                 Widgets:SetDropdownItems(widgets.auraTriggerDrop, {
                     { value = "applied", text = L("AURA_TRIGGER_APPLIED") },
@@ -2023,7 +2206,7 @@ function Fields:PushToWidgets(editor)
             if widgets.itemLoadEquipped then widgets.itemLoadEquipped:SetChecked(isItemObject and state.itemLoadMode == ITEM_LOAD_EQUIPPED) end
             if widgets.itemLoadBags then widgets.itemLoadBags:SetChecked(isItemObject and state.itemLoadMode == ITEM_LOAD_BAGS) end
             if widgets.itemLoadSameName then widgets.itemLoadSameName:SetChecked(state.itemLoadSameName == true) end
-            SetManyShown({ widgets.itemLoadEquipped, widgets.itemLoadBags, widgets.itemLoadSameName }, isItemObject)
+            SetManyShown({ widgets.itemLoadEquipped, widgets.itemLoadBags, widgets.itemLoadSameName }, isItemObject and advancedExpanded == true)
             SetEnabled(widgets.itemLoadSameName, isItemObject and state.itemLoadMode == ITEM_LOAD_BAGS)
             widgets.spellId:SetText((tonumber(state.spellId) or 0) > 0 and tostring(state.spellId) or "")
             widgets.spellName:SetText(tostring(state.spellName or ""))
@@ -2057,6 +2240,25 @@ function Fields:PushToWidgets(editor)
             SetManyShown({ widgets.baseCDLabel, widgets.baseCD }, isCooldown)
             SetManyShown({ widgets.cdModeLabel, widgets.cdModeDrop }, isCooldown and not isItemObject)
             SetManyShown({ widgets.delayEnabled, widgets.delaySecondsLabel, widgets.delaySeconds }, false)
+
+            -- Advanced block: talent / item conditions stay hidden until the
+            -- toggle is opened; a configured block is marked on the toggle.
+            if not advancedExpanded then
+                SetManyShown({
+                    widgets.checkTalent, widgets.talentIdLabel, widgets.talentId,
+                    widgets.talentNameLabel, widgets.talentName,
+                    widgets.talentCDLabel, widgets.talentCD,
+                    widgets.loadTalentEnabled, widgets.loadTalentIdLabel, widgets.loadTalentId,
+                    widgets.loadTalentNameLabel, widgets.loadTalentName,
+                }, false)
+            end
+            if widgets.advancedToggle then
+                local advancedText = advancedExpanded and L("BTN_ADVANCED_COLLAPSE") or L("BTN_ADVANCED_OPTIONS")
+                if advancedConfigured then
+                    advancedText = advancedText .. " · " .. L("ADVANCED_CONFIGURED_TAG")
+                end
+                widgets.advancedToggle:SetText(advancedText)
+            end
 
             local talentEnabled = talentControlsVisible and (state.checkTalent == true) and cdTalentAvailable
             SetEnabled(widgets.checkTalent, talentControlsVisible and isCooldown and cdTalentAvailable)
@@ -2293,7 +2495,7 @@ function Fields:PushToWidgets(editor)
         end
     end
     if showSettings and isCooldown then
-        -- Force the inline condition/action controls visible after returning from Voice/Image/Text tabs.
+        -- Force the inline condition/action controls visible after returning from a preview.
         -- Some native dropdown frames keep their previous hidden state when their parent row was hidden.
         ForceShowInlineCondition(widgets)
     elseif showSettings and isCast then
@@ -2305,13 +2507,20 @@ function Fields:PushToWidgets(editor)
     SetManyShown(imageConditionControls, false)
     SetManyShown(textConditionControls, false)
 
+    -- Inline validation result of the Save button (set by EditorActions after
+    -- a failed EntryStore:SaveEntry call).
+    if widgets.saveErrorText then
+        local errorKey = state.qfxsaSaveError
+        widgets.saveErrorText:SetText(type(errorKey) == "string" and errorKey ~= "" and L(errorKey) or "")
+    end
+
     local voiceControls = {
-        widgets.voiceEnabled, widgets.sourceLabel, widgets.sourceDrop, widgets.builtinLabel, widgets.builtinDrop,
+        widgets.sourceLabel, widgets.sourceDrop, widgets.builtinLabel, widgets.builtinDrop,
         widgets.sharedMediaLabel, widgets.sharedMediaDrop, widgets.customPathLabel, widgets.soundPath,
         widgets.ttsTextLabel, widgets.ttsText, widgets.rateLabel, widgets.ttsRateSlider,
     }
     local imageControls = {
-        widgets.imageEnabled, widgets.imageSourceLabel, widgets.imageSourceDrop, widgets.imageIconLabel, widgets.imageIconID, widgets.imageIconPreview,
+        widgets.imageSourceLabel, widgets.imageSourceDrop, widgets.imageIconLabel, widgets.imageIconID, widgets.imageIconPreview,
         widgets.imagePathLabel, widgets.imagePath, widgets.imageSharedMediaLabel, widgets.imageSharedMediaDrop,
         widgets.imageSizeLabel, widgets.imageSize, widgets.imageStrataLabel, widgets.imageStrataDrop,
         widgets.imageEndEventsLabel, widgets.imageEndEventsDrop, widgets.imageDurationEnabled,
@@ -2323,7 +2532,7 @@ function Fields:PushToWidgets(editor)
         widgets.imageNudgeLeft, widgets.imageNudgeRight, widgets.imageNudgeReset,
     }
     local textControls = {
-        widgets.textEnabled, widgets.textCooldownCountdown, widgets.textAlertLabel, widgets.textAlert, widgets.textSizeLabel, widgets.textSize, widgets.textDurationEnabled,
+        widgets.textCooldownCountdown, widgets.textAlertLabel, widgets.textAlert, widgets.textSizeLabel, widgets.textSize, widgets.textDurationEnabled,
         widgets.textDurationLabel, widgets.textDuration, widgets.textEndEventsLabel, widgets.textEndEventsDrop,
     }
     local textPositionControls = {
@@ -2337,6 +2546,9 @@ function Fields:PushToWidgets(editor)
         widgets.textNudgeUp, widgets.textNudgeDown, widgets.textNudgeLeft, widgets.textNudgeRight, widgets.textNudgeReset,
         widgets.layoutPreviewButton, widgets.layoutHidePreviewButton,
     }
+    -- The enable checkboxes are replaced by the execute multi-select on the
+    -- condition row; they keep the same state but are never shown.
+    SetManyShown({ widgets.voiceEnabled, widgets.imageEnabled, widgets.textEnabled }, false)
     SetManyShown(voiceControls, showVoice)
     local bloodlustCustomVoice = showVoice and isBloodlust and tostring(source or state.soundSource or "") == "custom"
     if bloodlustCustomVoice then
@@ -2435,7 +2647,8 @@ function Fields:PushToWidgets(editor)
             SetEnabled(widgets.textConditionTime, textEnabled and isCooldown and not isAuraEntry)
             SetLabelsEnabled({ widgets.textConditionLabel, widgets.textConditionCdLabel, widgets.textConditionSecLabel }, textEnabled and isCooldown and not isAuraEntry)
         end
-    elseif showVoice then
+    end
+    if showVoice then
         local voiceEnabled = state.voiceEnabled == true or tostring(state.entryType or "") == "aura"
         Widgets:SetDropdownEnabled(widgets.sourceDrop, voiceEnabled)
         SetNativeLabelColor(widgets.sourceLabel, voiceEnabled)
@@ -2446,7 +2659,8 @@ function Fields:PushToWidgets(editor)
             SetLabelsEnabled({ widgets.builtinLabel, widgets.sharedMediaLabel, widgets.customPathLabel, widgets.ttsTextLabel, widgets.rateLabel }, false)
             if Layout.SetRateSliderLabelEnabled then Layout.SetRateSliderLabelEnabled(widgets.ttsRateSlider, false) end
         end
-    elseif showImage then
+    end
+    if showImage then
         local enabled = state.imageEnabled == true
         local imageSource = NormalizeImageSource(state.imageSource)
         local usesID = imageSource == "spell" or imageSource == "item" or imageSource == "icon"
@@ -2481,7 +2695,8 @@ function Fields:PushToWidgets(editor)
         Widgets:SetDropdownEnabled(widgets.imageStrataDrop, enabled)
         Widgets:SetDropdownEnabled(widgets.imageEndEventsDrop, enabled)
         SetLabelsEnabled({ widgets.imageStrataLabel, widgets.imageEndEventsLabel }, enabled)
-    elseif showText then
+    end
+    if showText then
         local enabled = state.textEnabled == true
         local linked = linkedVisualLayout == true
         local textOnly = textOnlyPositionLayout == true
@@ -2509,39 +2724,23 @@ function Fields:PushToWidgets(editor)
     end
 
     SetManyShown({ widgets.tabTypeLabel, widgets.tabCooldown, widgets.tabCast, widgets.tabBloodlust, widgets.subTabLabel }, false)
-    if widgets.tabImage then widgets.tabImage:SetShown(true) end
-    if widgets.tabText then widgets.tabText:SetShown(true) end
+    -- The single page never switches; the tab buttons stay hidden.
+    SetManyShown({ widgets.tabSettings, widgets.tabVoice, widgets.tabImage, widgets.tabText }, false)
     if widgets.actionTest then
-        if showVoice then widgets.actionTest:Show() else widgets.actionTest:Hide() end
+        widgets.actionTest:Show()
     end
 
     if showSettings and isCooldown then
-        if widgets.conditionSection and widgets.conditionSection.SetHeight then
-            widgets.conditionSection:SetHeight(150)
-        end
         ForceShowInlineCondition(widgets)
     elseif showSettings and (isAuraEntry or isEvent) then
-        if widgets.conditionSection and widgets.conditionSection.SetHeight then
-            widgets.conditionSection:SetHeight(90)
-        end
         if isEvent then
             ForceShowEventCondition(widgets)
         end
     elseif showSettings and isCast then
-        if widgets.conditionSection and widgets.conditionSection.SetHeight then
-            widgets.conditionSection:SetHeight(170)
-        end
         ForceShowCastCondition(widgets)
     elseif showSettings and isCustom then
-        if widgets.conditionSection and widgets.conditionSection.SetHeight then
-            widgets.conditionSection:SetHeight(GetCustomNotifySectionHeight(state))
-        end
         ForceShowCustomCondition(widgets)
     end
-    SetTabVisual(widgets.tabSettings, showSettings)
-    SetTabVisual(widgets.tabVoice, showVoice)
-    SetTabVisual(widgets.tabImage, showImage)
-    SetTabVisual(widgets.tabText, showText)
     if frame.contentHost and frame.contentHost.UpdateScrollRange then
         frame.contentHost:UpdateScrollRange()
     end
@@ -2607,6 +2806,26 @@ function Fields:RefreshLocale(editor)
     SetManyShown({ widgets.tabTypeLabel, widgets.tabCooldown, widgets.tabCast, widgets.tabBloodlust, widgets.subTabLabel }, false)
     SetLocaleText(widgets.actionSave, L("BTN_SAVE"))
     SetLocaleText(widgets.actionTest, L("BTN_TEST"))
+
+    -- Collapsible Advanced block and the action jump buttons refresh their
+    -- labels here for language switches; the state-driven text is re-applied
+    -- by PushToWidgets on every refresh.
+    local advancedExpandedLocale = frame.qfxsaAdvancedExpanded
+    if advancedExpandedLocale == nil then
+        advancedExpandedLocale = frame.qfxsaAdvancedConfigured == true
+    end
+    local advancedText = L(advancedExpandedLocale and "BTN_ADVANCED_COLLAPSE" or "BTN_ADVANCED_OPTIONS")
+    if frame.qfxsaAdvancedConfigured == true then
+        advancedText = advancedText .. " · " .. L("ADVANCED_CONFIGURED_TAG")
+    end
+    SetLocaleText(widgets.advancedToggle, advancedText)
+    SetLocaleText(widgets.blockTitleVoice, L("TAB_VOICE"))
+    SetLocaleText(widgets.blockTitleImage, L("TAB_IMAGE"))
+    SetLocaleText(widgets.blockTitleText, L("TAB_TEXT"))
+    if widgets.saveErrorText then
+        local errorKey = state.qfxsaSaveError
+        widgets.saveErrorText:SetText(type(errorKey) == "string" and errorKey ~= "" and L(errorKey) or "")
+    end
 
     SetSectionLocaleText(widgets.classSection, L("SECTION_CLASS_SPEC"))
     SetSectionLocaleText(widgets.spellSection, entryType == "event" and L("SECTION_EVENT_VOICE_PARAMS") or L("SECTION_SPELL_PARAMS"))

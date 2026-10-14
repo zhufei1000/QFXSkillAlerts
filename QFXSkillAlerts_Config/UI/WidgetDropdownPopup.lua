@@ -2,6 +2,7 @@ local NS = rawget(_G, "QFXSkillAlertsNS") or {}
 _G.QFXSkillAlertsNS = NS
 
 NS.UI = NS.UI or {}
+if NS.UI.FactoryBridge then return end
 NS.UI.Widgets = NS.UI.Widgets or {}
 NS.UI.WidgetDropdownPopup = NS.UI.WidgetDropdownPopup or {}
 

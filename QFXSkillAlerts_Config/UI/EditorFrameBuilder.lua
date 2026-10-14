@@ -2,6 +2,12 @@ local NS = rawget(_G, "QFXSkillAlertsNS") or {}
 _G.QFXSkillAlertsNS = NS
 
 NS.UI = NS.UI or {}
+local NativeCreateFrame = CreateFrame
+local function CreateFrame(kind, name, parent, template)
+    local bridge = NS.UI.FactoryBridge
+    if bridge then return bridge.CreateFrame(kind, name, parent, template) end
+    return NativeCreateFrame(kind, name, parent, template)
+end
 NS.UI.EditorFrameBuilder = NS.UI.EditorFrameBuilder or {}
 
 local Builder = NS.UI.EditorFrameBuilder
@@ -20,6 +26,7 @@ local CreateRateSlider = EditorLayout.CreateRateSlider
 local CreateValueSlider = EditorLayout.CreateValueSlider
 local InstallSpellIdAutofill = EditorLayout.InstallSpellIdAutofill
 local InstallTalentIdAutofill = EditorLayout.InstallTalentIdAutofill
+local InstallTooltip = EditorLayout.InstallTooltip
 
 local function SetCheckWidth(button, width)
     if not button then
@@ -307,6 +314,32 @@ local function CreateNotifyControls(content, ctx)
     nw.editorHint:SetJustifyH("LEFT")
     nw.editorHint:Hide()
 
+    -- Block titles and separators for the inline action configuration
+    -- (sound / image / text blocks). Positions come from
+    -- EditorFields:LayoutNotifyBlocks.
+    nw.blockTitleVoice = CreateFieldLabel(notifySection, L("TAB_VOICE"), INNER, -8, 240)
+    nw.blockTitleImage = CreateFieldLabel(notifySection, L("TAB_IMAGE"), INNER, -8, 240)
+    nw.blockTitleText = CreateFieldLabel(notifySection, L("TAB_TEXT"), INNER, -8, 240)
+    nw.blockTitleVoice:Hide()
+    nw.blockTitleImage:Hide()
+    nw.blockTitleText:Hide()
+    local function CreateBlockSeparator()
+        local line = CreateFrame("Frame", nil, notifySection)
+        line:SetSize(MODULE_CONTENT_W, 1)
+        local texture = line:CreateTexture(nil, "ARTWORK")
+        texture:SetAllPoints()
+        local divider = NS.UI.FactoryBridge and NS.UI.FactoryBridge.Divider and NS.UI.FactoryBridge.Divider()
+        if divider then
+            texture:SetColorTexture(divider[1], divider[2], divider[3], divider[4] or 1)
+        else
+            texture:SetColorTexture(0.45, 0.45, 0.45, 0.7)
+        end
+        line:Hide()
+        return line
+    end
+    nw.blockSep1 = CreateBlockSeparator()
+    nw.blockSep2 = CreateBlockSeparator()
+
     nw.notifySection = notifySection
     nw.imagePositionSection = imagePositionSection
     nw.textPositionSection = textPositionSection
@@ -406,17 +439,24 @@ function Builder:EnsureFrame(owner)
     local subTabLabel = Widgets:CreateLabel(frame, L("TAB_GROUP_PAGE"), "GameFontNormalSmall")
     subTabLabel:Hide()
 
+    -- The Voice / Image / Text configuration is displayed inline on the
+    -- settings page now; the tab buttons stay allocated but hidden so old
+    -- refresh code and locale updates keep working.
     local tabSettings = Widgets:CreateButton(frame, L("TAB_SETTINGS"), 78, 24)
     tabSettings:SetPoint("TOPLEFT", frame, "TOPLEFT", 24, frameCfg.tabY or -70)
+    tabSettings:Hide()
 
     local tabVoice = Widgets:CreateButton(frame, L("TAB_VOICE"), 78, 24)
     tabVoice:SetPoint("LEFT", tabSettings, "RIGHT", 8, 0)
+    tabVoice:Hide()
 
     local tabImage = Widgets:CreateButton(frame, L("TAB_IMAGE"), 78, 24)
     tabImage:SetPoint("LEFT", tabVoice, "RIGHT", 8, 0)
+    tabImage:Hide()
 
     local tabText = Widgets:CreateButton(frame, L("TAB_TEXT"), 78, 24)
     tabText:SetPoint("LEFT", tabImage, "RIGHT", 8, 0)
+    tabText:Hide()
 
     local contentHost, content = Widgets:CreateScrollableContent(frame, { contentHeight = (PopupLayout and PopupLayout.Editor and PopupLayout.Editor.Rows.contentHeight) or 880, contentWidth = 700, topHeight = 16, noTopLine = true, wheelStep = 86 })
     contentHost:SetPoint("TOPLEFT", frame, "TOPLEFT", frameCfg.sideInset or 24, (frameCfg.contentTopY or -146) + 38)
@@ -426,6 +466,9 @@ function Builder:EnsureFrame(owner)
 
     local grid = (PopupLayout and PopupLayout.Editor and PopupLayout.Editor.Grid) or {}
     local modules = (PopupLayout and PopupLayout.Editor and PopupLayout.Editor.Modules) or {}
+    -- Container for controls added after the original layout; keeps this very
+    -- large function under Lua's 200-local limit.
+    local editorUi = {}
     local INNER = grid.moduleInnerLeft or 16
     local MODULE_W = modules.width or 680
     local MODULE_RIGHT = grid.moduleInnerRight or 16
@@ -491,6 +534,18 @@ function Builder:EnsureFrame(owner)
     local actionTest = Widgets:CreateButton(frame, L("BTN_TEST"), 120, 32)
     actionTest:SetPoint("LEFT", actionSave, "RIGHT", 8, 0)
 
+    -- Inline validation result for the Save button. Configuration errors used
+    -- to go to the chat frame only; the key set by EntryStore:SaveEntry is
+    -- shown here instead.
+    editorUi.saveErrorText = Widgets:CreateLabel(frame, "", "GameFontHighlightSmall")
+    editorUi.saveErrorText:SetPoint("BOTTOMLEFT", frame, "BOTTOMLEFT", 292, 26)
+    editorUi.saveErrorText:SetWidth(430)
+    editorUi.saveErrorText:SetJustifyH("LEFT")
+    editorUi.saveErrorText:SetTextColor(1, 0.35, 0.35, 1)
+    if editorUi.saveErrorText.SetWordWrap then editorUi.saveErrorText:SetWordWrap(false) end
+    if editorUi.saveErrorText.SetNonSpaceWrap then editorUi.saveErrorText:SetNonSpaceWrap(false) end
+    if editorUi.saveErrorText.SetMaxLines then editorUi.saveErrorText:SetMaxLines(1) end
+
     -- Always-visible scope controls, laid out as two compact inline rows:
     -- race on top, class + linked spec below. "All ..." entries are exclusive
     -- and long multi-selections collapse to a localized count summary.
@@ -522,6 +577,7 @@ function Builder:EnsureFrame(owner)
     local spellId = PlaceControl(Widgets:CreateEditBox(spellSection, PRIMARY_ID_W, 30, true), spellSection, PRIMARY_ID_X, SPELL_CONTROL1_Y)
     local spellName = PlaceControl(Widgets:CreateEditBox(spellSection, PRIMARY_NAME_W, 30, false), spellSection, PRIMARY_NAME_X, SPELL_CONTROL1_Y)
     local baseCD = PlaceControl(Widgets:CreateEditBox(spellSection, CD_W, 30, false), spellSection, CD_X, SPELL_CONTROL1_Y)
+    InstallTooltip(baseCD, function() return L("TOOLTIP_FIXED_CD") end)
 
     local eventTypeLabel = CreateFieldLabel(spellSection, L("LABEL_EVENT_VOICE_TYPE"), ID_X, SPELL_LABEL1_Y, 320)
     local eventTypeDrop = PlaceControl(Widgets:CreateDropdown(spellSection, "QFXSkillAlertsEditorEventVoiceDropDown", 320), spellSection, ID_X, SPELL_CONTROL1_Y)
@@ -583,6 +639,7 @@ function Builder:EnsureFrame(owner)
         label = CreateFieldLabel(spellSection, L("LABEL_OBJECT_TYPE"), INNER, -44, 100),
         drop = PlaceControl(Widgets:CreateDropdown(spellSection, "QFXSkillAlertsEditorObjectTypeDropDown", 100), spellSection, INNER, -68),
     }
+    InstallTooltip(objectType.drop, function() return L("TOOLTIP_OBJECT_TYPE") end)
 
     -- Aura trigger selector (applied / removed / applications) and the unit the
     -- aura is watched on (player / target / focus), shown only for aura entries.
@@ -596,6 +653,11 @@ function Builder:EnsureFrame(owner)
         drop = PlaceControl(Widgets:CreateDropdown(spellSection, "QFXSkillAlertsEditorAuraUnitDropDown", 100), spellSection, 280, -68),
     }
 
+    -- Low-frequency talent / item conditions collapse behind this toggle; the
+    -- coordinates are re-applied by EditorFields:ApplySpellSectionLayout.
+    editorUi.advancedToggle = Widgets:CreateButton(spellSection, L("BTN_ADVANCED_OPTIONS"), 210, 24)
+    editorUi.advancedToggle:SetPoint("TOPLEFT", spellSection, "TOPLEFT", INNER, -166)
+
     -- Fixed CD / ready / charge source for cooldown entries; the fixed number
     -- input follows on the same row. Legacy gameStateCD maps to "ready".
     local cdMode = {
@@ -605,6 +667,7 @@ function Builder:EnsureFrame(owner)
         Widgets:CreateDropdown(spellSection, "QFXSkillAlertsEditorCdModeDropDown", CD_W),
         spellSection, CD_X, SPELL_CONTROL1_Y
     )
+    InstallTooltip(cdMode.drop, function() return L("TOOLTIP_CD_MODE") end)
 
     local itemLoadEquipped = Widgets:CreateCheckButton(spellSection, L("LABEL_ITEM_LOAD_EQUIPPED"), 118)
     itemLoadEquipped:SetPoint("TOPLEFT", spellSection, "TOPLEFT", ID_X, SPELL_CONTROL2_Y - 3)
@@ -682,6 +745,8 @@ function Builder:EnsureFrame(owner)
     local conditionTime = Widgets:CreateEditBox(conditionRow1, COND_TIME_W, COND_ROW_H, false)
     conditionTime:SetPoint("LEFT", conditionRow1, "LEFT", COND_TIME_X - INNER, 0)
     conditionTime:SetText("0")
+    InstallTooltip(conditionOp, function() return L("TOOLTIP_CONDITION") end)
+    InstallTooltip(conditionTime, function() return L("TOOLTIP_CONDITION") end)
     local conditionSecLabel = CreateInlineText(conditionRow1, L("LABEL_SECONDS_SHORT"), COND_SEC_X - INNER, COND_SEC_W)
 
     local conditionExecuteLabel = CreateInlineText(conditionRow2, L("LABEL_CONDITION_EXECUTE"), 0, COND_EXEC_W)
@@ -860,6 +925,8 @@ function Builder:EnsureFrame(owner)
         castConditionRow1 = castConditionControls.row1,
         castConditionRow2 = castConditionControls.row2,
         castConditionRow3 = castConditionControls.row3,
+        advancedToggle = editorUi.advancedToggle,
+        saveErrorText = editorUi.saveErrorText,
         baseCDLabel = baseCDLabel,
         baseCD = baseCD,
         voiceEnabled = notifyData.voiceEnabled,
@@ -991,6 +1058,11 @@ function Builder:EnsureFrame(owner)
         actionSave = actionSave,
         actionTest = actionTest,
         editorHint = notifyData.editorHint,
+        blockTitleVoice = notifyData.blockTitleVoice,
+        blockTitleImage = notifyData.blockTitleImage,
+        blockTitleText = notifyData.blockTitleText,
+        blockSep1 = notifyData.blockSep1,
+        blockSep2 = notifyData.blockSep2,
         normalNotifyTop = modules.notifyTop or -8,
         bloodlustNotifyTop = modules.bloodlustTop or -8,
         normalSettingsContentHeight = 748,

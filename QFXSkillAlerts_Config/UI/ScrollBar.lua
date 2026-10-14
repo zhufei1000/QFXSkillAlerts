@@ -2,6 +2,7 @@ local NS = rawget(_G, "QFXSkillAlertsNS") or {}
 _G.QFXSkillAlertsNS = NS
 
 NS.UI = NS.UI or {}
+if NS.UI.FactoryBridge then return end
 NS.UI.ScrollBar = NS.UI.ScrollBar or {}
 
 local ScrollBar = NS.UI.ScrollBar

@@ -2,6 +2,7 @@ local NS = rawget(_G, "QFXSkillAlertsNS") or {}
 _G.QFXSkillAlertsNS = NS
 
 NS.UI = NS.UI or {}
+if NS.UI.FactoryBridge then return end
 NS.UI.DialogTextArea = NS.UI.DialogTextArea or {}
 
 local DialogTextArea = NS.UI.DialogTextArea

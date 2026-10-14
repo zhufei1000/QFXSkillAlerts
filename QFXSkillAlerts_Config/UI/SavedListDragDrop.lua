@@ -2,6 +2,12 @@ local NS = rawget(_G, "QFXSkillAlertsNS") or {}
 _G.QFXSkillAlertsNS = NS
 
 NS.UI = NS.UI or {}
+local NativeCreateFrame = CreateFrame
+local function CreateFrame(kind, name, parent, template)
+    local bridge = NS.UI.FactoryBridge
+    if bridge then return bridge.CreateFrame(kind, name, parent, template) end
+    return NativeCreateFrame(kind, name, parent, template)
+end
 NS.UI.SavedListDragDrop = NS.UI.SavedListDragDrop or {}
 
 local DragDrop = NS.UI.SavedListDragDrop
@@ -231,7 +237,12 @@ function DragDrop:StartDragVisual(list, row)
         accent:SetPoint("TOPLEFT", ghost, "TOPLEFT", 3, -3)
         accent:SetPoint("BOTTOMLEFT", ghost, "BOTTOMLEFT", 3, 3)
         accent:SetWidth(3)
-        accent:SetColorTexture(0.24, 0.48, 1.00, 0.80)
+        local accentColor = NS.UI.FactoryBridge and NS.UI.FactoryBridge.RowAccent and NS.UI.FactoryBridge.RowAccent()
+        if accentColor then
+            accent:SetColorTexture(accentColor[1], accentColor[2], accentColor[3], accentColor[4] or 1)
+        else
+            accent:SetColorTexture(0.24, 0.48, 1.00, 0.80)
+        end
         ghost.accent = accent
 
         local statusDot = ghost:CreateFontString(nil, "OVERLAY", "GameFontNormal")

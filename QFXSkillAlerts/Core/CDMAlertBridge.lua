@@ -89,6 +89,23 @@ function Bridge:GetAuraTriggerForEventKey(eventKey)
     return EVENT_TO_AURA_TRIGGER[tostring(eventKey or ""):upper()]
 end
 
+-- The unit an aura alert watches. Tracked bars follow a debuff on the player's
+-- target (Garrote, Rupture, ...); every other Cooldown Manager aura edge comes
+-- from the player's own auras. Records saved before the unit was stored resolve
+-- from their Cooldown Manager category.
+function Bridge:ResolveRecordAuraUnit(record)
+    if type(record) == "table" then
+        local unit = tostring(record.auraUnit or ""):lower()
+        if AURA_UNITS[unit] then
+            return unit
+        end
+        if tostring(record.category or "") == "trackedBar" then
+            return "target"
+        end
+    end
+    return "player"
+end
+
 -- All saved alert entries live in the global storage scope ([0][0]); the
 -- class / spec applicability is carried by alertClassIDs / alertSpecIDs. The
 -- classID / specID arguments are kept for scoping the saved entry itself.
@@ -444,7 +461,7 @@ function Bridge:MigrateLegacyRecords()
                                             spellID,
                                             ResolveSpellName(spellID),
                                             auraTrigger,
-                                            "player",
+                                            self:ResolveRecordAuraUnit(record),
                                             voiceItem
                                         )
                                     end
