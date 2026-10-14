@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.0.241
+
+- Add a localized author footer and show the current addon version from TOC metadata.
+- Add QQ group, Discord, and GitHub contact icons using the supplied artwork, with localized hover text and a Ctrl+C copy dialog.
+- Keep the contacts available in standalone and QFX Addon Manager settings; closing the main window closes contact dialogs, and regular exports retain their original instructions.
+- Preserve all alert settings, saved profiles, and runtime behavior.
+
 ## 1.0.240
 
 - Support WoW 12.1.5 and use the selected standard TTS voice with the required voice-type argument.

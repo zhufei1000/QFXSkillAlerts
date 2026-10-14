@@ -130,6 +130,21 @@ function Widgets:CreateModuleCard(parent, title, description, width, height)
     return card
 end
 
+function Widgets:CreateIconButton(parent, texture, size)
+    local button = CreateFrame("Button", nil, parent)
+    button:SetSize(size or 20, size or 20)
+    local icon = button:CreateTexture(nil, "ARTWORK")
+    icon:SetAllPoints()
+    icon:SetTexture(texture, "CLAMP", "CLAMP", "TRILINEAR")
+    if icon.SetSnapToPixelGrid then icon:SetSnapToPixelGrid(false) end
+    if icon.SetTexelSnappingBias then icon:SetTexelSnappingBias(0) end
+    button._icon = icon
+    button:SetAlpha(0.75)
+    button:SetScript("OnEnter", function(self) self:SetAlpha(1) end)
+    button:SetScript("OnLeave", function(self) self:SetAlpha(0.75) end)
+    return button
+end
+
 function Widgets:CreateButton(parent, text, width, height)
     local button = CreateFrame("Button", nil, parent, "UIPanelButtonTemplate")
     button:SetSize(width or 96, height or 26)

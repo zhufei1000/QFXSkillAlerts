@@ -38,7 +38,10 @@ local enUS = {
     ADDON_DISPLAY_NAME = "QFX Skill Alerts",
     ADDON_SHORT_NAME = "QFX Alerts",
     
-    AUTHOR_LINE = "Author: zhufei1000",
+    AUTHOR_LINE = "Author: Qunfeixuan (zhufei1000)",
+    VERSION_LINE = "Version: %s",
+    CONTACT_QQ = "QQ Group", CONTACT_DISCORD = "Discord", CONTACT_GITHUB = "GitHub",
+    CONTACT_COPY_HINT = "Press Ctrl+C to copy. Find the group number in QQ, or open the link in your browser.",
     OPTIONS_DESC = "Fixed-cooldown spell voice alerts: records successful casts via UNIT_SPELLCAST_SUCCEEDED, times cooldowns by the fixed CD you enter, and plays TTS or voice files when cooldowns finish, casts succeed, or Bloodlust is triggered.\n\nClick the button below to open the main settings window. You can also use /qfxsa or the minimap icon.",
     OPEN_MAIN_SETTINGS = "Open main settings",
     COMMANDS = "Commands: /qfxsa or /qfxskillalerts",
@@ -58,7 +61,9 @@ local enUS = {
 }
 
 local zhCN = setmetatable({
-    ADDON_DISPLAY_NAME = "QFX 技能提醒", ADDON_SHORT_NAME = "QFX 技能提醒", AUTHOR_LINE = "作者：zhufei1000",
+    ADDON_DISPLAY_NAME = "QFX 技能提醒", ADDON_SHORT_NAME = "QFX 技能提醒", AUTHOR_LINE = "作者：群飞轩（zhufei1000）",
+    VERSION_LINE = "版本：%s", CONTACT_QQ = "QQ 群", CONTACT_DISCORD = "Discord", CONTACT_GITHUB = "GitHub",
+    CONTACT_COPY_HINT = "按 Ctrl+C 复制。QQ群号可在 QQ 中查找，链接请在浏览器中打开。",
     OPTIONS_DESC = "固定CD技能语音提醒插件：通过 UNIT_SPELLCAST_SUCCEEDED 记录施法成功事件，按你填写的固定CD计时，并在冷却结束、施法成功或嗜血触发时播放TTS或语音文件。\n\n点击下方按钮可打开主设置界面；也可以使用 /qfxsa 或点击小地图图标打开。", OPEN_MAIN_SETTINGS = "打开主设置界面", COMMANDS = "命令：/qfxsa 或 /qfxskillalerts",
     BTN_ADD_VOICE = "新增", BTN_ADD_COLLECTION = "新增合集", BTN_EDIT = "编辑", BTN_DELETE = "删除", BTN_REFRESH = "刷新", BTN_IMPORT = "导入", BTN_EXPORT_FULL = "全量导出", BTN_SAVE = "保存", BTN_TEST = "试听", BTN_CLOSE = "关闭", BTN_SELECT_ALL = "全选",
     TITLE_NEW_CONFIG = "新增配置", TITLE_EDIT_CONFIG = "编辑配置", TITLE_ADD_COLLECTION = "新增合集", TITLE_RENAME_COLLECTION = "重命名合集", TITLE_IMPORT_EXPORT = "导入 / 导出", TITLE_EXPORT = "导出", TITLE_IMPORT_SETTINGS = "导入设置", EXPORT_ENTRY = "导出单条信息", EXPORT_COLLECTION = "导出合集", DELETE_ENTRY = "删除配置", EDIT_ENTRY = "编辑配置", DELETE_COLLECTION_WITH_ITEMS = "删除合集和其中语音", EXPAND_COLLECTION = "展开合集", COLLAPSE_COLLECTION = "收拢合集", RENAME_COLLECTION = "重命名合集", EXPORT_FULL_TITLE = "全量导出",
@@ -73,7 +78,9 @@ local zhCN = setmetatable({
 }, { __index = enUS })
 
 local zhTW = setmetatable({
-    ADDON_DISPLAY_NAME = "QFX 技能提醒", ADDON_SHORT_NAME = "QFX 技能提醒", AUTHOR_LINE = "作者：zhufei1000",
+    ADDON_DISPLAY_NAME = "QFX 技能提醒", ADDON_SHORT_NAME = "QFX 技能提醒", AUTHOR_LINE = "作者：群飛軒（zhufei1000）",
+    VERSION_LINE = "版本：%s", CONTACT_QQ = "QQ 群", CONTACT_DISCORD = "Discord", CONTACT_GITHUB = "GitHub",
+    CONTACT_COPY_HINT = "按 Ctrl+C 複製。QQ群號可在 QQ 中查找，連結請在瀏覽器中開啟。",
     OPTIONS_DESC = "固定冷卻技能語音提醒插件：透過 UNIT_SPELLCAST_SUCCEEDED 記錄施法成功事件，依照你填寫的固定冷卻計時，並在冷卻結束、施法成功或嗜血觸發時播放 TTS 或語音檔。\n\n點擊下方按鈕可開啟主設定介面；也可以使用 /qfxsa 或點擊小地圖圖示開啟。", OPEN_MAIN_SETTINGS = "開啟主設定介面", COMMANDS = "指令：/qfxsa 或 /qfxskillalerts",
     BTN_ADD_VOICE = "新增", BTN_ADD_COLLECTION = "新增合集", BTN_EDIT = "編輯", BTN_DELETE = "刪除", BTN_REFRESH = "重新整理", BTN_IMPORT = "匯入", BTN_EXPORT_FULL = "全量匯出", BTN_SAVE = "儲存", BTN_TEST = "試聽", BTN_CLOSE = "關閉", BTN_SELECT_ALL = "全選",
     TITLE_NEW_CONFIG = "新增設定", TITLE_EDIT_CONFIG = "編輯設定", TITLE_ADD_COLLECTION = "新增合集", TITLE_RENAME_COLLECTION = "重命名合集", TITLE_IMPORT_EXPORT = "匯入 / 匯出", TITLE_EXPORT = "匯出", TITLE_IMPORT_SETTINGS = "匯入設定", EXPORT_ENTRY = "匯出單條資訊", EXPORT_COLLECTION = "匯出合集", DELETE_ENTRY = "刪除設定", EDIT_ENTRY = "編輯設定", DELETE_COLLECTION_WITH_ITEMS = "刪除合集和其中語音", EXPAND_COLLECTION = "展開合集", COLLAPSE_COLLECTION = "收合合集", EXPORT_FULL_TITLE = "全量匯出",

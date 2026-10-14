@@ -165,9 +165,70 @@ function Builder:EnsureFrame(owner)
     LayoutToolbar()
     frame:HookScript("OnShow", LayoutToolbar)
 
+    local authorLabel = Widgets:CreateLabel(frame, L("AUTHOR_LINE"), "GameFontHighlightSmall")
+    authorLabel:SetPoint("BOTTOMLEFT", frame, "BOTTOMLEFT", 24, 14)
+    authorLabel:SetSize(250, 20)
+    authorLabel:SetJustifyV("MIDDLE")
+    if authorLabel.SetWordWrap then authorLabel:SetWordWrap(false) end
+
+    local versionLabel = Widgets:CreateLabel(frame, "", "GameFontHighlightSmall")
+    versionLabel:SetPoint("BOTTOMRIGHT", frame, "BOTTOMRIGHT", -24, 14)
+    versionLabel:SetSize(200, 20)
+    versionLabel:SetJustifyH("RIGHT")
+    versionLabel:SetJustifyV("MIDDLE")
+    if versionLabel.SetWordWrap then versionLabel:SetWordWrap(false) end
+
+    local contacts = {
+        { key = "qq", titleKey = "CONTACT_QQ", value = "1049855225", icon = "contact-qq.blp" },
+        { key = "discord", titleKey = "CONTACT_DISCORD", value = "https://discord.gg/HVJ2y4v7k4", icon = "contact-discord.blp" },
+        { key = "github", titleKey = "CONTACT_GITHUB", value = "https://github.com/zhufei1000/QFXSkillAlerts", icon = "contact-github.blp" },
+    }
+    local contactButtons = {}
+    local previous = authorLabel
+    for _, contact in ipairs(contacts) do
+        local info = contact
+        local texture = [[Interface\AddOns\QFXSkillAlerts_Config\Media\]] .. info.icon
+        local factory = NS.UI.FactoryBridge and NS.UI.FactoryBridge.Widgets
+        -- Older suite adapters still expose the factory's public icon button.
+        local button = Widgets.CreateIconButton and Widgets:CreateIconButton(frame, texture, 20)
+            or factory:IconButton(frame, {texture = texture, size = 20, alpha = .75, hoverAlpha = 1})
+        button:SetPoint("LEFT", previous, "RIGHT", 8, 0)
+        button:SetScript("OnClick", function(_, mouseButton)
+            if mouseButton and mouseButton ~= "LeftButton" then return end
+            owner:OpenExportDialog(L(info.titleKey), info.value, L("CONTACT_COPY_HINT"))
+        end)
+        button:HookScript("OnEnter", function(self)
+            GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+            GameTooltip:SetText(L(info.titleKey), 1, 1, 1)
+            GameTooltip:AddLine(info.value, 1, 1, 1, true)
+            GameTooltip:AddLine(L("CONTACT_COPY_HINT"), 1, 1, 1, true)
+            GameTooltip:Show()
+        end)
+        button:HookScript("OnLeave", GameTooltip_Hide)
+        contactButtons[info.key] = button
+        previous = button
+    end
+
+    local function RefreshFooter()
+        authorLabel:SetText(L("AUTHOR_LINE"))
+        local metadata = C_AddOns and C_AddOns.GetAddOnMetadata or GetAddOnMetadata
+        local version = "--"
+        if type(metadata) == "function" then
+            local ok, value = pcall(metadata, "QFXSkillAlerts", "Version")
+            if ok and type(value) == "string" and value ~= "" then version = value end
+        end
+        versionLabel:SetText(L("VERSION_LINE", version))
+    end
+    RefreshFooter()
+    frame:HookScript("OnShow", RefreshFooter)
+    frame:HookScript("OnHide", function()
+        local dialog = owner.importExportDialog
+        if dialog and dialog.qfxsaContact then dialog:Hide() end
+    end)
+
     local listHost = CreateFrame("Frame", nil, frame, "BackdropTemplate")
     listHost:SetPoint("TOPLEFT", addBtn, "BOTTOMLEFT", 0, -18)
-    listHost:SetPoint("BOTTOMRIGHT", frame, "BOTTOMRIGHT", -24, 24)
+    listHost:SetPoint("BOTTOMRIGHT", frame, "BOTTOMRIGHT", -24, 48)
     Widgets:ApplyPanelChrome(listHost, { inset = true, noFooter = true, topHeight = 20 })
 
     local savedList = NS.UI.SavedList:Create(listHost)
@@ -200,5 +261,9 @@ function Builder:EnsureFrame(owner)
     owner.exportAllBtn = exportAllBtn
     owner.layoutToolbar = LayoutToolbar
     owner.savedList = savedList
+    owner.authorLabel = authorLabel
+    owner.versionLabel = versionLabel
+    owner.contactButtons = contactButtons
+    owner.refreshFooter = RefreshFooter
     return frame
 end

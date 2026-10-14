@@ -146,10 +146,11 @@ function MainFrame:EnsureImportExportDialog()
     return dialog
 end
 
-function MainFrame:OpenExportDialog(titleText, exportText)
+function MainFrame:OpenExportDialog(titleText, exportText, description)
     local dialog = self:EnsureImportExportDialog()
     dialog.title:SetText(tostring(titleText or L("TITLE_EXPORT")))
-    dialog.desc:SetText(L("EXPORT_DESC"))
+    dialog.desc:SetText(description or L("EXPORT_DESC"))
+    dialog.qfxsaContact = description ~= nil
     dialog.editBox:SetText(tostring(exportText or ""))
     dialog.importBtn:Hide()
     dialog.selectBtn:ClearAllPoints()
@@ -162,6 +163,7 @@ end
 
 function MainFrame:OpenImportDialog()
     local dialog = self:EnsureImportExportDialog()
+    dialog.qfxsaContact = false
     dialog.title:SetText(L("TITLE_IMPORT_SETTINGS"))
     dialog.desc:SetText(L("IMPORT_DESC"))
     dialog.editBox:SetText("")

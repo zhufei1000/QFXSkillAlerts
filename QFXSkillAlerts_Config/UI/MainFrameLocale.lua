@@ -30,6 +30,8 @@ function MainFrameLocale:RefreshLocale(mainFrame)
         mainFrame.layoutHeader()
     end
 
+    if type(mainFrame.refreshFooter) == "function" then mainFrame.refreshFooter() end
+
     if mainFrame.languageLabel then
         mainFrame.languageLabel:SetText(L("LABEL_LANGUAGE"))
     end
