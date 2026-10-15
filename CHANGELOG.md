@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.0.242
+
+- Fix the execution action menu being disabled when selecting Ready or On Cooldown. Sound, image, and text actions can now be selected in both modes.
+- Preserve the existing numeric countdown restrictions, aura voice-only behavior, and saved alert settings.
+- Apply the fix to both standalone settings and QFX Addon Manager-rendered settings.
+
 ## 1.0.241
 
 - Add a localized author footer and show the current addon version from TOC metadata.

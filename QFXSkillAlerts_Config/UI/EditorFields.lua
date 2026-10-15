@@ -2603,10 +2603,10 @@ function Fields:PushToWidgets(editor)
             local gameStateOnly = isCooldown and self:IsGameStateCdMode(state)
             Widgets:SetDropdownEnabled(widgets.conditionOp, conditionEnabled and not gameStateOnly)
             SetEnabled(widgets.conditionTime, conditionEnabled and not gameStateOnly)
-            -- Event entries have no countdown condition, so their execute row
-            -- keeps the voice / image / text multi-select interactive exactly
-            -- like cooldown alerts (aura entries stay locked to voice).
-            Widgets:SetDropdownEnabled(widgets.conditionActionsDrop, (isCooldown and not gameStateOnly) or isEvent)
+            -- Readiness/cooldown edges restrict numeric conditions, not the
+            -- voice / image / text actions. Events also keep this picker
+            -- interactive; aura entries stay locked to voice.
+            Widgets:SetDropdownEnabled(widgets.conditionActionsDrop, isCooldown or isEvent)
             Widgets:SetDropdownEnabled(widgets.customNotifyActionsDrop, isCustom)
             Widgets:SetDropdownEnabled(widgets.customConditionLogicDrop, isCustom)
             Widgets:SetDropdownEnabled(widgets.customConditionVarDrop, false)
