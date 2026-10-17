@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.0.243
+
+- Fix TTS voice selection when the saved system voice is no longer available: use the first installed voice as a fallback.
+- Preserve the selected standard voice when it is available, including voice ID 0, and report when no TTS voices are installed.
+- Add regression coverage for custom TTS text in cooldown, cast-success, event, and Bloodlust alerts.
+- Saved alert settings are unchanged. In-game audio verification is still required for affected clients.
+
 ## 1.0.242
 
 - Fix the execution action menu being disabled when selecting Ready or On Cooldown. Sound, image, and text actions can now be selected in both modes.

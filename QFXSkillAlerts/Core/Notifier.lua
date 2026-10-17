@@ -75,27 +75,35 @@ local function GetEndEventUnitFilter(event)
 end
 
 function Notifier:GetSelectedVoiceID()
+    local selectedVoiceID
     if C_TTSSettings and C_TTSSettings.GetVoiceOptionID then
         local voiceType = Enum and Enum.TtsVoiceType and Enum.TtsVoiceType.Standard or 0
         local ok, voiceID = pcall(C_TTSSettings.GetVoiceOptionID, voiceType)
         if ok and tonumber(voiceID) and tonumber(voiceID) >= 0 then
-            return tonumber(voiceID)
+            selectedVoiceID = tonumber(voiceID)
         end
     end
 
     if C_VoiceChat and C_VoiceChat.GetTtsVoices then
         local ok, voices = pcall(C_VoiceChat.GetTtsVoices)
         if ok and type(voices) == "table" then
+            local fallbackVoiceID
             for _, voice in ipairs(voices) do
                 local voiceID = tonumber(type(voice) == "table" and (voice.voiceID or voice[1])) or -1
                 if voiceID >= 0 then
-                    return voiceID
+                    if voiceID == selectedVoiceID then
+                        return voiceID
+                    end
+                    fallbackVoiceID = fallbackVoiceID or voiceID
                 end
             end
+            -- Match Blizzard's voice selection: a saved ID may no longer be
+            -- installed, so fall back to the first available voice.
+            return fallbackVoiceID
         end
     end
 
-    return nil
+    return selectedVoiceID
 end
 
 function Notifier:SpeakTextTTS(text, rate)
