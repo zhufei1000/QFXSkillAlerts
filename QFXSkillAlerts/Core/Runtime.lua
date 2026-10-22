@@ -24,6 +24,12 @@ local gameWatch = {}
 local gamePending = {}
 local GAME_WATCH_MIN_ARM = 1.6
 local GAME_PENDING_TIMEOUT = 3
+local GAME_WORLD_SETTLE_DELAY = 1
+local gameWatchSuspended = false
+local gameLoadingScreen = false
+local gameInWorld = true
+local gameResumeTimer
+local gameRuntimeCfg
 local delayedCastSuccess = {}
 local delayedCastToken = 0
 local updateElapsed = 0
@@ -271,6 +277,9 @@ local function FireGameCooldown(spellID, record, now)
 end
 
 function Runtime:ArmGameCooldown(spellID, primaryKey, cfg)
+    if gameWatchSuspended then
+        return false
+    end
     spellID = tonumber(spellID)
     if not spellID or spellID <= 0 or type(cfg) ~= "table" or cfg.gameStateCD ~= true then
         return false
@@ -290,6 +299,8 @@ function Runtime:ArmGameCooldown(spellID, primaryKey, cfg)
         local refreshed = BuildGameWatchRecord(primaryKey or record.primaryKey, cfg, { charge = record.charge })
         refreshed.armedAt = record.armedAt
         refreshed.charge = record.charge
+        refreshed.sawRealCooldown = record.sawRealCooldown
+        refreshed.readyTicks = record.readyTicks
         gameWatch[spellID] = refreshed
         return true
     end
@@ -302,12 +313,19 @@ function Runtime:ArmGameCooldown(spellID, primaryKey, cfg)
     if state.isEnabled == false then
         return false
     end
+    -- A refresh during a GCD must not create a new real-cooldown watch.
+    if state.charge ~= true and state.isOnGCD == true then
+        return false
+    end
     gameWatch[spellID] = BuildGameWatchRecord(primaryKey, cfg, state)
     self:StartUpdate()
     return true
 end
 
 function Runtime:QueueGameCooldown(spellID, mapSpellToPrimary, mapRuntimeCfg, keepReadyWatch)
+    if gameWatchSuspended then
+        return false
+    end
     spellID = tonumber(spellID)
     if not spellID or spellID <= 0
         or type(mapSpellToPrimary) ~= "table" or type(mapRuntimeCfg) ~= "table" then
@@ -354,6 +372,9 @@ function Runtime:QueueGameCooldown(spellID, mapSpellToPrimary, mapRuntimeCfg, ke
 end
 
 function Runtime:EvaluateGameCooldowns(now)
+    if gameWatchSuspended then
+        return false
+    end
     now = tonumber(now) or GetTime()
     local active = false
 
@@ -427,6 +448,10 @@ function Runtime:EvaluateGameCooldowns(now)
 end
 
 function Runtime:PrimeGameCooldowns(mappedRuntimeCfg)
+    gameRuntimeCfg = type(mappedRuntimeCfg) == "table" and mappedRuntimeCfg or nil
+    if gameWatchSuspended then
+        return false
+    end
     local keep = {}
     local keepPending = {}
     for primaryKey, cfg in pairs(type(mappedRuntimeCfg) == "table" and mappedRuntimeCfg or {}) do
@@ -587,10 +612,54 @@ local function StopUpdate()
     end
 end
 
+-- Loading clears/rebuilds the client's cooldown state. Discard the old edges
+-- before that happens, then silently prime only cooldowns still running after
+-- both world entry and loading-screen completion. Never replay a ready edge
+-- (or a pending cooldown-start cast) from the previous map.
+local function OnWorldTransition(_, event)
+    if gameResumeTimer then
+        gameResumeTimer:Cancel()
+        gameResumeTimer = nil
+    end
+    if event == "PLAYER_LEAVING_WORLD" then
+        gameInWorld = false
+    elseif event == "PLAYER_ENTERING_WORLD" then
+        gameInWorld = true
+    elseif event == "LOADING_SCREEN_ENABLED" then
+        gameLoadingScreen = true
+    elseif event == "LOADING_SCREEN_DISABLED" then
+        gameLoadingScreen = false
+    end
+
+    gameWatchSuspended = true
+    wipe(gameWatch)
+    wipe(gamePending)
+    if next(cooldowns) == nil then
+        StopUpdate()
+    end
+
+    if gameInWorld and not gameLoadingScreen then
+        gameResumeTimer = C_Timer.NewTimer(GAME_WORLD_SETTLE_DELAY, function()
+            gameResumeTimer = nil
+            gameWatchSuspended = false
+            Runtime:PrimeGameCooldowns(gameRuntimeCfg)
+        end)
+    end
+end
+
+if type(frame.RegisterEvent) == "function" then
+    frame:RegisterEvent("PLAYER_LEAVING_WORLD")
+    frame:RegisterEvent("PLAYER_ENTERING_WORLD")
+    frame:RegisterEvent("LOADING_SCREEN_ENABLED")
+    frame:RegisterEvent("LOADING_SCREEN_DISABLED")
+    frame:SetScript("OnEvent", OnWorldTransition)
+end
+
 function Runtime:WipeCooldowns(hideVisual)
     wipe(cooldowns)
     wipe(gameWatch)
     wipe(gamePending)
+    gameRuntimeCfg = nil
 
     -- Profile/spec rebuilds can remove the cooldown state while a state-based
     -- visual alert is still on screen.  Hide it together with the runtime wipe

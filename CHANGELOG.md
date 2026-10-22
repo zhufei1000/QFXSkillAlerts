@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.0.244
+
+- Fix false Ready voice announcements when changing maps, entering instances, or passing through loading screens.
+- Suspend game-cooldown watches during loading, then silently rebuild them after world entry and a short settling delay. Already-ready spells and stale cooldown-start casts are not replayed.
+- Preserve real cooldown evidence across configuration refreshes and avoid priming a watch from a GCD alone.
+- Keep fixed cooldown timers and saved alert settings intact.
+- Validation: all 35 regression scripts pass, including loading-event ordering, consecutive transfers, cooldown completion, charge watches, and fixed timers. Actual audio playback still requires in-game verification.
+
 ## 1.0.243
 
 - Fix TTS voice selection when the saved system voice is no longer available: use the first installed voice as a fallback.
