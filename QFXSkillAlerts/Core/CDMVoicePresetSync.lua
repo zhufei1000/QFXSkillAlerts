@@ -732,19 +732,34 @@ function Sync:PromptForPending(summary, kind, signature)
     end
     local messageKey = kind == "import" and "CDM_IMPORT_PENDING_CONFIRM"
         or (kind == "external" and "CDM_EXTERNAL_CHANGE_PENDING" or "CDM_SCOPE_PENDING_CONFIRM")
-    local message = L(messageKey, tonumber(summary.pendingCount) or 0)
-    local dialog = StaticPopup_Show("QFXSKILLALERTS_CDM_PENDING", message, nil, {
-        reason = kind or "pending_prompt",
-    })
-    if not dialog then
-        return false
+    local scopeSerial = tonumber(self.scopeSerial) or 0
+    local function ShowPending(queued)
+        -- A delayed popup must never offer to apply another specialization's data.
+        if (tonumber(self.scopeSerial) or 0) ~= scopeSerial or IsInCombat() then return end
+        if kind == "external" and self.sessionPromptedSignatures[signature] then return end
+        if promptKey and self.sessionPromptedScopes[promptKey] then return end
+        local current = queued and self:GetCurrentSpecPendingSummary() or summary
+        if not current or (tonumber(current.pendingCount) or 0) <= 0 then return end
+        local dialog = StaticPopup_Show("QFXSKILLALERTS_CDM_PENDING",
+            L(messageKey, tonumber(current.pendingCount) or 0), nil, {
+                reason = kind or "pending_prompt",
+            })
+        if dialog then
+            if kind == "external" then
+                self.sessionPromptedSignatures[signature] = true
+            elseif promptKey then
+                self.sessionPromptedScopes[promptKey] = true
+            end
+        end
+        return dialog
     end
-    if kind == "external" then
-        self.sessionPromptedSignatures[signature] = true
-    elseif promptKey then
-        self.sessionPromptedScopes[promptKey] = true
+    local api = rawget(_G, "QFXAddonManagerAPI")
+    if api and type(api.QueueNotice) == "function" then
+        return api.QueueNotice("skillalerts-pending:" .. tostring(kind or "scope")
+            .. ":" .. scopeKey .. ":" .. scopeSerial, 70,
+            function() return ShowPending(true) end, { movable = false })
     end
-    return true
+    return ShowPending(false) ~= nil
 end
 
 function Sync:EvaluateCurrentSpec(reason, options)
@@ -980,7 +995,6 @@ function Sync:PromptLegacyCleanup(count)
     if IsInCombat() then
         return false
     end
-    self.legacyCleanupPrompted = true
     if type(StaticPopupDialogs) ~= "table" or type(StaticPopup_Show) ~= "function" then
         return false
     end
@@ -1001,10 +1015,22 @@ function Sync:PromptLegacyCleanup(count)
             end,
         }
     end
-    return StaticPopup_Show(
-        "QFXSKILLALERTS_LEGACY_CLEANUP",
-        L("CDM_CLEANUP_PROMPT", count)
-    ) ~= nil
+    local function ShowCleanup()
+        if self.legacyCleanupPrompted or IsInCombat() then return end
+        local service = GetService()
+        local currentCount = service and type(service.CountNativeCDMAlerts) == "function"
+            and service:CountNativeCDMAlerts() or count
+        if currentCount <= 0 then return end
+        local dialog = StaticPopup_Show("QFXSKILLALERTS_LEGACY_CLEANUP",
+            L("CDM_CLEANUP_PROMPT", currentCount))
+        if dialog then self.legacyCleanupPrompted = true end
+        return dialog
+    end
+    local api = rawget(_G, "QFXAddonManagerAPI")
+    if api and type(api.QueueNotice) == "function" then
+        return api.QueueNotice("skillalerts-legacy-cleanup", 75, ShowCleanup, { movable = false })
+    end
+    return ShowCleanup() ~= nil
 end
 
 function Sync:ApplyAllPendingCurrentSpecAndReload(reason, drafts)

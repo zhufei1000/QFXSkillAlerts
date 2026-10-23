@@ -25,6 +25,31 @@ local function TrimText(value)
     return value
 end
 
+local function GetScopeSortID(selectedIDs, fallbackID)
+    local firstID
+    if type(selectedIDs) == "table" then
+        for key, selected in pairs(selectedIDs) do
+            local id = tonumber(key)
+            if selected == true and id and id >= 0 then
+                if id == 0 then
+                    return 0
+                end
+                if not firstID or id < firstID then
+                    firstID = id
+                end
+            end
+        end
+    end
+    return firstID or tonumber(fallbackID) or 0
+end
+
+local function GetRowSortScope(row)
+    -- Entries may live in the global store while targeting specific classes
+    -- and specs. Sort by those selections rather than their storage scope.
+    return GetScopeSortID(row.alertClassIDs or row.customClassIDs, row.classID),
+        GetScopeSortID(row.alertSpecIDs or row.customSpecIDs, row.specID)
+end
+
 function Builder.ParseGroupKey(key)
     local classID, specID, groupID = tostring(key or ""):match("^group:(%-?%d+):(%-?%d+):(.+)$")
     return tonumber(classID) or 0, tonumber(specID) or 0, tostring(groupID or "")
@@ -446,14 +471,12 @@ function Builder.BuildLayout(list, state)
 
         local used = {}
         local sorted = {}
-        local cleanedOrder = {}
         for _, key in ipairs(order) do
             key = TrimText(key)
             local block = byKey[key]
             if block and not used[key] then
                 sorted[#sorted + 1] = block
                 used[key] = true
-                cleanedOrder[#cleanedOrder + 1] = key
             end
         end
         for _, block in ipairs(blocks) do
@@ -461,14 +484,37 @@ function Builder.BuildLayout(list, state)
             if key == "" or not used[key] then
                 sorted[#sorted + 1] = block
                 if key ~= "" then
-                    cleanedOrder[#cleanedOrder + 1] = key
                     used[key] = true
                 end
             end
         end
 
+        -- Default to class/spec order without splitting collection blocks.
+        -- Only an explicit drag makes the persisted order override this default;
+        -- older versions also saved automatic layouts in the same order table.
+        local manual = type(db.savedListOrder.manual) == "table" and db.savedListOrder.manual[sectionKey] == true
+        if not manual then
+            for index, block in ipairs(sorted) do
+                block.classID, block.specID = GetRowSortScope(block.rows[1])
+                block.order = index
+            end
+            table.sort(sorted, function(left, right)
+                if left.classID ~= right.classID then
+                    return left.classID < right.classID
+                end
+                if left.specID ~= right.specID then
+                    return left.specID < right.specID
+                end
+                return left.order < right.order
+            end)
+        end
+
+        local cleanedOrder = {}
         local result = {}
         for _, block in ipairs(sorted) do
+            if block.key ~= "" then
+                cleanedOrder[#cleanedOrder + 1] = block.key
+            end
             for _, row in ipairs(block.rows or {}) do
                 row.displaySection = sectionKey
                 result[#result + 1] = row

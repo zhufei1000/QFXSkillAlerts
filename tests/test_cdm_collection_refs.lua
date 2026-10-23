@@ -140,12 +140,14 @@ Assert(QFXSkillAlertsNS.CollectionController:DeleteCollection(owner, "group:1:2:
 Equal(deletedKeys and deletedKeys[1], VALID_CDM, "collection deletion must delete its CDM preset")
 Assert(scope.groups.g1 == nil, "deleted collection must be removed")
 
--- Root CDM projections participate in saved-list ordering after normal rows.
+-- Root CDM projections retain an explicit user drag over the default order.
 QFXSkillAlertsDB = {
     specConfigs = { [1] = { [2] = { [1] = {} } } },
     collectionData = {},
-    savedListOrder = { loaded = { VALID_CDM, "1:2:1" }, unloaded = {} },
+    savedListOrder = { loaded = { "1:2:1", VALID_CDM }, unloaded = {} },
 }
+Assert(QFXSkillAlertsNS.SavedListOrder:RecordSavedListDisplayMove(VALID_CDM, "1:2:1", "loaded", false),
+    "explicit CDM drag should save its custom order")
 QFXSkillAlertsNS.UI = {}
 QFXSkillAlertsNS.API.GetCurrentClassSpec = function() return 1, 2 end
 QFXSkillAlertsNS.API.GetCDMVoiceSavedEntries = api.GetCDMVoiceSavedEntries

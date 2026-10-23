@@ -363,7 +363,6 @@ function MoveController:MoveSavedListItem(aceOptions, sourceKey, targetKey, targ
                     if targetLoc and targetLoc.container == "group" then
                         moved = moveGroupTreeAcrossScope(targetClassID, targetSpecID, targetLoc, nil)
                     else
-                        RecordSavedListDisplayMove(sourceKey, targetKey, displayTargetSection, insertAfter)
                         moved = true
                     end
                 end
@@ -389,7 +388,6 @@ function MoveController:MoveSavedListItem(aceOptions, sourceKey, targetKey, targ
                 if targetLoc and targetLoc.container == "group" then
                     moved = moveGroupTreeAcrossScope(targetClassID, targetSpecID, targetLoc, nil)
                 else
-                    RecordSavedListDisplayMove(sourceKey, targetKey, displayTargetSection, insertAfter)
                     moved = true
                 end
             end
@@ -423,7 +421,6 @@ function MoveController:MoveSavedListItem(aceOptions, sourceKey, targetKey, targ
 
         if targetIsRoot then
             RemoveEntryKeyFromAllCollectionScopes(sourceKey)
-            RecordSavedListDisplayMove(sourceKey, targetKey, displayTargetSection, true)
         elseif targetIsGroup then
             local targetClassID, targetSpecID, targetGroupID = ParseGroupKey(targetKey)
             local targetScope = EnsureCollectionScope(targetClassID, targetSpecID)
@@ -446,7 +443,6 @@ function MoveController:MoveSavedListItem(aceOptions, sourceKey, targetKey, targ
                     end
                 else
                     RemoveEntryKeyFromAllCollectionScopes(sourceKey)
-                    RecordSavedListDisplayMove(sourceKey, targetKey, displayTargetSection, insertAfter)
                 end
             end
             NormalizeCollectionScope(targetScope, api.GetStoredEntryMap(targetClassID, targetSpecID), targetClassID, targetSpecID)
@@ -472,7 +468,6 @@ function MoveController:MoveSavedListItem(aceOptions, sourceKey, targetKey, targ
                 NormalizeCollectionScope(targetScope, api.GetStoredEntryMap(targetClassID, targetSpecID), targetClassID, targetSpecID)
             else
                 RemoveEntryKeyFromAllCollectionScopes(sourceKey)
-                RecordSavedListDisplayMove(sourceKey, targetKey, displayTargetSection, insertAfter)
             end
         end
     else
@@ -505,7 +500,6 @@ function MoveController:MoveSavedListItem(aceOptions, sourceKey, targetKey, targ
                 NormalizeCollectionScope(targetScope, api.GetStoredEntryMap(targetClassID, targetSpecID), targetClassID, targetSpecID)
             else
                 RemoveEntryKeyFromAllCollectionScopes(sourceEntryKey)
-                RecordSavedListDisplayMove(sourceEntryKey, targetKey, displayTargetSection, true)
             end
         elseif targetIsGroup then
             local targetClassID, targetSpecID, targetGroupID = ParseGroupKey(targetKey)
@@ -578,14 +572,10 @@ function MoveController:MoveSavedListItem(aceOptions, sourceKey, targetKey, targ
                         targetScope.root[#targetScope.root + 1] = { type = "entry", index = sourceIndex }
                     end
                     NormalizeCollectionScope(targetScope, api.GetStoredEntryMap(targetClassID, targetSpecID), targetClassID, targetSpecID)
-                else
-                    if targetLoc.container == "group" then
-                        RemoveEntryKeyFromAllCollectionScopes(sourceEntryKey)
-                        InsertEntryKeyAtCollectionLocation(targetScope, sourceEntryKey, sourceIndex, targetLoc, insertAfter, false)
-                        NormalizeCollectionScope(targetScope, api.GetStoredEntryMap(targetClassID, targetSpecID), targetClassID, targetSpecID)
-                    else
-                        RecordSavedListDisplayMove(sourceEntryKey, targetGroupKey, displayTargetSection, insertAfter)
-                    end
+                elseif targetLoc.container == "group" then
+                    RemoveEntryKeyFromAllCollectionScopes(sourceEntryKey)
+                    InsertEntryKeyAtCollectionLocation(targetScope, sourceEntryKey, sourceIndex, targetLoc, insertAfter, false)
+                    NormalizeCollectionScope(targetScope, api.GetStoredEntryMap(targetClassID, targetSpecID), targetClassID, targetSpecID)
                 end
             end
         else
@@ -635,9 +625,7 @@ function MoveController:MoveSavedListItem(aceOptions, sourceKey, targetKey, targ
                 table.insert(group.entries, math.min(insertPos, #group.entries + 1), sourceEntryKey)
                 NormalizeCollectionScope(targetScope, api.GetStoredEntryMap(targetClassID, targetSpecID), targetClassID, targetSpecID)
             elseif loc and loc.container == "root" then
-                if not sameScope then
-                    RecordSavedListDisplayMove(sourceEntryKey, targetEntryKey, displayTargetSection, insertAfter)
-                else
+                if sameScope then
                     RemoveEntryKeyFromAllCollectionScopes(sourceEntryKey)
                     loc = FindEntryKeyLocation(targetScope, targetEntryKey, targetClassID, targetSpecID)
                     if not (loc and loc.container == "root") then
@@ -647,9 +635,7 @@ function MoveController:MoveSavedListItem(aceOptions, sourceKey, targetKey, targ
                     table.insert(targetScope.root, math.min(insertPos, #targetScope.root + 1), { type = "entry", index = sourceIndex })
                 end
             else
-                if not sameScope then
-                    RecordSavedListDisplayMove(sourceEntryKey, targetEntryKey, displayTargetSection, insertAfter)
-                else
+                if sameScope then
                     RemoveEntryKeyFromAllCollectionScopes(sourceEntryKey)
                     targetScope.root[#targetScope.root + 1] = { type = "entry", index = sourceIndex }
                 end
@@ -662,8 +648,8 @@ function MoveController:MoveSavedListItem(aceOptions, sourceKey, targetKey, targ
     end
 
     NormalizeCollectionScope(currentScope, api.GetStoredEntryMap(currentClassID, currentSpecID), currentClassID, currentSpecID)
-    if not insertInside and not targetIsRoot then
-        RecordSavedListDisplayMove(sourceKey, targetKey, displayTargetSection, insertAfter)
+    if not insertInside then
+        RecordSavedListDisplayMove(sourceKey, targetKey, displayTargetSection, targetIsRoot or insertAfter)
     end
     if not suppressRefresh then
         if not RequestNativeUIRefresh("list") and type(api.RefreshPanel) == "function" then

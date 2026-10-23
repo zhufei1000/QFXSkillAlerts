@@ -81,6 +81,15 @@ function Order:RecordSavedListDisplayMove(sourceKey, targetKey, targetSection, i
             break
         end
     end
+    -- Nested targets are ordered by their collection, not by the root list.
+    -- Do not let a child-only move disable default sorting for unrelated roots.
+    if not targetPos and not targetKey:match("^root:%d+:%d+$") then
+        return false
+    end
+    if type(orderDB.manual) ~= "table" then
+        orderDB.manual = {}
+    end
+    orderDB.manual[targetSection] = true
     if not targetPos then
         list[#list + 1] = sourceKey
         return true

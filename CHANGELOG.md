@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.0.245
+
+- Default the saved alert list to class, then specialization order. All-class/all-specialization alerts come first, followed by all-specialization alerts within each class; preserve the existing order within the same scope.
+- Preserve explicit drag positions across refreshes and UI reloads. Keep collections and their children together, and keep loaded/unloaded ordering independent.
+- Fix saving positions when dragging entries back to their root list. Reordering children inside a collection no longer disables default sorting for unrelated root entries.
+- Record each successful drag's display position once and remove three unused duplicate serializer/compression files from the main addon; the configuration addon retains the active libraries.
+- Retain the installed optional QFX Addon Manager notice-queue integration for pending-apply and legacy-cleanup prompts, including scope and pending-count rechecks before delayed prompts appear.
+- Legacy list snapshots do not distinguish automatic and manual ordering, so the initial update regroups them by scope. Subsequent explicit drag positions override the default.
+- Preserve existing alert settings, playback behavior, and standalone/manager settings support. No player SavedVariables files are modified.
+
 ## 1.0.244
 
 - Fix false Ready voice announcements when changing maps, entering instances, or passing through loading screens.
