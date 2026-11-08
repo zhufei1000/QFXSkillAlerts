@@ -519,8 +519,9 @@ local function MarkRowEventConfigured(row)
     end
     local selected = tonumber(row.selectedEvent)
     for _, item in ipairs(row.eventDropdown.qfxsaItems or {}) do
-        if tonumber(item.value) == selected and tostring(item.text or ""):find("✓", 1, true) == nil then
-            item.text = tostring(item.text or "") .. "  |cff40ff40✓|r"
+        if tonumber(item.value) == selected then
+            item.marked = true
+            break
         end
     end
     NS.UI.Widgets:SetDropdownValue(row.eventDropdown, selected, L("CDM_EVENT"))

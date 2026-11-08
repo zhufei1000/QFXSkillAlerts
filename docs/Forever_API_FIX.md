@@ -24,7 +24,7 @@
 
 只同步本次修改的运行文件；覆盖前备份，核对源码、整合副本、已安装正式服客户端的 SHA-256。无限服未安装时不自动安装。不修改 WTF 或玩家 SavedVariables 文件，TOC、SavedVariables 声明和版本号保持不变。
 
-新测试包为 `releases/QFXSkillAlerts_1.0.245_forever_api_fixed_test.zip`。请使用新包验证；早期同版测试包保留用于追溯，不代表修复后的代码。
+该轮测试包归档于 `archive/release-tests-1.0.245/QFXSkillAlerts_1.0.245_forever_api_fixed_test.zip`。早期同版测试包也保留在该目录供追溯。
 
 实机仍需验证：
 

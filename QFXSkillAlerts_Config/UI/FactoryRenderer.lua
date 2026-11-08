@@ -147,10 +147,18 @@ local function Install()
         dropdown.qfxsaText = tostring(text or "")
         dropdown:SetText(dropdown.qfxsaText)
     end
+    local function ItemText(item)
+        local text = item.text or tostring(item.value)
+        if item.marked then
+            return text .. "  |TInterface\\Buttons\\UI-CheckBox-Check:16:16:0:0|t"
+        end
+        return text
+    end
     local function Items(dropdown)
         local result = {}
         for i, item in ipairs(dropdown.qfxsaItems or {}) do
-            result[i] = {key = item.value, label = item.text, searchText = item.searchText, disabled = item.disabled == true}
+            result[i] = {key = item.value, label = ItemText(item), searchText = item.searchText or item.text,
+                disabled = item.disabled == true}
         end
         return result
     end
@@ -209,7 +217,7 @@ local function Install()
         if not dropdown then return end
         dropdown.qfxsaValue = value
         local text = fallback or ""
-        for _, item in ipairs(dropdown.qfxsaItems) do if item.value == value then text = item.text; break end end
+        for _, item in ipairs(dropdown.qfxsaItems) do if item.value == value then text = ItemText(item); break end end
         Visual(dropdown, text)
     end
     function widgets:GetDropdownValue(dropdown) return dropdown and dropdown.qfxsaValue end

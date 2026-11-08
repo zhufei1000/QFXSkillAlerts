@@ -199,11 +199,31 @@ local dropdown = W:CreateDropdown(UIParent, "TestPicker", 180)
 assert(dropdown:GetNumPoints() == 0, "Legacy-layout dropdowns must not keep a factory RIGHT anchor")
 dropdown:SetPoint("LEFT", UIParent, "LEFT", 10, 0)
 assert(dropdown:GetNumPoints() == 1 and dropdown:GetPoint() == "LEFT")
-W:SetDropdownItems(dropdown, {{value=1,text="One"},{value=2,text="Two",disabled=true}})
+W:SetDropdownItems(dropdown, {{value=1,text="One",marked=true},{value=2,text="Two",disabled=true}})
 dropdown.qfxsaToggleClear = true
 dropdown:qfxsaPick(1); assert(W:GetDropdownValue(dropdown)==1)
+local checkTexture = "|TInterface\\Buttons\\UI-CheckBox-Check:16:16:0:0|t"
+assert(dropdown:GetText() == "One  " .. checkTexture, "The selected label must use the built-in check texture")
 dropdown:qfxsaPick(1); assert(W:GetDropdownValue(dropdown)==nil)
-dropdown._openMenu(); assert(dropdown._menu:IsShown()); dropdown:Hide(); assert(not dropdown._menu:IsShown())
+assert(dropdown:GetText() == "", "Clearing selection must clear the mark")
+dropdown._openMenu()
+assert(dropdown._menu:IsShown() and dropdown._menu:GetHeight() == 60)
+assert(not dropdown._editorSearch:IsShown(), "A short list does not need a search row")
+local markedRow
+for _, frame in ipairs(frames) do
+    if frame.hit and frame.hit:GetText() == "One  " .. checkTexture then markedRow = frame; break end
+end
+assert(markedRow and markedRow:GetPoint(2) == "TOPRIGHT" and markedRow:GetParent():GetPoint(2) == "TOPRIGHT",
+    "Marked menu rows must span the full list width")
+dropdown:Hide(); assert(not dropdown._menu:IsShown())
+W:SetDropdownSearchable(dropdown, true)
+dropdown:Show(); dropdown._openMenu()
+assert(dropdown._editorSearch:IsShown())
+dropdown._editorSearch:SetText("one")
+assert(markedRow.hit:GetText() == "One  " .. checkTexture)
+dropdown._editorSearch:SetText("UI-CheckBox-Check")
+assert(markedRow.hit:GetText() == NS.L("SEARCH_NO_RESULTS"), "The texture path must not be searchable")
+dropdown:Hide()
 local multi = W:CreateMultiSelectDropdown(UIParent, "TestMultiPicker", 180)
 multi.qfxsaExclusiveValue = 0
 W:SetDropdownItems(multi, {{value=0,text="All"},{value=1,text="One"},{value=2,text="Two"}})
@@ -237,6 +257,11 @@ if client == "forever" then
     end
 end
 editor:Show(); editor:SetFrameLevel(850)
+local objectType = assert(editor.widgets.objectTypeDrop)
+objectType:Click()
+assert(objectType._menu:GetWidth() == 170 and objectType._menu:GetHeight() == 104,
+    "The four object types need a wider popup that fits exactly four rows")
+objectType._menu:Hide()
 editor.widgets.sourceDrop:GetParent():SetFrameLevel(1100)
 -- Exercise mode changes without forcing the execution picker enabled: only
 -- numeric conditions are disabled for API readiness/cooldown edge alerts.
@@ -317,9 +342,9 @@ local version, singleton = QFXWidgets.VERSION, QFXWidgets
 assert(loadfile(sourcePath("QFXSkillAlerts_Config/Libs/QFXWidgets.lua")))("other", {})
 assert(QFXWidgets==singleton and QFXWidgets.VERSION==version)
 local oldDropdownBuilder = QFXWidgets.EditorDropdown
-QFXWidgets.DETACHED_CONTROLS_REVISION = 2
+QFXWidgets.DETACHED_CONTROLS_REVISION = 7
 assert(loadfile(sourcePath("QFXSkillAlerts_Config/Libs/QFXWidgets.lua")))("other", {})
-assert(QFXWidgets == singleton and QFXWidgets.VERSION == version and QFXWidgets.DETACHED_CONTROLS_REVISION == 7)
+assert(QFXWidgets == singleton and QFXWidgets.VERSION == version and QFXWidgets.DETACHED_CONTROLS_REVISION == 8)
 assert(QFXWidgets.EditorDropdown ~= oldDropdownBuilder, "An earlier winning singleton must receive the popup fix")
 local fieldCount = 0; for _ in pairs(editor.widgets) do fieldCount = fieldCount + 1 end
 assert(fieldCount == 223, "Preserve the complete editor field contract, got "..fieldCount)

@@ -142,10 +142,9 @@ function Rows:Render(frame, cooldowns, pendingEdit)
             local savedEntry = Controller:GetSavedVoiceEntry(info.cooldownID, eventType)
             local configured = type(api.GetCDMVoiceConfiguredAlert) == "function"
                 and api.GetCDMVoiceConfiguredAlert(info.cooldownID, eventType) or nil
-            if savedEntry or configured then
-                eventText = eventText .. "  |cff40ff40✓|r"
-            end
-            eventItems[#eventItems + 1] = { value = eventType, text = eventText }
+            eventItems[#eventItems + 1] = {
+                value = eventType, text = eventText, marked = (savedEntry or configured) and true or false,
+            }
         end
         if pendingEdit and tonumber(pendingEdit.cooldownID) == tonumber(info.cooldownID) then
             selectedEvent = pendingEdit.eventType

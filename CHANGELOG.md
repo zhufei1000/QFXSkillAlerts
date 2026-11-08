@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.0.246
+
+- Support World of Warcraft: Forever (1.60.1, interface 16001) and Retail in one package.
+- Use the Forever client's specialization and talent APIs. Refresh alert conditions after a dual-talent group switch, and keep captured cooldown data scoped to the active specialization.
+- Fix cooldown and Bloodlust aura checks on clients that restrict combat data.
+- Open settings with the configuration addon's embedded QFXWidgets. QFX Addon Manager can still open the same settings window.
+- Give dropdown options more room and size short menus to their contents. Use Blizzard's checkmark texture for cached specializations and configured voice events.
+
 ## 1.0.245
 
 - Default the saved alert list to class, then specialization order. All-class/all-specialization alerts come first, followed by all-specialization alerts within each class; preserve the existing order within the same scope.

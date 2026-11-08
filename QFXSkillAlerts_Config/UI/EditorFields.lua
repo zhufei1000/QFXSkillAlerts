@@ -861,7 +861,7 @@ end
 
 -- Class/spec filter items for the quick skill picker: every class's specs in
 -- client order, colored by class, without an "All" entry (single selection).
--- Specs that already have a complete cached catalog get a green check.
+-- Specs that already have a complete cached catalog get a check mark.
 function Fields:GetSkillFilterItems()
     local selector = NS.UI and NS.UI.ScopeSelector
     local source = selector and type(selector.GetScopeSpecItems) == "function"
@@ -886,8 +886,9 @@ function Fields:GetSkillFilterItems()
             if catalog[value] then
                 items[#items + 1] = {
                     value = value,
-                    text = tostring(item.text or "") .. "  |cff40ff40✓|r",
+                    text = item.text,
                     searchText = item.searchText,
+                    marked = true,
                 }
             else
                 items[#items + 1] = item
