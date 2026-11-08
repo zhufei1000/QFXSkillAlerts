@@ -18,11 +18,18 @@ local L = NS.L or function(key)
     return tostring(key)
 end
 
+local function IsForever()
+    local compat = NS.Core and NS.Core.Compat
+    return compat ~= nil
+        and type(compat.IsForever) == "function"
+        and compat:IsForever() == true
+end
+
 local DEFINITIONS = {
     { key = "combat_start", wowEvent = "PLAYER_REGEN_DISABLED", labelKey = "EVENT_VOICE_COMBAT_START", icon = 132337 },
     { key = "combat_end", wowEvent = "PLAYER_REGEN_ENABLED", labelKey = "EVENT_VOICE_COMBAT_END", icon = 132338 },
-    { key = "mythic_plus_start", wowEvent = "CHALLENGE_MODE_START", labelKey = "EVENT_VOICE_MYTHIC_PLUS_START", icon = 525134 },
-    { key = "mythic_plus_complete", wowEvent = "CHALLENGE_MODE_COMPLETED", labelKey = "EVENT_VOICE_MYTHIC_PLUS_COMPLETE", icon = 236372 },
+    { key = "mythic_plus_start", wowEvent = "CHALLENGE_MODE_START", labelKey = "EVENT_VOICE_MYTHIC_PLUS_START", icon = 525134, foreverUnsupported = true },
+    { key = "mythic_plus_complete", wowEvent = "CHALLENGE_MODE_COMPLETED", labelKey = "EVENT_VOICE_MYTHIC_PLUS_COMPLETE", icon = 236372, foreverUnsupported = true },
     { key = "encounter_start", wowEvent = "ENCOUNTER_START", labelKey = "EVENT_VOICE_ENCOUNTER_START", icon = 136116 },
     { key = "encounter_success", wowEvent = "ENCOUNTER_END", labelKey = "EVENT_VOICE_ENCOUNTER_SUCCESS", icon = 236621, encounterResult = 1 },
     { key = "encounter_wipe", wowEvent = "ENCOUNTER_END", labelKey = "EVENT_VOICE_ENCOUNTER_WIPE", icon = 132281, encounterResult = 0 },
@@ -172,12 +179,15 @@ end
 
 function EventVoice:GetOptions()
     local options = {}
+    local isForever = IsForever()
     for _, definition in ipairs(DEFINITIONS) do
-        options[#options + 1] = {
-            value = definition.key,
-            text = L(definition.labelKey),
-            icon = definition.icon,
-        }
+        if not (definition.foreverUnsupported and isForever) then
+            options[#options + 1] = {
+                value = definition.key,
+                text = L(definition.labelKey),
+                icon = definition.icon,
+            }
+        end
     end
     return options
 end
@@ -264,7 +274,9 @@ function EventVoice:Rebuild()
         for _, index in ipairs(type(indices) == "table" and indices or {}) do
             local entry = SafeCall("getEntry", entryMap, index)
             local eventKey = entry and self:NormalizeEventKey(entry.eventKey)
-            if entry and tostring(entry.entryType or "") == "event" and eventKey
+            local definition = eventKey and definitionByKey[eventKey]
+            local supported = not (definition and definition.foreverUnsupported and IsForever())
+            if entry and supported and tostring(entry.entryType or "") == "event" and eventKey
                 and (entry.voiceEnabled ~= false or entry.imageEnabled == true or entry.textEnabled == true)
                 and IsScopeMatched(entry, scopeClassID, scopeSpecID, currentClassID, currentSpecID, currentRaceID) then
                 local loadSignature = EventContext and EventContext:BuildLoadConditionSignature(entry) or ""

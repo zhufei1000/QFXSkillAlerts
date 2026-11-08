@@ -4,7 +4,7 @@ _G.QFXSkillAlertsNS = NS
 NS.UI = NS.UI or {}
 local NativeCreateFrame = CreateFrame
 local function CreateFrame(kind, name, parent, template)
-    local bridge = NS.UI.FactoryBridge
+    local bridge = NS.UI.Renderer
     if bridge then return bridge.CreateFrame(kind, name, parent, template) end
     return NativeCreateFrame(kind, name, parent, template)
 end
@@ -237,7 +237,7 @@ function DragDrop:StartDragVisual(list, row)
         accent:SetPoint("TOPLEFT", ghost, "TOPLEFT", 3, -3)
         accent:SetPoint("BOTTOMLEFT", ghost, "BOTTOMLEFT", 3, 3)
         accent:SetWidth(3)
-        local accentColor = NS.UI.FactoryBridge and NS.UI.FactoryBridge.RowAccent and NS.UI.FactoryBridge.RowAccent()
+        local accentColor = NS.UI.Renderer and NS.UI.Renderer.RowAccent and NS.UI.Renderer.RowAccent()
         if accentColor then
             accent:SetColorTexture(accentColor[1], accentColor[2], accentColor[3], accentColor[4] or 1)
         else

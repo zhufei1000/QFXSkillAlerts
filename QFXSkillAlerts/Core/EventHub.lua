@@ -11,6 +11,7 @@ local EVENTS = {
     "PLAYER_LOGOUT",
     "PLAYER_ENTERING_WORLD",
     "PLAYER_SPECIALIZATION_CHANGED",
+    "ACTIVE_TALENT_GROUP_CHANGED",
     "PLAYER_TALENT_UPDATE",
     "SPELLS_CHANGED",
     "ITEM_DATA_LOAD_RESULT",
@@ -71,6 +72,10 @@ function EventHub:Dispatch(event, ...)
     elseif event == "PLAYER_SPECIALIZATION_CHANGED" then
         local unit = ...
         return Call(handlers, "OnSpecializationChanged", unit)
+    elseif event == "ACTIVE_TALENT_GROUP_CHANGED" then
+        -- Forever switches dual talent groups through SetActiveSpecGroup, which
+        -- reports this event instead of PLAYER_SPECIALIZATION_CHANGED.
+        return Call(handlers, "OnTalentGroupChanged")
     elseif event == "ITEM_DATA_LOAD_RESULT" then
         return Call(handlers, "OnItemDataLoadResult", ...)
     elseif event == "PLAYER_REGEN_ENABLED" then

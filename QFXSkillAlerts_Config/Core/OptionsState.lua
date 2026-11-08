@@ -27,6 +27,13 @@ local ITEM_LOAD_NONE = CONST.ITEM_LOAD_NONE or "none"
 local ITEM_LOAD_EQUIPPED = CONST.ITEM_LOAD_EQUIPPED or "equipped"
 local ITEM_LOAD_BAGS = CONST.ITEM_LOAD_BAGS or "bags"
 
+local function IsForever()
+    local compat = NS.Core and NS.Core.Compat
+    return compat ~= nil
+        and type(compat.IsForever) == "function"
+        and compat:IsForever() == true
+end
+
 
 local function NormalizeConditionOp(value)
     value = tostring(value or "<=")
@@ -197,6 +204,13 @@ function NS.OptionsState:GetState(owner)
     owner.state.eventLoadContexts = type(api.NormalizeEventLoadContexts) == "function"
         and api.NormalizeEventLoadContexts(owner.state.eventLoadContexts)
         or (owner.state.eventLoadContexts or { world = true, delve = true, dungeon = true, raid = true })
+    if IsForever() then
+        -- The season/specific catalogs are unavailable on Forever; collapse
+        -- imported values so the editor does not display a mode that cannot
+        -- be selected or matched.
+        owner.state.eventDungeonMode = "any"
+        owner.state.eventRaidMode = "any"
+    end
     owner.state.eventDungeonMode = type(api.NormalizeEventInstanceMode) == "function"
         and api.NormalizeEventInstanceMode(owner.state.eventDungeonMode) or "any"
     owner.state.eventRaidMode = type(api.NormalizeEventInstanceMode) == "function"
@@ -319,20 +333,40 @@ function NS.OptionsState:GetClassOptionList(owner)
     local options = {
         { classID = ALL_CLASSES_ID, className = L("ALL_CLASSES"), classFile = nil },
     }
-    if type(GetNumClasses) ~= "function" or type(GetClassInfo) ~= "function" then
-        return options
+    if type(GetNumClasses) == "function" and type(GetClassInfo) == "function" then
+        local classCount = tonumber(GetNumClasses()) or 0
+        for classIndex = 1, classCount do
+            local ok, className, classFile, classID = pcall(GetClassInfo, classIndex)
+            classID = tonumber(classID) or 0
+            if ok and classID > 0 and type(className) == "string" and className ~= "" then
+                options[#options + 1] = {
+                    classID = classID,
+                    className = className,
+                    classFile = classFile,
+                }
+            end
+        end
+        if #options > 1 then
+            return options
+        end
     end
 
-    local classCount = tonumber(GetNumClasses()) or 0
-    for classIndex = 1, classCount do
-        local ok, className, classFile, classID = pcall(GetClassInfo, classIndex)
-        classID = tonumber(classID) or 0
-        if ok and classID > 0 and type(className) == "string" and className ~= "" then
-            options[#options + 1] = {
-                classID = classID,
-                className = className,
-                classFile = classFile,
-            }
+    -- Documented 12.x fallback: class IDs are stable (1..13), and invalid
+    -- entries return nil. This keeps the class dropdown usable if the legacy
+    -- index-based globals are not present on a client branch.
+    local creatureInfo = rawget(_G, "C_CreatureInfo")
+    if type(creatureInfo) == "table" and type(creatureInfo.GetClassInfo) == "function" then
+        for classID = 1, 13 do
+            local ok, info = pcall(creatureInfo.GetClassInfo, classID)
+            if ok and type(info) == "table"
+                and tonumber(info.classID) == classID
+                and type(info.className) == "string" and info.className ~= "" then
+                options[#options + 1] = {
+                    classID = classID,
+                    className = info.className,
+                    classFile = info.classFile,
+                }
+            end
         end
     end
 
@@ -361,6 +395,14 @@ function NS.OptionsState:GetSpecOptionList(owner, classID)
         return options
     end
     if classID < 0 then
+        return options
+    end
+    local compat = NS.Core and NS.Core.Compat
+    if compat and compat.GetSpecOptions then
+        for _, option in ipairs(compat:GetSpecOptions(classID)) do
+            option.specName = option.specName or L("FALLBACK_SPEC", " " .. tostring(option.specID))
+            options[#options + 1] = option
+        end
         return options
     end
 

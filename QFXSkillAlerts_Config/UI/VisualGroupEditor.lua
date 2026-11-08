@@ -3,7 +3,7 @@ _G.QFXSkillAlertsNS = NS
 NS.UI = NS.UI or {}
 local NativeCreateFrame = CreateFrame
 local function CreateFrame(kind, name, parent, template)
-    local bridge = NS.UI.FactoryBridge
+    local bridge = NS.UI.Renderer
     if bridge then return bridge.CreateFrame(kind, name, parent, template) end
     return NativeCreateFrame(kind, name, parent, template)
 end
@@ -231,7 +231,7 @@ function M:Hit(frame, cfg)
     if not frame then return end
     local hit = frame.qfxsaVGHit
     if not hit then
-        hit = NS.UI.FactoryBridge and NS.UI.FactoryBridge.CreatePreviewHit(frame)
+        hit = NS.UI.Renderer and NS.UI.Renderer.CreatePreviewHit(frame)
             or CreateFrame("Button", nil, frame, "BackdropTemplate")
         hit:SetFrameLevel((frame:GetFrameLevel() or 1) + 20)
         hit:RegisterForClicks("LeftButtonUp")

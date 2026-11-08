@@ -23,8 +23,15 @@ local GetSpecializationInfoForClassID = rawget(_G, "GetSpecializationInfoForClas
 
 function Scope:GetCurrentClassSpec()
     local _, _, classID = UnitClass("player")
-    local specIndex = GetSpecialization()
-    local specID = specIndex and GetSpecializationInfo(specIndex) or 0
+    local compat = NS.Core.Compat
+    if compat and compat.GetCurrentSpecID then
+        return classID or 0, compat:GetCurrentSpecID()
+    end
+    local specIndex = type(GetSpecialization) == "function" and GetSpecialization() or nil
+    local specID = 0
+    if specIndex and type(GetSpecializationInfo) == "function" then
+        specID = GetSpecializationInfo(specIndex) or 0
+    end
     return classID or 0, specID or 0
 end
 
@@ -60,6 +67,18 @@ function Scope:ResolveClassName(classID)
         end
     end
 
+    -- 12.x documents classes through C_CreatureInfo.GetClassInfo(classID);
+    -- the index-based globals above are legacy. Use the documented API as a
+    -- fallback when the client no longer exposes them.
+    local creatureInfo = rawget(_G, "C_CreatureInfo")
+    if type(creatureInfo) == "table" and type(creatureInfo.GetClassInfo) == "function" then
+        local ok, info = pcall(creatureInfo.GetClassInfo, classID)
+        if ok and type(info) == "table"
+            and type(info.className) == "string" and info.className ~= "" then
+            return info.className
+        end
+    end
+
     return L("FALLBACK_CLASS", tostring(classID))
 end
 
@@ -74,6 +93,13 @@ function Scope:ResolveSpecName(classID, specID)
     end
     if specID == ALL_SPECS_ID then
         return L("ALL_SPECS")
+    end
+
+    local compat = NS.Core.Compat
+    if compat and compat.GetSpecOptions then
+        for _, option in ipairs(compat:GetSpecOptions(classID)) do
+            if option.specID == specID then return option.specName or L("FALLBACK_SPEC", tostring(specID)) end
+        end
     end
 
     if type(GetNumSpecializationsForClassID) == "function" and type(GetSpecializationInfoForClassID) == "function" then

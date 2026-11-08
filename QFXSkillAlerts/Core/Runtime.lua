@@ -17,11 +17,15 @@ local frame = CreateFrame("Frame")
 local cooldowns = {}
 -- Game-cooldown-state watch: spellID -> { primaryKey, cfg, cd, armedAt, charge }.
 -- Used by non-fixed-CD entries that cannot be timed from a number in combat.
--- Casts are queued first and only enter the armed watch once the client
--- reports a real cooldown, so the addon never has to listen for Blizzard's
--- secret-sensitive SPELL_UPDATE_COOLDOWN/SPELL_UPDATE_CHARGES events.
+-- Casts are queued until a cooldown event confirms a real cooldown.
+-- Only that event may sample isOnGCD; polling uses its public-state snapshot.
 local gameWatch = {}
 local gamePending = {}
+local gameCooldownSnapshots = {}
+-- Ready-mode entries eligible for event-time arming, rebuilt on config refresh.
+-- The cooldown event only arms missing watches from this list; it never rebuilds
+-- an armed record, so a high-frequency event stays off the alert-field path.
+local gameArmCandidates = {}
 local GAME_WATCH_MIN_ARM = 1.6
 local GAME_PENDING_TIMEOUT = 3
 local GAME_WORLD_SETTLE_DELAY = 1
@@ -211,7 +215,7 @@ end
 -- preferCharges = charge mode ("charge"): wait for the recharge to finish.
 -- Otherwise the spell-cooldown readiness predicate is used (first charge for
 -- charge spells, exact ready edge for normal cooldowns).
-local function ReadGameSpellState(spellID, preferCharges)
+local function ReadGameSpellState(spellID, preferCharges, fromCooldownEvent)
     spellID = tonumber(spellID)
     if not spellID or spellID <= 0 or type(C_Spell) ~= "table" then
         return nil
@@ -225,12 +229,21 @@ local function ReadGameSpellState(spellID, preferCharges)
     if type(C_Spell.GetSpellCooldown) == "function" then
         local ok, info = pcall(C_Spell.GetSpellCooldown, spellID)
         if ok and type(info) == "table" then
-            return {
+            local state = {
                 charge = false,
                 active = info.isActive == true,
                 isEnabled = info.isEnabled,
-                isOnGCD = info.isOnGCD,
             }
+            if fromCooldownEvent then
+                state.isOnGCD = info.isOnGCD
+                gameCooldownSnapshots[spellID] = state
+            else
+                local snapshot = gameCooldownSnapshots[spellID]
+                if snapshot and snapshot.active == state.active and snapshot.isEnabled == state.isEnabled then
+                    state.isOnGCD = snapshot.isOnGCD
+                end
+            end
+            return state
         end
     end
     return nil
@@ -250,7 +263,7 @@ local function BuildGameWatchRecord(primaryKey, cfg, state)
         cd = cd,
         armedAt = GetTime(),
         charge = state.charge == true,
-        sawRealCooldown = state.charge ~= true and state.active == true and state.isOnGCD ~= true,
+        sawRealCooldown = state.charge ~= true and state.active == true and state.isOnGCD == false,
     }
 end
 
@@ -264,7 +277,7 @@ local function IsGameSpellReady(state)
     if state.charge == true then
         return state.active ~= true
     end
-    return not (state.active == true and state.isOnGCD ~= true)
+    return state.active ~= true or state.isOnGCD == true
 end
 
 local function FireGameCooldown(spellID, record, now)
@@ -276,7 +289,7 @@ local function FireGameCooldown(spellID, record, now)
     return true
 end
 
-function Runtime:ArmGameCooldown(spellID, primaryKey, cfg)
+function Runtime:ArmGameCooldown(spellID, primaryKey, cfg, fromCooldownEvent)
     if gameWatchSuspended then
         return false
     end
@@ -304,7 +317,7 @@ function Runtime:ArmGameCooldown(spellID, primaryKey, cfg)
         gameWatch[spellID] = refreshed
         return true
     end
-    local state = ReadGameSpellState(spellID, cfg.cdMode == "charge")
+    local state = ReadGameSpellState(spellID, cfg.cdMode == "charge", fromCooldownEvent)
     if not state or state.active ~= true then
         return false
     end
@@ -314,7 +327,7 @@ function Runtime:ArmGameCooldown(spellID, primaryKey, cfg)
         return false
     end
     -- A refresh during a GCD must not create a new real-cooldown watch.
-    if state.charge ~= true and state.isOnGCD == true then
+    if state.charge ~= true and state.isOnGCD ~= false then
         return false
     end
     gameWatch[spellID] = BuildGameWatchRecord(primaryKey, cfg, state)
@@ -347,6 +360,9 @@ function Runtime:QueueGameCooldown(spellID, mapSpellToPrimary, mapRuntimeCfg, ke
     if not ConfigHasAlertWork(cfg) then
         return companionQueued
     end
+    -- A new cast invalidates the previous event's GCD snapshot, including
+    -- when an older ready watch is still waiting for its confirmation tick.
+    gameCooldownSnapshots[spellID] = nil
     if gameWatch[spellID] then
         if cfg.cdMode == "cooldown" then
             -- Mode changed from Ready to Cooldown while a watch was armed.
@@ -355,6 +371,10 @@ function Runtime:QueueGameCooldown(spellID, mapSpellToPrimary, mapRuntimeCfg, ke
             end
         else
             self:ArmGameCooldown(spellID, primaryKey, cfg)
+            local record = gameWatch[spellID]
+            record.armedAt = GetTime()
+            record.sawRealCooldown = false
+            record.readyTicks = 0
             return true
         end
     end
@@ -371,7 +391,7 @@ function Runtime:QueueGameCooldown(spellID, mapSpellToPrimary, mapRuntimeCfg, ke
     return true
 end
 
-function Runtime:EvaluateGameCooldowns(now)
+function Runtime:EvaluateGameCooldowns(now, fromCooldownEvent)
     if gameWatchSuspended then
         return false
     end
@@ -383,12 +403,12 @@ function Runtime:EvaluateGameCooldowns(now)
     for pendingKey, pending in pairs(gamePending) do
         local spellID = tonumber(pending.cfg.triggerSpellID) or tonumber(pending.cfg.spellId)
         local mode = pending.cfg and pending.cfg.cdMode
-        local state = ReadGameSpellState(spellID, mode == "charge")
+        local state = ReadGameSpellState(spellID, mode == "charge", fromCooldownEvent)
         if not state or state.isEnabled == false
             or (now - (pending.at or now)) > GAME_PENDING_TIMEOUT then
             gamePending[pendingKey] = nil
         elseif mode == "cooldown" then
-            if state.active == true and state.isOnGCD ~= true then
+            if state.active == true and state.isOnGCD == false then
                 -- "cooldown" mode announces at the real cooldown start and
                 -- stops watching: the ready edge is a separate mode.
                 local record = BuildGameWatchRecord(pending.primaryKey, pending.cfg, state)
@@ -397,7 +417,7 @@ function Runtime:EvaluateGameCooldowns(now)
             else
                 active = true
             end
-        elseif state.active == true then
+        elseif state.active == true and (state.charge == true or state.isOnGCD ~= nil) then
             gamePending[pendingKey] = nil
             if not gameWatch[spellID] then
                 gameWatch[spellID] = BuildGameWatchRecord(pending.primaryKey, pending.cfg, state)
@@ -409,7 +429,7 @@ function Runtime:EvaluateGameCooldowns(now)
     end
 
     for spellID, record in pairs(gameWatch) do
-        local state = ReadGameSpellState(spellID, record.cfg and record.cfg.cdMode == "charge")
+        local state = ReadGameSpellState(spellID, record.cfg and record.cfg.cdMode == "charge", fromCooldownEvent)
         if not state or state.isEnabled == false then
             gameWatch[spellID] = nil
         elseif state.charge == true then
@@ -419,14 +439,14 @@ function Runtime:EvaluateGameCooldowns(now)
             else
                 active = true
             end
-        elseif state.active == true and state.isOnGCD ~= true then
+        elseif state.active == true and state.isOnGCD == false then
             -- Real (non-GCD) cooldown observed; keep waiting.
             record.sawRealCooldown = true
             record.readyTicks = 0
             active = true
         elseif IsGameSpellReady(state) then
             if record.sawRealCooldown == true then
-                -- Two consecutive ready ticks filter transient isOnGCD reads.
+                -- Confirm the public ready state before announcing.
                 record.readyTicks = (record.readyTicks or 0) + 1
                 if record.readyTicks >= 2 then
                     FireGameCooldown(spellID, record, now)
@@ -447,13 +467,14 @@ function Runtime:EvaluateGameCooldowns(now)
     return active
 end
 
-function Runtime:PrimeGameCooldowns(mappedRuntimeCfg)
+function Runtime:PrimeGameCooldowns(mappedRuntimeCfg, fromCooldownEvent)
     gameRuntimeCfg = type(mappedRuntimeCfg) == "table" and mappedRuntimeCfg or nil
     if gameWatchSuspended then
         return false
     end
     local keep = {}
     local keepPending = {}
+    wipe(gameArmCandidates)
     for primaryKey, cfg in pairs(type(mappedRuntimeCfg) == "table" and mappedRuntimeCfg or {}) do
         if type(cfg) == "table" and cfg.gameStateCD == true
             and (ConfigHasAlertWork(cfg) or (cfg.onCooldownCfg and ConfigHasAlertWork(cfg.onCooldownCfg))) then
@@ -479,7 +500,12 @@ function Runtime:PrimeGameCooldowns(mappedRuntimeCfg)
                         pending.primaryKey = primaryKey
                     end
                 elseif ConfigHasAlertWork(cfg) then
-                    self:ArmGameCooldown(spellID, primaryKey, cfg)
+                    gameArmCandidates[#gameArmCandidates + 1] = {
+                        spellID = spellID,
+                        primaryKey = primaryKey,
+                        cfg = cfg,
+                    }
+                    self:ArmGameCooldown(spellID, primaryKey, cfg, fromCooldownEvent)
                 end
             end
         end
@@ -495,6 +521,24 @@ function Runtime:PrimeGameCooldowns(mappedRuntimeCfg)
         end
     end
     return true
+end
+
+-- SPELL_UPDATE_COOLDOWN is the only place isOnGCD may be sampled. Arm watches
+-- that a config refresh could not arm because the GCD state was still unknown,
+-- and leave already-armed records to EvaluateGameCooldowns so the event does not
+-- rebuild their alert fields on every cooldown tick.
+function Runtime:ArmGameCooldownsFromEvent()
+    if gameWatchSuspended then
+        return false
+    end
+    local armed = false
+    for _, candidate in ipairs(gameArmCandidates) do
+        if not gameWatch[candidate.spellID]
+            and self:ArmGameCooldown(candidate.spellID, candidate.primaryKey, candidate.cfg, true) then
+            armed = true
+        end
+    end
+    return armed
 end
 
 local function ClearDisabledActiveVisual(cd)
@@ -634,6 +678,8 @@ local function OnWorldTransition(_, event)
     gameWatchSuspended = true
     wipe(gameWatch)
     wipe(gamePending)
+    wipe(gameCooldownSnapshots)
+    wipe(gameArmCandidates)
     if next(cooldowns) == nil then
         StopUpdate()
     end
@@ -652,13 +698,29 @@ if type(frame.RegisterEvent) == "function" then
     frame:RegisterEvent("PLAYER_ENTERING_WORLD")
     frame:RegisterEvent("LOADING_SCREEN_ENABLED")
     frame:RegisterEvent("LOADING_SCREEN_DISABLED")
-    frame:SetScript("OnEvent", OnWorldTransition)
+    frame:RegisterEvent("SPELL_UPDATE_COOLDOWN")
+    frame:RegisterEvent("SPELL_UPDATE_CHARGES")
+    frame:SetScript("OnEvent", function(self, event)
+        if event == "SPELL_UPDATE_COOLDOWN" then
+            -- Ignore all event payloads and query only configured spell IDs.
+            -- No Blizzard frame, cache or layout is read or modified here.
+            if gameWatchSuspended then return end
+            Runtime:ArmGameCooldownsFromEvent()
+            Runtime:EvaluateGameCooldowns(GetTime(), true)
+        elseif event == "SPELL_UPDATE_CHARGES" then
+            Runtime:EvaluateGameCooldowns(GetTime())
+        else
+            OnWorldTransition(self, event)
+        end
+    end)
 end
 
 function Runtime:WipeCooldowns(hideVisual)
     wipe(cooldowns)
     wipe(gameWatch)
     wipe(gamePending)
+    wipe(gameCooldownSnapshots)
+    wipe(gameArmCandidates)
     gameRuntimeCfg = nil
 
     -- Profile/spec rebuilds can remove the cooldown state while a state-based

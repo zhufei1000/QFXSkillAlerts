@@ -86,8 +86,13 @@ local function GetCurrentClassSpec()
         return scope:GetCurrentClassSpec()
     end
     local _, _, classID = UnitClass("player")
-    local specIndex = GetSpecialization()
-    local specID = specIndex and GetSpecializationInfo(specIndex) or 0
+    local compat = NS.Core and NS.Core.Compat
+    if compat and compat.GetCurrentSpecID then return classID or 0, compat:GetCurrentSpecID() end
+    local specIndex = type(GetSpecialization) == "function" and GetSpecialization() or nil
+    local specID = 0
+    if specIndex and type(GetSpecializationInfo) == "function" then
+        specID = GetSpecializationInfo(specIndex) or 0
+    end
     return classID or 0, specID or 0
 end
 

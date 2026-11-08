@@ -132,4 +132,29 @@ local staleResult = Bloodlust:HandleUnitAura("player", notifier, { addedAuras = 
 Equal(staleResult, false, "a stale exhaustion aura must stay silent")
 Equal(#notified, 1, "a stale exhaustion aura must not announce")
 
+-- The permission predicate runs before querying an aura. General aura
+-- secrecy must not suppress an explicitly public exhaustion spell.
+local restrictedQueries = 0
+C_Secrets = {
+    ShouldAurasBeSecret = function() return true end,
+    ShouldSpellAuraBeSecret = function() return true end,
+}
+C_UnitAuras.GetPlayerAuraBySpellID = function()
+    restrictedQueries = restrictedQueries + 1
+    error("restricted aura must never be queried")
+end
+local guarded = pcall(Bloodlust.HandleUnitAura, Bloodlust, "player", notifier, {isFullUpdate = true})
+Assert(guarded, "restricted query must not escape the aura handler")
+Equal(restrictedQueries, 0, "restriction must be checked before the query")
+C_Secrets.ShouldSpellAuraBeSecret = function() return false end
+C_UnitAuras.GetPlayerAuraBySpellID = function()
+    return {expirationTime = now + 600}
+end
+Assert(Bloodlust:HandleUnitAura("player", notifier, {isFullUpdate = true}),
+    "public exhaustion must remain usable when other auras are secret")
+C_UnitAuras.GetPlayerAuraBySpellID = function() error("ordinary transient API failure") end
+Assert(pcall(Bloodlust.HandleUnitAura, Bloodlust, "player", notifier, {isFullUpdate = true}),
+    "unexpected query failure must not break UNIT_AURA dispatch")
+C_Secrets = nil
+
 print("PASS: bloodlust secret guards")

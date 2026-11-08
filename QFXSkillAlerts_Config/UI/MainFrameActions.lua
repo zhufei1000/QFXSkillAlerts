@@ -4,14 +4,14 @@ _G.QFXSkillAlertsNS = NS
 NS.UI = NS.UI or {}
 local NativeCreateFrame = CreateFrame
 local function CreateFrame(kind, name, parent, template)
-    local bridge = NS.UI.FactoryBridge
+    local bridge = NS.UI.Renderer
     if bridge then return bridge.CreateFrame(kind, name, parent, template) end
     return NativeCreateFrame(kind, name, parent, template)
 end
 local StaticPopup_Show = StaticPopup_Show
-if NS.UI.FactoryBridge then
+if NS.UI.Renderer then
     StaticPopup_Show = function(key, text, _, data)
-        return NS.UI.FactoryBridge.ShowConfirmation(key, text, data)
+        return NS.UI.Renderer.ShowConfirmation(key, text, data)
     end
 end
 NS.UI.MainFrame = NS.UI.MainFrame or {}

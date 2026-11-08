@@ -38,6 +38,7 @@ local function Advance(seconds)
             if timer.at <= now then timer.callback() else timers[#timers + 1] = timer end
         end
     end
+    frame:SendEvent("SPELL_UPDATE_COOLDOWN")
 end
 
 local states, charges = {}, {}
@@ -60,6 +61,7 @@ local cfg = { gameStateCD = true, cdMode = "ready", spellId = 3001,
 local cfgMap = { ["spell:3001"] = cfg }
 local spellMap = { [3001] = "spell:3001" }
 local function Tick()
+    frame:SendEvent("SPELL_UPDATE_COOLDOWN")
     if frame.OnUpdate then frame.OnUpdate(frame, 0.2) end
 end
 local function Ready()
@@ -131,6 +133,7 @@ Equal(played, 1, "consecutive transfers must stay silent")
 -- Refreshing a real watch must preserve its evidence of a real cooldown.
 states[3001] = State(true)
 Runtime:PrimeGameCooldowns(cfgMap)
+frame:SendEvent("SPELL_UPDATE_COOLDOWN")
 Advance(3)
 Runtime:PrimeGameCooldowns(cfgMap)
 Ready()

@@ -4,7 +4,7 @@ _G.QFXSkillAlertsNS = NS
 NS.UI = NS.UI or {}
 local NativeCreateFrame = CreateFrame
 local function CreateFrame(kind, name, parent, template)
-    local bridge = NS.UI.FactoryBridge
+    local bridge = NS.UI.Renderer
     if bridge then return bridge.CreateFrame(kind, name, parent, template) end
     return NativeCreateFrame(kind, name, parent, template)
 end
@@ -83,7 +83,7 @@ function SavedList:Create(parent)
     frame:SetPoint("BOTTOMRIGHT", parent, "BOTTOMRIGHT", -12, 12)
 
     local scrollFrame, content, slider
-    if NS.UI.FactoryBridge then
+    if NS.UI.Renderer then
         local host
         host, content, scrollFrame, slider = NS.UI.Widgets:CreateScrollableContent(frame, {wheelStep = ROW_HEIGHT, bottomPadding = 0})
         host:ClearAllPoints(); host:SetAllPoints(frame)

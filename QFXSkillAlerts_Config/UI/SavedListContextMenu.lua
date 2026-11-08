@@ -4,7 +4,7 @@ _G.QFXSkillAlertsNS = NS
 NS.UI = NS.UI or {}
 local NativeCreateFrame = CreateFrame
 local function CreateFrame(kind, name, parent, template)
-    local bridge = NS.UI.FactoryBridge
+    local bridge = NS.UI.Renderer
     if bridge then return bridge.CreateFrame(kind, name, parent, template) end
     return NativeCreateFrame(kind, name, parent, template)
 end
@@ -218,7 +218,7 @@ function ContextMenu:Open(list, items, options)
             row:SetHeight(rowHeight)
             row:SetPoint("LEFT", menu, "LEFT", 4, 0)
             row:SetPoint("RIGHT", menu, "RIGHT", -4, 0)
-            local bridge = NS.UI.FactoryBridge
+            local bridge = NS.UI.Renderer
             if bridge and bridge.StyleMenuRow then
                 bridge.StyleMenuRow(row, i)
             else

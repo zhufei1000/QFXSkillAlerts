@@ -12,6 +12,13 @@ local INSTANCE_MODE_ANY = "any"
 local INSTANCE_MODE_SEASON = "season"
 local INSTANCE_MODE_SPECIFIC = "specific"
 
+local function IsForever()
+    local compat = NS.Core and NS.Core.Compat
+    return compat ~= nil
+        and type(compat.IsForever) == "function"
+        and compat:IsForever() == true
+end
+
 local dungeonCatalog = { built = false, ids = {}, names = {}, nameByID = {}, items = {} }
 local raidCatalog = { built = false, names = {}, nameByID = {}, items = {} }
 
@@ -248,6 +255,9 @@ function EventContext:BuildLoadConditionSignature(entry)
     end
     if contexts.dungeon then
         local mode = self:NormalizeInstanceMode(entry.eventDungeonMode)
+        if IsForever() then
+            mode = INSTANCE_MODE_ANY
+        end
         parts[#parts + 1] = "dungeon=" .. mode
         if mode == INSTANCE_MODE_SPECIFIC then
             parts[#parts + 1] = "dungeonIDs=" .. SelectionSignature(entry.eventDungeonSelectionIDs)
@@ -255,6 +265,9 @@ function EventContext:BuildLoadConditionSignature(entry)
     end
     if contexts.raid then
         local mode = self:NormalizeInstanceMode(entry.eventRaidMode)
+        if IsForever() then
+            mode = INSTANCE_MODE_ANY
+        end
         parts[#parts + 1] = "raid=" .. mode
         if mode == INSTANCE_MODE_SPECIFIC then
             parts[#parts + 1] = "raidIDs=" .. SelectionSignature(entry.eventRaidSelectionIDs)
@@ -308,6 +321,13 @@ end
 
 function EventContext:GetInstanceModeOptions()
     local L = NS.L or function(key) return tostring(key) end
+    -- Forever has no Mythic+ season and no current-season raid catalog. Keep
+    -- only "any"; existing season/specific entries fall back to "any" below.
+    if IsForever() then
+        return {
+            { value = INSTANCE_MODE_ANY, text = L("EVENT_LOAD_MODE_ANY") },
+        }
+    end
     return {
         { value = INSTANCE_MODE_ANY, text = L("EVENT_LOAD_MODE_ANY") },
         { value = INSTANCE_MODE_SEASON, text = L("EVENT_LOAD_MODE_CURRENT_SEASON") },
@@ -316,6 +336,9 @@ function EventContext:GetInstanceModeOptions()
 end
 
 function EventContext:GetSeasonInstanceOptions(kind, selectedIDs, selectedNames)
+    if IsForever() then
+        return {}
+    end
     local catalog = tostring(kind or "") == "raid" and raidCatalog or dungeonCatalog
     if catalog == raidCatalog then BuildRaidCatalog() else BuildDungeonCatalog() end
     local options = {}
@@ -328,6 +351,9 @@ end
 
 function EventContext:FilterCurrentSeasonSelections(kind, selectedIDs)
     selectedIDs = self:NormalizeInstanceSelections(selectedIDs)
+    if IsForever() then
+        return selectedIDs
+    end
     local catalog = tostring(kind or "") == "raid" and raidCatalog or dungeonCatalog
     local ready
     if catalog == raidCatalog then
@@ -354,6 +380,13 @@ end
 function EventContext:ResolveInstanceSelectionNames(kind, selectedIDs, savedNames)
     selectedIDs = self:NormalizeInstanceSelections(selectedIDs)
     savedNames = self:NormalizeInstanceSelectionNames(savedNames)
+    if IsForever() then
+        local result = {}
+        for id in pairs(selectedIDs) do
+            result[id] = savedNames[id] or id
+        end
+        return result
+    end
     local catalog = tostring(kind or "") == "raid" and raidCatalog or dungeonCatalog
     if catalog == raidCatalog then BuildRaidCatalog() else BuildDungeonCatalog() end
     local result = {}
@@ -411,6 +444,9 @@ function EventContext:WarmForEntry(entry)
     if type(entry) ~= "table" or IsCombatLocked() then
         return false
     end
+    if IsForever() then
+        return true
+    end
     local contexts = self:NormalizeLoadContexts(entry.eventLoadContexts)
     local dungeonMode = self:NormalizeInstanceMode(entry.eventDungeonMode)
     local raidMode = self:NormalizeInstanceMode(entry.eventRaidMode)
@@ -440,6 +476,12 @@ function EventContext:MatchesEntry(entry)
     end
     if hasSelection and contexts[context] ~= true then
         return false
+    end
+    -- Forever cannot build the Retail season catalogs. Treat a saved
+    -- season/specific condition as "any instance of this context" instead of
+    -- silently never matching, while still honoring world/dungeon/raid.
+    if IsForever() then
+        return true
     end
     if context == "dungeon" and self:NormalizeInstanceMode(entry.eventDungeonMode) == INSTANCE_MODE_SEASON then
         return self:IsCurrentSeasonDungeon(instanceName)

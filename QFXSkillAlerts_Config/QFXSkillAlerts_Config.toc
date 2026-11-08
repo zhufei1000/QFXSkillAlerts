@@ -1,4 +1,6 @@
-## Interface: 120005, 120007, 120100, 120105
+## Interface: 120005, 120007, 120100, 120105, 16001
+## AllowLoadGameType: standard, camelot
+## ExcludeLoadGameType: classic
 ## Title: QFX Skill Alerts Config
 ## Notes: Load-on-demand configuration UI for QFX Skill Alerts.
 ## Author: zhufei1000
@@ -33,15 +35,10 @@ Core\EntryStore.lua
 Core\VisualGroupIdentity.lua
 Core\TestController.lua
 
-UI\FactoryBridge.lua
-UI\Skin.lua
-UI\ScrollBar.lua
+Libs\QFXWidgets.lua
+UI\FactoryBootstrap.lua
+UI\FactoryRenderer.lua
 UI\WidgetUtils.lua
-UI\Widgets.lua
-UI\WidgetScrollable.lua
-UI\DialogTextArea.lua
-UI\WidgetDropdownPopup.lua
-UI\WidgetDropdown.lua
 Core\CDMVoiceEditorController.lua
 UI\CDMVoiceEditorRows.lua
 UI\CDMVoiceEditorBuilder.lua

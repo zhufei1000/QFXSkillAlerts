@@ -25,6 +25,7 @@ local runtimeConfig = {
     notifyMode = CONST.MODE_SOUND or "sound",
 }
 local lastExpiration = 0
+local lastExhaustionQuery = -math.huge
 -- nil = not rebuilt yet (allow events, keeps the uninitialized path identical
 -- to the old behavior); false = saved config has no enabled alert channel
 -- (skip UNIT_AURA work entirely); true = Bloodlust alert is active.
@@ -38,7 +39,12 @@ local bloodlustActive
 -- can taint shared aura data that Blizzard's CooldownViewer later reads. Skip
 -- any secret aura instead of touching it.
 local function IsSecretValue(value)
-    return type(issecretvalue) == "function" and issecretvalue(value) == true
+    if type(issecretvalue) == "function" and issecretvalue(value) == true then
+        return true
+    end
+    -- Aura/update payloads can be secret tables rather than secret scalars.
+    -- Accessing their fields must be avoided just like a secret number/string.
+    return type(issecrettable) == "function" and issecrettable(value) == true
 end
 
 local function SafeNormalize(normalizeSoundPath, path)
@@ -146,8 +152,16 @@ function Bloodlust:CheckExhaustionFresh()
     end
 
     local now = GetTime()
+    lastExhaustionQuery = now
     for _, spellId in ipairs(EXHAUSTION_IDS) do
-        local aura = C_UnitAuras.GetPlayerAuraBySpellID(spellId)
+        local secrets = rawget(_G, "C_Secrets")
+        local restricted = secrets and type(secrets.ShouldSpellAuraBeSecret) == "function"
+            and secrets.ShouldSpellAuraBeSecret(spellId)
+        local aura
+        if not restricted then
+            local ok, result = pcall(C_UnitAuras.GetPlayerAuraBySpellID, spellId)
+            if ok then aura = result end
+        end
         if not IsSecretValue(aura) and aura ~= nil then
             local expirationTime = aura.expirationTime
             if not IsSecretValue(expirationTime) and expirationTime ~= nil then
@@ -180,7 +194,7 @@ local function GetReadableAuraSpellID(aura)
 end
 
 function Bloodlust:UpdateMayContainExhaustion(updateInfo)
-    if type(updateInfo) ~= "table" then
+    if type(updateInfo) ~= "table" or IsSecretValue(updateInfo) then
         return true
     end
     local isFullUpdate = updateInfo.isFullUpdate
@@ -205,19 +219,9 @@ function Bloodlust:UpdateMayContainExhaustion(updateInfo)
     end
     local updated = type(updatedAuraInstanceIDs) == "table" and updatedAuraInstanceIDs or {}
     if #updated > 0 then
-        if not C_UnitAuras or type(C_UnitAuras.GetAuraDataByAuraInstanceID) ~= "function" then
-            return true
-        end
-        for _, auraInstanceID in ipairs(updated) do
-            local ok, aura = pcall(C_UnitAuras.GetAuraDataByAuraInstanceID, "player", auraInstanceID)
-            if not ok then
-                return true
-            end
-            local spellID, readable = GetReadableAuraSpellID(aura)
-            if not readable or EXHAUSTION_ID_SET[spellID] then
-                return true
-            end
-        end
+        -- Instance-ID lookup requires separate unit-aura access. Recheck only
+        -- the known, public exhaustion spells instead of querying that data.
+        return GetTime() - lastExhaustionQuery >= 0.2
     end
 
     -- Removed auras cannot represent a newly applied exhaustion effect.
@@ -225,7 +229,7 @@ function Bloodlust:UpdateMayContainExhaustion(updateInfo)
 end
 
 function Bloodlust:HandleUnitAura(unit, notifier, updateInfo)
-    if unit ~= "player" or bloodlustActive == false then
+    if IsSecretValue(unit) or unit ~= "player" or bloodlustActive == false then
         return false
     end
     local filterOK, mayContainExhaustion = pcall(self.UpdateMayContainExhaustion, self, updateInfo)

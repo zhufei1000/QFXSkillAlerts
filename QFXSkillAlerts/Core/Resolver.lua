@@ -389,6 +389,8 @@ function Resolver:ResolveTalentName(talentId)
 end
 
 function Resolver:GetActiveTalentConfigID()
+    local compat = NS.Core and NS.Core.Compat
+    if compat and compat.GetActiveTalentConfigID then return compat:GetActiveTalentConfigID() end
     if C_ClassTalents and C_ClassTalents.GetActiveConfigID then
         local ok, configID = pcall(C_ClassTalents.GetActiveConfigID)
         if ok and tonumber(configID) and tonumber(configID) > 0 then
@@ -400,6 +402,7 @@ end
 
 function Resolver:InvalidateTalentCache()
     self.talentCacheValid = false
+    self.talentCacheRetryAt = nil
 end
 
 local function CacheTalentEntry(configID, entryID, selectedTalentIDs)
@@ -425,9 +428,16 @@ function Resolver:BuildSelectedTalentCache()
     if self.talentCacheValid then
         return self.talentCacheReadable
     end
+    -- Trait data can lag behind login. Leave the cache invalid so a later call
+    -- retries, but bound the retry rate so one profile refresh cannot turn into
+    -- a config query per entry.
+    local now = (type(GetTime) == "function" and GetTime()) or 0
+    if now < (self.talentCacheRetryAt or 0) then
+        return false
+    end
+    self.talentCacheRetryAt = now + 1
     local selectedTalentIDs = self.selectedTalentIDs
     wipe(selectedTalentIDs)
-    self.talentCacheValid = true
     self.talentCacheReadable = false
 
     local configID = self:GetActiveTalentConfigID()
@@ -439,6 +449,7 @@ function Resolver:BuildSelectedTalentCache()
     if not okConfig or type(configInfo) ~= "table" or type(configInfo.treeIDs) ~= "table" then
         return false
     end
+    self.talentCacheValid = true
     self.talentCacheReadable = true
 
     for _, treeID in ipairs(configInfo.treeIDs) do
@@ -486,7 +497,7 @@ function Resolver:IsTalentSelectedCached(talentId)
         end
     end
     if not self.talentCacheReadable then
-        return true
+        return false
     end
     return false
 end

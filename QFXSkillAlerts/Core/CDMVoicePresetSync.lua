@@ -26,6 +26,12 @@ local function IsInCombat()
     return type(InCombatLockdown) == "function" and InCombatLockdown() == true
 end
 
+-- Forever reports a dual talent group switch as ACTIVE_TALENT_GROUP_CHANGED
+-- rather than PLAYER_SPECIALIZATION_CHANGED; both change the active scope.
+local function IsScopeChangeEvent(event)
+    return event == "PLAYER_SPECIALIZATION_CHANGED" or event == "ACTIVE_TALENT_GROUP_CHANGED"
+end
+
 local function NewSummary()
     return {
         added = 0,
@@ -1226,6 +1232,7 @@ function Sync:Initialize()
         "COOLDOWN_VIEWER_DATA_LOADED",
         "COOLDOWN_VIEWER_TABLE_HOTFIXED",
         "PLAYER_SPECIALIZATION_CHANGED",
+        "ACTIVE_TALENT_GROUP_CHANGED",
         "PLAYER_REGEN_ENABLED",
     }) do
         pcall(frame.RegisterEvent, frame, event)
@@ -1253,13 +1260,13 @@ function Sync:Initialize()
         if service and type(service.InvalidateCooldownCache) == "function"
             and (event == "COOLDOWN_VIEWER_DATA_LOADED"
                 or event == "COOLDOWN_VIEWER_TABLE_HOTFIXED"
-                or event == "PLAYER_SPECIALIZATION_CHANGED"
+                or IsScopeChangeEvent(event)
                 or resumeDeferredData) then
             service:InvalidateCooldownCache(resumeDeferredData and "COMBAT_DEFERRED_CDM_DATA" or event)
             Sync.cooldownCatalogCacheKey = nil
             Sync.cooldownCatalogCache = nil
         end
-        local scopeEvent = event == "PLAYER_SPECIALIZATION_CHANGED"
+        local scopeEvent = IsScopeChangeEvent(event)
             or event == "PLAYER_ENTERING_WORLD"
             or event == "PLAYER_LOGIN"
         if scopeEvent then
@@ -1308,7 +1315,7 @@ function Sync:Initialize()
                 captureService:CaptureCurrentSpecCatalog(event ~= "PLAYER_REGEN_ENABLED")
             end
         end
-        if event == "PLAYER_SPECIALIZATION_CHANGED" then
+        if IsScopeChangeEvent(event) then
             -- A specialization revisited later in the same login is a new
             -- opportunity to resolve its still-pending records. World-entry
             -- events deliberately do not reset this guard, avoiding prompts on

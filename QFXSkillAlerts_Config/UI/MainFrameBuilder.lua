@@ -4,7 +4,7 @@ _G.QFXSkillAlertsNS = NS
 NS.UI = NS.UI or {}
 local NativeCreateFrame = CreateFrame
 local function CreateFrame(kind, name, parent, template)
-    local bridge = NS.UI.FactoryBridge
+    local bridge = NS.UI.Renderer
     if bridge then return bridge.CreateFrame(kind, name, parent, template) end
     return NativeCreateFrame(kind, name, parent, template)
 end
@@ -12,7 +12,7 @@ NS.UI.MainFrameBuilder = NS.UI.MainFrameBuilder or {}
 
 local Builder = NS.UI.MainFrameBuilder
 local Widgets = NS.UI.Widgets
-local Skin = NS.UI.Skin
+local W = NS.UI.Renderer.Widgets
 local L = NS.L or function(key, ...)
     if select("#", ...) > 0 then
         return string.format(tostring(key), ...)
@@ -41,66 +41,21 @@ function Builder:EnsureFrame(owner)
     frame:SetScript("OnDragStop", frame.StopMovingOrSizing)
     frame:SetClampedToScreen(true)
     frame:Hide()
-    Widgets:ApplyPanelChrome(frame, { footerHeight = 50 })
     tinsert(UISpecialFrames, frame:GetName())
+    local chrome = W:AddonWindow(frame, {
+        title = NS.ADDON_DISPLAY_NAME or L("ADDON_DISPLAY_NAME"), version = "--",
+        locale = NS.LOCALE, repository = "https://github.com/zhufei1000/QFXSkillAlerts",
+        onClose = function() owner:Close() end,
+    })
+    local content = chrome.content
+    local summary = Widgets:CreateLabel(content, "", "GameFontHighlightSmall")
+    summary:SetPoint("TOPLEFT", content, "TOPLEFT", 8, -4)
+    summary:SetPoint("RIGHT", content, "RIGHT", -340, 0)
 
-    local header = CreateFrame("Frame", nil, frame)
-    header:SetSize(420, 40)
-    header:SetPoint("TOP", frame, "TOP", 0, -10)
-
-    local logo = header:CreateTexture(nil, "ARTWORK")
-    logo:SetSize(34, 34)
-    logo:SetPoint("LEFT", header, "LEFT", 0, -1)
-    logo:SetTexture(NS.ADDON_ICON or "Interface\\AddOns\\QFXSkillAlerts\\AppIcon.png")
-    logo:SetTexCoord(0.08, 0.92, 0.08, 0.92)
-
-    local title = Widgets:CreateLabel(header, NS.ADDON_DISPLAY_NAME or L("ADDON_DISPLAY_NAME"), "GameFontNormalLarge")
-    title:SetPoint("LEFT", logo, "RIGHT", 10, 0)
-    title:SetJustifyH("LEFT")
-    if Skin then
-        Skin:StyleFont(title, "title")
-    end
-
-    local function LayoutHeader()
-        local titleWidth = 360
-        if title.GetStringWidth then
-            titleWidth = math.min(math.max((title:GetStringWidth() or 0) + 6, 180), 540)
-        end
-        title:SetWidth(titleWidth)
-        header:SetWidth(34 + 10 + titleWidth)
-    end
-    LayoutHeader()
-    frame:HookScript("OnShow", LayoutHeader)
-
-    local close = CreateFrame("Button", nil, frame, "UIPanelCloseButton")
-    close:SetSize(28, 28)
-    close:SetPoint("TOPRIGHT", frame, "TOPRIGHT", -10, -10)
-    if Skin and Skin.SkinCloseButton then
-        Skin:SkinCloseButton(close)
-    end
-    close:SetScript("OnClick", function()
-        owner:Close()
-    end)
-
-    local summary = Widgets:CreateLabel(frame, "", "GameFontHighlight")
-    summary:SetPoint("TOPLEFT", frame, "TOPLEFT", 24, -62)
-    summary:SetPoint("RIGHT", frame, "RIGHT", -245, 0)
-    if Skin then
-        Skin:StyleFont(summary, "muted")
-    end
-
-    local languageLabel = Widgets:CreateLabel(frame, L("LABEL_LANGUAGE"), "GameFontNormal")
-    languageLabel:SetPoint("TOPRIGHT", frame, "TOPRIGHT", -220, -62)
-    if Skin then
-        Skin:StyleFont(languageLabel, "accent")
-    end
-
-    -- UI skin is fully automatic.  No user-facing skin selector is shown here:
-    -- ElvUI / NDui can skin native-friendly controls when loaded; otherwise QFX fallback is used.
-
-    local languageDrop = Widgets:CreateDropdown(frame, "QFXSkillAlertsLanguageDropDown", 180)
+    local languageLabel = Widgets:CreateLabel(content, L("LABEL_LANGUAGE"), "GameFontNormal")
+    local languageDrop = Widgets:CreateDropdown(content, "QFXSkillAlertsLanguageDropDown", 180)
     languageDrop:ClearAllPoints()
-    languageDrop:SetPoint("TOPRIGHT", frame, "TOPRIGHT", -18, -54)
+    languageDrop:SetPoint("TOPRIGHT", content, "TOPRIGHT", -8, 0)
     languageLabel:ClearAllPoints()
     languageLabel:SetPoint("RIGHT", languageDrop, "LEFT", -8, 0)
     languageLabel:SetJustifyH("RIGHT")
@@ -116,25 +71,25 @@ function Builder:EnsureFrame(owner)
     end
 
 
-    local addBtn = Widgets:CreateButton(frame, L("BTN_ADD_VOICE"), 112, 32)
+    local addBtn = Widgets:CreateButton(content, L("BTN_ADD_VOICE"), 112, 32)
     addBtn:SetPoint("TOPLEFT", summary, "BOTTOMLEFT", 0, -16)
 
-    local addGroupBtn = Widgets:CreateButton(frame, L("BTN_ADD_COLLECTION"), 112, 32)
+    local addGroupBtn = Widgets:CreateButton(content, L("BTN_ADD_COLLECTION"), 112, 32)
     addGroupBtn:SetPoint("LEFT", addBtn, "RIGHT", 8, 0)
 
-    local editBtn = Widgets:CreateButton(frame, L("BTN_EDIT"), 104, 32)
+    local editBtn = Widgets:CreateButton(content, L("BTN_EDIT"), 104, 32)
     editBtn:SetPoint("LEFT", addGroupBtn, "RIGHT", 8, 0)
 
-    local deleteBtn = Widgets:CreateButton(frame, L("BTN_DELETE"), 104, 32)
+    local deleteBtn = Widgets:CreateButton(content, L("BTN_DELETE"), 104, 32)
     deleteBtn:SetPoint("LEFT", editBtn, "RIGHT", 8, 0)
 
-    local refreshBtn = Widgets:CreateButton(frame, L("BTN_REFRESH"), 104, 32)
+    local refreshBtn = Widgets:CreateButton(content, L("BTN_REFRESH"), 104, 32)
     refreshBtn:SetPoint("LEFT", deleteBtn, "RIGHT", 8, 0)
 
-    local importBtn = Widgets:CreateButton(frame, L("BTN_IMPORT"), 104, 32)
+    local importBtn = Widgets:CreateButton(content, L("BTN_IMPORT"), 104, 32)
     importBtn:SetPoint("LEFT", refreshBtn, "RIGHT", 8, 0)
 
-    local exportAllBtn = Widgets:CreateButton(frame, L("BTN_EXPORT_FULL"), 112, 32)
+    local exportAllBtn = Widgets:CreateButton(content, L("BTN_EXPORT_FULL"), 112, 32)
     exportAllBtn:SetPoint("LEFT", importBtn, "RIGHT", 8, 0)
 
     local toolbarButtons = { addBtn, addGroupBtn, editBtn, deleteBtn, refreshBtn, importBtn, exportAllBtn }
@@ -165,70 +120,42 @@ function Builder:EnsureFrame(owner)
     LayoutToolbar()
     frame:HookScript("OnShow", LayoutToolbar)
 
-    local authorLabel = Widgets:CreateLabel(frame, L("AUTHOR_LINE"), "GameFontHighlightSmall")
-    authorLabel:SetPoint("BOTTOMLEFT", frame, "BOTTOMLEFT", 24, 14)
-    authorLabel:SetSize(250, 20)
-    authorLabel:SetJustifyV("MIDDLE")
-    if authorLabel.SetWordWrap then authorLabel:SetWordWrap(false) end
-
-    local versionLabel = Widgets:CreateLabel(frame, "", "GameFontHighlightSmall")
-    versionLabel:SetPoint("BOTTOMRIGHT", frame, "BOTTOMRIGHT", -24, 14)
-    versionLabel:SetSize(200, 20)
-    versionLabel:SetJustifyH("RIGHT")
-    versionLabel:SetJustifyV("MIDDLE")
-    if versionLabel.SetWordWrap then versionLabel:SetWordWrap(false) end
-
+    local authorLabel, versionLabel = chrome.footer.author, chrome.footer.version
+    authorLabel:SetWidth(250)
     local contacts = {
         { key = "qq", titleKey = "CONTACT_QQ", value = "1049855225", icon = "contact-qq.blp" },
         { key = "discord", titleKey = "CONTACT_DISCORD", value = "https://discord.gg/HVJ2y4v7k4", icon = "contact-discord.blp" },
         { key = "github", titleKey = "CONTACT_GITHUB", value = "https://github.com/zhufei1000/QFXSkillAlerts", icon = "contact-github.blp" },
     }
     local contactButtons = {}
-    local previous = authorLabel
-    for _, contact in ipairs(contacts) do
-        local info = contact
-        local texture = [[Interface\AddOns\QFXSkillAlerts_Config\Media\]] .. info.icon
-        local factory = NS.UI.FactoryBridge and NS.UI.FactoryBridge.Widgets
-        -- Older suite adapters still expose the factory's public icon button.
-        local button = Widgets.CreateIconButton and Widgets:CreateIconButton(frame, texture, 20)
-            or factory:IconButton(frame, {texture = texture, size = 20, alpha = .75, hoverAlpha = 1})
-        button:SetPoint("LEFT", previous, "RIGHT", 8, 0)
-        button:SetScript("OnClick", function(_, mouseButton)
-            if mouseButton and mouseButton ~= "LeftButton" then return end
-            owner:OpenExportDialog(L(info.titleKey), info.value, L("CONTACT_COPY_HINT"))
-        end)
-        button:HookScript("OnEnter", function(self)
-            GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
-            GameTooltip:SetText(L(info.titleKey), 1, 1, 1)
-            GameTooltip:AddLine(info.value, 1, 1, 1, true)
-            GameTooltip:AddLine(L("CONTACT_COPY_HINT"), 1, 1, 1, true)
-            GameTooltip:Show()
-        end)
-        button:HookScript("OnLeave", GameTooltip_Hide)
-        contactButtons[info.key] = button
-        previous = button
-    end
-
     local function RefreshFooter()
-        authorLabel:SetText(L("AUTHOR_LINE"))
         local metadata = C_AddOns and C_AddOns.GetAddOnMetadata or GetAddOnMetadata
         local version = "--"
         if type(metadata) == "function" then
             local ok, value = pcall(metadata, "QFXSkillAlerts", "Version")
             if ok and type(value) == "string" and value ~= "" then version = value end
         end
+        local entries = {}
+        for index, info in ipairs(contacts) do
+            entries[index] = { key = info.key, title = L(info.titleKey), value = info.value,
+                texture = [[Interface\AddOns\QFXSkillAlerts_Config\Media\]] .. info.icon }
+        end
+        chrome:Update({ title = NS.ADDON_DISPLAY_NAME or L("ADDON_DISPLAY_NAME"),
+            version = version, locale = NS.LOCALE, contacts = entries })
+        authorLabel:SetText(L("AUTHOR_LINE"))
         versionLabel:SetText(L("VERSION_LINE", version))
+        for index, info in ipairs(contacts) do
+            local button = chrome.footer.buttons[index]
+            button:ClearAllPoints()
+            button:SetPoint("LEFT", authorLabel, "RIGHT", 8 + (index - 1) * 28, 0)
+            contactButtons[info.key] = button
+        end
     end
     RefreshFooter()
     frame:HookScript("OnShow", RefreshFooter)
-    frame:HookScript("OnHide", function()
-        local dialog = owner.importExportDialog
-        if dialog and dialog.qfxsaContact then dialog:Hide() end
-    end)
-
-    local listHost = CreateFrame("Frame", nil, frame, "BackdropTemplate")
+    local listHost = CreateFrame("Frame", nil, content, "BackdropTemplate")
     listHost:SetPoint("TOPLEFT", addBtn, "BOTTOMLEFT", 0, -18)
-    listHost:SetPoint("BOTTOMRIGHT", frame, "BOTTOMRIGHT", -24, 48)
+    listHost:SetPoint("BOTTOMRIGHT", content, "BOTTOMRIGHT", -8, 8)
     Widgets:ApplyPanelChrome(listHost, { inset = true, noFooter = true, topHeight = 20 })
 
     local savedList = NS.UI.SavedList:Create(listHost)
@@ -247,8 +174,9 @@ function Builder:EnsureFrame(owner)
     end
 
     owner.frame = frame
-    owner.headerTitle = title
-    owner.layoutHeader = LayoutHeader
+    owner.chrome = chrome
+    owner.headerTitle = chrome.title
+    owner.layoutHeader = function() chrome:Layout() end
     owner.summary = summary
     owner.languageLabel = languageLabel
     owner.languageDrop = languageDrop

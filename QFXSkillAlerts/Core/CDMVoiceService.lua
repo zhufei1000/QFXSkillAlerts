@@ -38,6 +38,15 @@ local function IsInCombat()
     return type(InCombatLockdown) == "function" and InCombatLockdown() == true
 end
 
+local function IsValidSpecScope(specID)
+    local compat = NS.Core and NS.Core.Compat
+    if compat and type(compat.IsValidSpecScope) == "function" then
+        return compat:IsValidSpecScope(specID)
+    end
+    specID = tonumber(specID)
+    return specID ~= nil and specID > 0 and specID == math.floor(specID)
+end
+
 -- Throttle for the cross-spec skill catalog capture below. Combat-end fires
 -- far more often than login / spec change / data load, and re-walking every
 -- Cooldown Manager category there costs C-API calls, table churn and string
@@ -212,12 +221,33 @@ function Service:GetCurrentClassSpec()
     if type(UnitClass) == "function" then
         className, _, classID = UnitClass("player")
     end
-    local specIndex = type(GetSpecialization) == "function" and GetSpecialization() or nil
     local specID, specName
-    if specIndex and type(GetSpecializationInfo) == "function" then
-        specID, specName = GetSpecializationInfo(specIndex)
+    local compat = NS.Core and NS.Core.Compat
+    if compat and compat.GetCurrentSpecInfo then
+        specID, specName = compat:GetCurrentSpecInfo()
+        if specID == 0 and not compat:IsForever() then specID = nil end
+    else
+        local specIndex = type(GetSpecialization) == "function" and GetSpecialization() or nil
+        if specIndex and type(GetSpecializationInfo) == "function" then
+            specID, specName = GetSpecializationInfo(specIndex)
+        end
     end
-    return tonumber(classID), tonumber(specID), className, specName
+    specID = tonumber(specID)
+    if specID == nil then
+        -- Keep legacy all-specs records readable while Forever's class
+        -- specialization data is not ready. Retail retains its nil sentinel.
+        -- This 0 means "current spec unknown", never "the player picked all
+        -- specs": automatic captures must require a positive ID so they cannot
+        -- write one spec's data into the bucket every spec inherits from.
+        local compat = NS.Core and NS.Core.Compat
+        if compat and type(compat.IsForever) == "function" and compat:IsForever() == true then
+            specID = 0
+        end
+    end
+    if specID == 0 and (specName == nil or specName == "") then
+        specName = L("ALL_SPECS")
+    end
+    return tonumber(classID), specID, className, specName
 end
 
 function Service:GetLayoutManager()
@@ -295,8 +325,8 @@ function Service:IsAvailable()
         or type(C_CooldownViewer.GetCooldownViewerCooldownInfo) ~= "function" then
         return false, "data_not_ready"
     end
-    local _, specID = self:GetCurrentClassSpec()
-    if not specID then
+    local classID, specID = self:GetCurrentClassSpec()
+    if not classID or classID <= 0 or specID == nil then
         return false, "no_spec"
     end
     return true
@@ -1754,7 +1784,9 @@ function Service:GetSavedEntries()
             for specIDKey, specMap in pairs(classMap) do
                 local specID = tonumber(specIDKey)
                 if specID and type(specMap) == "table"
-                    and (classID ~= currentClassID or specID ~= currentSpecID) then
+                    and (classID ~= currentClassID or specID ~= currentSpecID)
+                    and not (classID == currentClassID and specID == 0
+                        and NS.Core.Compat and NS.Core.Compat:IsForever()) then
                     for _, record in pairs(specMap) do
                         if type(record) == "table" and record.enabled ~= false then
                             inactiveRecords[#inactiveRecords + 1] = record
@@ -1798,7 +1830,7 @@ end
 function Service:SaveSkillCatalog(classID, specID, items)
     classID = tonumber(classID)
     specID = tonumber(specID)
-    if not classID or not specID or classID <= 0 or specID <= 0 or type(items) ~= "table" then
+    if not classID or classID <= 0 or not IsValidSpecScope(specID) or type(items) ~= "table" then
         return false
     end
     local entries = {}
@@ -1857,6 +1889,9 @@ function Service:CaptureCurrentSpecCatalog(force)
     local classID, specID = self:GetCurrentClassSpec()
     classID = tonumber(classID) or 0
     specID = tonumber(specID) or 0
+    -- The catalog always describes one concrete spec. Scope 0 is the shared
+    -- all-specs bucket, so an unreadable current spec must skip the capture
+    -- instead of storing this spec's list where every spec would inherit it.
     if classID <= 0 or specID <= 0 then
         return false
     end

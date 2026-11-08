@@ -219,6 +219,7 @@ function AuraSounds:Initialize()
         "PLAYER_ENTERING_WORLD",
         "PLAYER_REGEN_ENABLED",
         "PLAYER_SPECIALIZATION_CHANGED",
+        "ACTIVE_TALENT_GROUP_CHANGED",
         "ADDON_LOADED",
     }) do
         pcall(frame.RegisterEvent, frame, event)

@@ -4,7 +4,7 @@ _G.QFXSkillAlertsNS = NS
 NS.UI = NS.UI or {}
 local NativeCreateFrame = CreateFrame
 local function CreateFrame(kind, name, parent, template)
-    local bridge = NS.UI.FactoryBridge
+    local bridge = NS.UI.Renderer
     if bridge then return bridge.CreateFrame(kind, name, parent, template) end
     return NativeCreateFrame(kind, name, parent, template)
 end
@@ -328,7 +328,7 @@ local function CreateNotifyControls(content, ctx)
         line:SetSize(MODULE_CONTENT_W, 1)
         local texture = line:CreateTexture(nil, "ARTWORK")
         texture:SetAllPoints()
-        local divider = NS.UI.FactoryBridge and NS.UI.FactoryBridge.Divider and NS.UI.FactoryBridge.Divider()
+        local divider = NS.UI.Renderer and NS.UI.Renderer.Divider and NS.UI.Renderer.Divider()
         if divider then
             texture:SetColorTexture(divider[1], divider[2], divider[3], divider[4] or 1)
         else

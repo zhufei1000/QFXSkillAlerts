@@ -4,7 +4,7 @@ _G.QFXSkillAlertsNS = NS
 NS.UI = NS.UI or {}
 local NativeCreateFrame = CreateFrame
 local function CreateFrame(kind, name, parent, template)
-    local bridge = NS.UI.FactoryBridge
+    local bridge = NS.UI.Renderer
     if bridge then return bridge.CreateFrame(kind, name, parent, template) end
     return NativeCreateFrame(kind, name, parent, template)
 end
@@ -174,7 +174,7 @@ function RowFactory:EnsureRow(list, index)
         return list.rows[index]
     end
 
-    local row = NS.UI.FactoryBridge and NS.UI.FactoryBridge.CreateListRow(list.content, ROW_HEIGHT)
+    local row = NS.UI.Renderer and NS.UI.Renderer.CreateListRow(list.content, ROW_HEIGHT)
         or CreateFrame("Button", nil, list.content)
     row:SetHeight(ROW_HEIGHT)
     row:SetPoint("LEFT", list.content, "LEFT", 0, 0)
@@ -182,7 +182,7 @@ function RowFactory:EnsureRow(list, index)
     row:RegisterForClicks("LeftButtonUp", "RightButtonUp")
     row:RegisterForDrag("LeftButton")
 
-    if not NS.UI.FactoryBridge then
+    if not NS.UI.Renderer then
     local bg = row:CreateTexture(nil, "BACKGROUND")
     bg:SetPoint("TOPLEFT", row, "TOPLEFT", 1, -1)
     bg:SetPoint("BOTTOMRIGHT", row, "BOTTOMRIGHT", -1, 1)

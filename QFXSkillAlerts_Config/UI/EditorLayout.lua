@@ -4,7 +4,7 @@ _G.QFXSkillAlertsNS = NS
 NS.UI = NS.UI or {}
 local NativeCreateFrame = CreateFrame
 local function CreateFrame(kind, name, parent, template)
-    local bridge = NS.UI.FactoryBridge
+    local bridge = NS.UI.Renderer
     if bridge then return bridge.CreateFrame(kind, name, parent, template) end
     return NativeCreateFrame(kind, name, parent, template)
 end
@@ -19,7 +19,7 @@ function Layout.SetNativeLabelColor(label, enabled)
     if not label or not label.SetTextColor then
         return
     end
-    if NS.UI.FactoryBridge then NS.UI.FactoryBridge.StyleLabel(label, enabled); return end
+    if NS.UI.Renderer then NS.UI.Renderer.StyleLabel(label, enabled); return end
     local color = enabled and rawget(_G, "NORMAL_FONT_COLOR") or rawget(_G, "GRAY_FONT_COLOR")
     if color and color.GetRGB then
         local r, g, b = color:GetRGB()

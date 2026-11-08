@@ -35,6 +35,20 @@ local function CanonicalPath(value)
     return (Trim(value):gsub("/", "\\"))
 end
 
+local function IsValidSpecScope(specID)
+    local compat = NS.Core and NS.Core.Compat
+    if compat and type(compat.IsValidSpecScope) == "function" then
+        return compat:IsValidSpecScope(specID)
+    end
+    specID = tonumber(specID)
+    return specID ~= nil and specID > 0 and specID == math.floor(specID)
+end
+
+local function UsesAllSpecFallback(specID)
+    local compat = NS.Core and NS.Core.Compat
+    return tonumber(specID) and tonumber(specID) > 0 and compat and compat:IsForever()
+end
+
 local function EnsureDatabase()
     QFXSkillAlertsDB = type(QFXSkillAlertsDB) == "table" and QFXSkillAlertsDB or {}
     local db = QFXSkillAlertsDB
@@ -175,7 +189,7 @@ function Store:SanitizeRecord(data, forcedSource)
     end
     local recordKey = self:BuildRecordKey(category, spellID, eventKey)
     if not classID or classID <= 0 or classID ~= math.floor(classID)
-        or not specID or specID <= 0 or specID ~= math.floor(specID)
+        or not IsValidSpecScope(specID)
         or not recordKey or not eventTypeHint or eventTypeHint ~= math.floor(eventTypeHint)
         or (voiceIdentity == "" and voiceName == "" and voicePath == "") then
         return nil
@@ -222,7 +236,16 @@ function Store:SaveAppliedRecord(data)
 end
 
 function Store:GetPendingRemovals(classID, specID)
-    return GetScope(EnsureDatabase().cdmVoicePendingRemovals, classID, specID) or {}
+    local root = EnsureDatabase().cdmVoicePendingRemovals
+    local scoped = GetScope(root, classID, specID) or {}
+    if not UsesAllSpecFallback(specID) then return scoped end
+    local result = {}
+    local overrides = self:GetUserRecords(classID, specID)
+    for key, value in pairs(GetScope(root, classID, 0) or {}) do
+        if overrides[key] == nil then result[key] = value end
+    end
+    for key, value in pairs(scoped) do result[key] = value end
+    return result
 end
 
 function Store:GetPendingRemoval(classID, specID, recordKey)
@@ -244,7 +267,7 @@ function Store:SetPendingRemoval(record)
     eventType = self:EventKeyToType(eventKey, eventType)
     local recordKey = self:BuildRecordKey(category, spellID, eventKey)
     if not classID or classID <= 0 or classID ~= math.floor(classID)
-        or not specID or specID <= 0 or specID ~= math.floor(specID)
+        or not IsValidSpecScope(specID)
         or not recordKey or not eventType or eventType ~= math.floor(eventType) then
         return nil, "invalid_record"
     end
@@ -296,7 +319,13 @@ end
 function Store:GetEffectiveRecords(classID, specID)
     local db = EnsureDatabase()
     local resultByKey = {}
+    if UsesAllSpecFallback(specID) then
+        for _, record in ipairs(self:GetEffectiveRecords(classID, 0)) do
+            resultByKey[record.recordKey] = record
+        end
+    end
     local disabled = GetScope(db.cdmVoiceDisabledPresets, classID, specID) or {}
+    for key, value in pairs(disabled) do if value == true then resultByKey[key] = nil end end
     for recordKey, data in pairs(self:GetBuiltInRecords(classID, specID)) do
         if disabled[recordKey] ~= true then
             local record = self:SanitizeRecord(data, "builtIn")
@@ -341,6 +370,9 @@ function Store:HasEffectiveRecord(classID, specID, recordKey)
     if recordKey == "" then
         return false
     end
+    if UsesAllSpecFallback(specID) then
+        return self:GetEffectiveRecord(classID, specID, recordKey) ~= nil
+    end
     local userData = self:GetUserRecords(classID, specID)[recordKey]
     if userData ~= nil then
         local userRecord = self:SanitizeRecord(userData, userData.source or "user")
@@ -364,6 +396,9 @@ function Store:RemoveOrDisableRecord(classID, specID, recordKey, options)
     if not classID or not specID or recordKey == "" or not effective then
         return nil, "not_found"
     end
+    -- An inherited Forever record stays in its original all-specs bucket so
+    -- deleting/restoring it edits the actual source instead of an empty copy.
+    specID = tonumber(effective.specID) or specID
     local db = EnsureDatabase()
     local userScope = GetScope(db.cdmVoiceProfiles, classID, specID)
     local disabledScope = GetScope(db.cdmVoiceDisabledPresets, classID, specID)
@@ -465,7 +500,10 @@ function Store:CaptureCurrentSpecFromLayout()
         return 0
     end
     local classID, specID = service:GetCurrentClassSpec()
-    if not classID or not specID then
+    -- Captured layout alerts belong to one concrete spec. Scope 0 is the
+    -- shared all-specs bucket that every spec inherits, so an unreadable
+    -- current spec must not be captured into it.
+    if not classID or classID <= 0 or not specID or specID <= 0 then
         return 0
     end
     local captured = 0
@@ -535,6 +573,9 @@ function Store:GetRecordForAlert(classID, specID, category, spellID, eventType)
     local builtIn = self:GetBuiltInRecords(classID, specID)[recordKey]
     if type(builtIn) == "table" then
         return builtIn, recordKey, "builtIn"
+    end
+    if UsesAllSpecFallback(specID) then
+        return self:GetRecordForAlert(classID, 0, category, spellID, eventType)
     end
     return nil, recordKey
 end

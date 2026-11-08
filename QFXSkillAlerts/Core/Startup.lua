@@ -173,6 +173,18 @@ function Startup:OnSpecializationChanged(unit)
     end
 end
 
+-- A dual talent group switch changes both the active spec and the trait
+-- config, so it needs the same reset as a specialization change.
+function Startup:OnTalentGroupChanged()
+    if IsCombatLocked() then
+        profileRefreshCombatPending = true
+        profileRefreshCombatReset = true
+        return
+    end
+    SafeCall("invalidateTalentCache")
+    self:ScheduleProfileRefresh("ACTIVE_TALENT_GROUP_CHANGED", true)
+end
+
 function Startup:OnItemDataLoadResult(...)
     return SafeCall("resolvePendingItems", ...)
 end
@@ -313,6 +325,9 @@ function Startup:GetEventHandlers()
         end,
         OnSpecializationChanged = function(unit)
             return self:OnSpecializationChanged(unit)
+        end,
+        OnTalentGroupChanged = function()
+            return self:OnTalentGroupChanged()
         end,
         OnItemDataLoadResult = function(...)
             return self:OnItemDataLoadResult(...)

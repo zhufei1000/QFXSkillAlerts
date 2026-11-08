@@ -4,9 +4,8 @@
 -- CD modes: "fixed" (fixed timer), "ready" (spell-cooldown readiness edge),
 -- "cooldown" (real cooldown start) and "charge" (charge recharge finished).
 -- Casts are queued from
--- UNIT_SPELLCAST_SUCCEEDED; the watch must never listen for Blizzard's
--- secret-sensitive SPELL_UPDATE_COOLDOWN/SPELL_UPDATE_CHARGES events, because
--- sharing those events taints the CooldownViewer handlers.
+-- UNIT_SPELLCAST_SUCCEEDED. Explicit Evaluate calls below simulate the
+-- SPELL_UPDATE_COOLDOWN path, where isOnGCD is documented as reliable.
 
 local function Fail(message)
     error(message, 2)
@@ -106,11 +105,11 @@ local cfgMapA = { ["spell:3001"] = cfgA }
 cooldownState[3001] = { isActive = false, isEnabled = true, isOnGCD = false }
 Assert(Runtime:QueueGameCooldown(3001, mapsA, cfgMapA), "cast should queue a game watch")
 Assert(type(runtimeFrame.OnUpdate) == "function", "queued watch should start the update loop")
-Equal(Runtime:EvaluateGameCooldowns(now), true, "queued cast stays alive while waiting")
+Equal(Runtime:EvaluateGameCooldowns(now, true), true, "queued cast stays alive while waiting")
 Equal(#played, 0, "queued cast must not announce")
 
 cooldownState[3001] = { isActive = true, isEnabled = true, isOnGCD = false }
-Equal(Runtime:EvaluateGameCooldowns(now), true, "the real cooldown should arm from the queue")
+Equal(Runtime:EvaluateGameCooldowns(now, true), true, "the real cooldown should arm from the queue")
 Equal(#played, 0, "an active cooldown must not announce")
 
 -- 2) The ready edge must announce even while a post-ready GCD is still running
@@ -118,7 +117,7 @@ Equal(#played, 0, "an active cooldown must not announce")
 --    hold the announcement back).
 now = now + 2.0
 cooldownState[3001] = { isActive = true, isEnabled = true, isOnGCD = true }
-Equal(Runtime:EvaluateGameCooldowns(now), true, "first ready tick should confirm readiness")
+Equal(Runtime:EvaluateGameCooldowns(now, true), true, "first ready tick should confirm readiness")
 runtimeFrame.OnUpdate(runtimeFrame, 0.2)
 Equal(#played, 1, "the ready edge must announce exactly once, even during a GCD")
 Equal(played[1].channel, "voice", "the game-state watch announces on the voice channel")
@@ -131,11 +130,11 @@ now = now + 10
 cooldownState[3001] = nil
 Runtime:QueueGameCooldown(3001, mapsA, cfgMapA)
 cooldownState[3001] = { isActive = true, isEnabled = true, isOnGCD = false }
-Runtime:EvaluateGameCooldowns(now)
+Runtime:EvaluateGameCooldowns(now, true)
 now = now + 0.5
 cooldownState[3001] = { isActive = false, isEnabled = true, isOnGCD = false }
-Runtime:EvaluateGameCooldowns(now)
-Runtime:EvaluateGameCooldowns(now)
+Runtime:EvaluateGameCooldowns(now, true)
+Runtime:EvaluateGameCooldowns(now, true)
 Equal(#played, 1, "sub-threshold arms must not announce")
 
 -- 4) A GCD-only cast (no real cooldown ever reported) must never announce.
@@ -143,12 +142,12 @@ now = now + 10
 cooldownState[3001] = nil
 Runtime:QueueGameCooldown(3001, mapsA, cfgMapA)
 cooldownState[3001] = { isActive = true, isEnabled = true, isOnGCD = true }
-Runtime:EvaluateGameCooldowns(now)
+Runtime:EvaluateGameCooldowns(now, true)
 now = now + 0.5
 cooldownState[3001] = { isActive = false, isEnabled = true, isOnGCD = false }
-Runtime:EvaluateGameCooldowns(now)
+Runtime:EvaluateGameCooldowns(now, true)
 now = now + 4.0
-Equal(Runtime:EvaluateGameCooldowns(now), false, "a GCD-only cast should expire silently")
+Equal(Runtime:EvaluateGameCooldowns(now, true), false, "a GCD-only cast should expire silently")
 Equal(#played, 1, "a GCD-only cast must not announce")
 
 -- 5) A cooldown already running at login/reload is primed from the config.
@@ -157,11 +156,11 @@ local cfgB = MakeCfg(3002, "Primed")
 local mapsB = { [3002] = "spell:3002" }
 local cfgMapB = { ["spell:3002"] = cfgB }
 cooldownState[3002] = { isActive = true, isEnabled = true, isOnGCD = false }
-Runtime:PrimeGameCooldowns(cfgMapB)
+Runtime:PrimeGameCooldowns(cfgMapB, true)
 now = now + 2.0
 cooldownState[3002] = { isActive = false, isEnabled = true, isOnGCD = false }
-Runtime:EvaluateGameCooldowns(now)
-Runtime:EvaluateGameCooldowns(now)
+Runtime:EvaluateGameCooldowns(now, true)
+Runtime:EvaluateGameCooldowns(now, true)
 Equal(#played, 2, "a primed mid-cooldown entry must announce on its ready edge")
 
 -- 6) "ready" mode uses the spell-cooldown predicate even for charge spells, so
@@ -173,11 +172,11 @@ local cfgMapR = { ["spell:3005"] = cfgR }
 cooldownState[3005] = { isActive = true, isEnabled = true, isOnGCD = false }
 chargeState[3005] = { maxCharges = 2, isActive = true }
 Runtime:QueueGameCooldown(3005, mapsR, cfgMapR)
-Runtime:EvaluateGameCooldowns(now)
+Runtime:EvaluateGameCooldowns(now, true)
 now = now + 2.0
 cooldownState[3005] = { isActive = false, isEnabled = true, isOnGCD = false }
-Runtime:EvaluateGameCooldowns(now)
-Runtime:EvaluateGameCooldowns(now)
+Runtime:EvaluateGameCooldowns(now, true)
+Runtime:EvaluateGameCooldowns(now, true)
 Equal(#played, 3, "ready mode must announce from the cooldown predicate regardless of charges")
 
 -- 7) "charge" mode announces when the recharge returns to max.
@@ -187,10 +186,10 @@ local mapsC = { [3003] = "spell:3003" }
 local cfgMapC = { ["spell:3003"] = cfgC }
 chargeState[3003] = { maxCharges = 2, isActive = true }
 Runtime:QueueGameCooldown(3003, mapsC, cfgMapC)
-Equal(Runtime:EvaluateGameCooldowns(now), true, "a recharging charge spell should arm")
+Equal(Runtime:EvaluateGameCooldowns(now, true), true, "a recharging charge spell should arm")
 now = now + 2.0
 chargeState[3003] = { maxCharges = 2, isActive = false }
-Runtime:EvaluateGameCooldowns(now)
+Runtime:EvaluateGameCooldowns(now, true)
 Equal(#played, 4, "a charge refill to max must announce")
 Equal(played[4].cd and played[4].cd.spellName, "Charged", "the charge announcement carries the saved spell name")
 
@@ -224,28 +223,28 @@ local mapsOn = { [3006] = "spell:3006" }
 local cfgMapOn = { ["spell:3006"] = cfgOn }
 cooldownState[3006] = { isActive = true, isEnabled = true, isOnGCD = true }
 Runtime:QueueGameCooldown(3006, mapsOn, cfgMapOn)
-Runtime:EvaluateGameCooldowns(now)
+Runtime:EvaluateGameCooldowns(now, true)
 Equal(#played, playedBase, "cooldown mode must wait for the non-GCD cooldown")
 
 cooldownState[3006] = { isActive = true, isEnabled = true, isOnGCD = false }
-Runtime:EvaluateGameCooldowns(now)
+Runtime:EvaluateGameCooldowns(now, true)
 Equal(#played, playedBase + 1, "cooldown mode announces when the real cooldown starts")
 Equal(played[playedBase + 1].cd and played[playedBase + 1].cd.spellName, "OnCooldown",
     "the cooldown-start announcement carries the saved spell name")
 
 now = now + 2.0
 cooldownState[3006] = { isActive = false, isEnabled = true, isOnGCD = false }
-Runtime:EvaluateGameCooldowns(now)
+Runtime:EvaluateGameCooldowns(now, true)
 Equal(#played, playedBase + 1, "cooldown mode must not announce again at the ready edge")
 
 now = now + 10
 Runtime:QueueGameCooldown(3006, mapsOn, cfgMapOn)
 cooldownState[3006] = { isActive = true, isEnabled = true, isOnGCD = true }
-Runtime:EvaluateGameCooldowns(now)
+Runtime:EvaluateGameCooldowns(now, true)
 cooldownState[3006] = { isActive = false, isEnabled = true, isOnGCD = false }
-Runtime:EvaluateGameCooldowns(now)
+Runtime:EvaluateGameCooldowns(now, true)
 now = now + 4.0
-Runtime:EvaluateGameCooldowns(now)
+Runtime:EvaluateGameCooldowns(now, true)
 Equal(#played, playedBase + 1, "cooldown mode must stay silent for a GCD-only cast")
 
 -- 11) A "cooldown" entry already cooling at login/reload must not be primed
@@ -255,9 +254,9 @@ local cfgPrime = MakeCfg(3007, "PrimedCooldown", "cooldown")
 local mapsPrime = { [3007] = "spell:3007" }
 local cfgMapPrime = { ["spell:3007"] = cfgPrime }
 cooldownState[3007] = { isActive = true, isEnabled = true, isOnGCD = false }
-Runtime:PrimeGameCooldowns(cfgMapPrime)
+Runtime:PrimeGameCooldowns(cfgMapPrime, true)
 Equal(#played, playedBase + 1, "priming a mid-cooldown 'cooldown' entry must not announce")
-Equal(Runtime:EvaluateGameCooldowns(now), false, "priming must not leave a watch behind")
+Equal(Runtime:EvaluateGameCooldowns(now, true), false, "priming must not leave a watch behind")
 
 -- 12) Real builder output must keep both CDM edges regardless of save order.
 dofile("QFXSkillAlerts/Core/RuntimeConfigBuilder.lua")
@@ -282,14 +281,14 @@ for _, reverse in ipairs({ false, true }) do
     local before = #played
     cooldownState[3010] = { isActive = true, isEnabled = true, isOnGCD = false }
     Assert(Runtime:QueueGameCooldown(3010, spellMap, cfgMap))
-    Runtime:PrimeGameCooldowns(cfgMap)
-    Runtime:EvaluateGameCooldowns(now)
+    Runtime:PrimeGameCooldowns(cfgMap, true)
+    Runtime:EvaluateGameCooldowns(now, true)
     Equal(#played, before + 1, "cooldown-start voice fires")
     Equal(played[#played].cd.spellName, "Started", "cooldown-start uses its own voice config")
     now = now + 5
     cooldownState[3010] = { isActive = false, isEnabled = true, isOnGCD = false }
-    Runtime:EvaluateGameCooldowns(now)
-    Runtime:EvaluateGameCooldowns(now)
+    Runtime:EvaluateGameCooldowns(now, true)
+    Runtime:EvaluateGameCooldowns(now, true)
     Equal(#played, before + 2, "ready voice also fires")
     Equal(played[#played].cd.spellName, "Ready", "ready uses its own voice config")
 
@@ -300,8 +299,8 @@ for _, reverse in ipairs({ false, true }) do
     now = now + 10
     cooldownState[3010] = { isActive = true, isEnabled = true, isOnGCD = false }
     Assert(Runtime:QueueGameCooldown(3010, spellMap, cfgMap))
-    Runtime:PrimeGameCooldowns(cfgMap)
-    Runtime:EvaluateGameCooldowns(now)
+    Runtime:PrimeGameCooldowns(cfgMap, true)
+    Runtime:EvaluateGameCooldowns(now, true)
     Equal(#played, before + 1, "enabled cooldown edge survives a refresh with disabled Ready")
 end
 

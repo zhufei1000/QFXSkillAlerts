@@ -8,6 +8,13 @@ local Migration = NS.Core.ScopeMigration
 
 local MIGRATION_VERSION = 20260708
 
+local function IsForever()
+    local compat = NS.Core and NS.Core.Compat
+    return compat ~= nil
+        and type(compat.IsForever) == "function"
+        and compat:IsForever() == true
+end
+
 local KNOWN_SPEC_SCOPES = {
     [31821] = { classID = 2, specIDs = { 65 } },
     [31850] = { classID = 2, specIDs = { 66 } },
@@ -92,6 +99,13 @@ function Migration:ApplyKnownSpecScopes(db)
         return 0
     end
     if (tonumber(db.knownSpecScopeMigrationVersion) or 0) >= MIGRATION_VERSION then
+        return 0
+    end
+    -- The known-scope table is a Retail specialization map. Forever has no
+    -- modern specs and uses a different spell-ID space, so applying it there
+    -- would pin valid entries to a specialization that can never match.
+    if IsForever() then
+        db.knownSpecScopeMigrationVersion = MIGRATION_VERSION
         return 0
     end
 

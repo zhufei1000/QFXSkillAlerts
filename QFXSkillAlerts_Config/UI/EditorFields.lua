@@ -23,6 +23,15 @@ local SetNativeLabelColor = Layout.SetNativeLabelColor
 local SetEnabled = Layout.SetEnabled
 local SetManyShown = Layout.SetManyShown
 
+local function IsValidSpecScope(specID)
+    local compat = NS.Core and NS.Core.Compat
+    if compat and type(compat.IsValidSpecScope) == "function" then
+        return compat:IsValidSpecScope(specID)
+    end
+    specID = tonumber(specID)
+    return specID ~= nil and specID > 0
+end
+
 local function CopyNumberBoolMap(source)
     local copy = {}
     if type(source) == "table" then
@@ -696,7 +705,7 @@ function Fields:GetCdmSkillItems()
     -- Remember the current spec's full catalog. Blizzard only exposes the
     -- active spec's Cooldown Manager data, so each spec's complete list is
     -- cached the first time it is read and listed later from any other spec.
-    if classID > 0 and specID > 0 and #catalogItems > 0
+    if classID > 0 and IsValidSpecScope(specID) and #catalogItems > 0
         and type(api.SaveCDMVoiceSkillCatalog) == "function" then
         api.SaveCDMVoiceSkillCatalog(classID, specID, catalogItems)
     end
@@ -782,7 +791,7 @@ function Fields:GetCdmSkillItems()
             if cachedClassID > 0 and type(classMap) == "table" then
                 for cachedSpecID, record in pairs(classMap) do
                     cachedSpecID = tonumber(cachedSpecID) or 0
-                    if cachedSpecID > 0 and type(record) == "table" and type(record.items) == "table" then
+                    if IsValidSpecScope(cachedSpecID) and type(record) == "table" and type(record.items) == "table" then
                         catalogSpecs[cachedSpecID] = true
                         cachedSpecs[#cachedSpecs + 1] = {
                             classID = cachedClassID,
@@ -1911,8 +1920,8 @@ function Fields:PushToWidgets(editor)
 
     -- Collapsible Advanced block: it auto-opens while any advanced option is
     -- configured.
-    local advancedConfigured = state.checkTalent == true
-        or state.loadTalentEnabled == true
+    local talentConfigured = state.checkTalent == true or state.loadTalentEnabled == true
+    local advancedConfigured = talentConfigured
         or (tostring(state.itemLoadMode or "none") ~= "none")
         or state.itemLoadSameName == true
     frame.qfxsaAdvancedConfigured = advancedConfigured
@@ -2305,6 +2314,12 @@ function Fields:PushToWidgets(editor)
                     end
                     if widgets.skillFilterDrop then
                         local filterItems = self:GetSkillFilterItems()
+                        -- Forever has no concrete specialization list; hide the
+                        -- blank filter instead of leaving an empty dropdown.
+                        SetManyShown(
+                            { widgets.skillFilterLabel, widgets.skillFilterDrop },
+                            #filterItems > 1
+                        )
                         Widgets:SetDropdownItems(widgets.skillFilterDrop, filterItems)
                         local filterFallback = filterItems[1] and filterItems[1].text or ""
                         Widgets:SetDropdownValue(widgets.skillFilterDrop, selectedSpec, filterFallback)
